@@ -6,23 +6,6 @@ import {
   validateMeasured,
 } from "../identifier-probe-summary-lib.mjs";
 
-/**
- * Issue #109: `identifier-probe-summary-lib.mjs`(純関数の側)の歯。DB を要求しない。
- *
- * ⭐ **最重要の検査**: `status: "weights_unavailable"` の入力から、
- * `buildSummaryMarkdown` が**メトリクスの数字を1つも出さない**こと、そして
- * **基準値との比較を1つも出さないこと**
- * (「HF から取れなかった」が「想起の質が下がった」に見えてはならない、という
- * オーナー代理の要求を、この出力の形そのもので満たしているかを見る)。
- *
- * ⭐ **次に重要な検査**: 基準値と**比べていること**。基準値ファイルがコミットされて
- * いるのに誰も比べないなら、値が動いても誰も気づかず、誰も基準値を更新せず、
- * 新しい値が PR の diff に現れる輪が閉じない(ADR 0088 §3 が名指しした形)。
- * ⟹ 一致なら1行で黙り、違うときだけ展開する。**⛔ ただし相違では落とさない**
- * ——exit code の線は `identifier-probe-summary.test.mjs`(CLI を子プロセスで起動する
- * 側)が測る。
- */
-
 function makeGroup(overrides = {}) {
   return {
     label:
@@ -80,13 +63,6 @@ function makeMeasured(overrides = {}) {
   };
 }
 
-/**
- * 実測から基準値ファイルの形(`groups` 配列＋各要素の `group` キー)を作る。
- *
- * ⚠ **一致の検査では、これを実測から作ること自体が要**である——「一致」の側は
- * 自明に一致していなければ、相違の側の検査が何を測ったのか言えなくなる。
- * 相違の検査は、ここから**1項目だけ**動かして作る。
- */
 function baselineFrom(measured) {
   return {
     groups: [
@@ -214,9 +190,6 @@ describe("diffGroup", () => {
   });
 
   it("🔴 数字が同じでも embeddingSpace.model が違えば相違になる", () => {
-    // ⚠ この repo の芯: `local`/`ruri-v3-30m/sym`/**256次元** と
-    // `openai`/`text-embedding-3-small`/**256次元** は次元数が同じでも別の空間である。
-    // 数字だけを比べる実装なら、この検査は緑にならない。
     const measured = makeGroup({
       embeddingSpace: { provider: "local", model: "ruri-v3-30m/other", dimensions: 256 },
     });
@@ -255,17 +228,12 @@ describe("buildSummaryMarkdown", () => {
     });
     expect(markdown).toContain("重みを取得できなかった");
     expect(markdown).toContain("simulated network failure");
-    // MRR・hit@1・hit@10 という文字列そのものが出てはいけない——
-    // 「測っていない」ことが、表が無いという形で現れる。
     expect(markdown).not.toContain("MRR");
     expect(markdown).not.toContain("hit@1");
     expect(markdown).not.toContain("hit@10");
   });
 
   it("🔴 weights_unavailable のときは、基準値を渡しても比較の節を1つも出さない", () => {
-    // ⭐ **この PR の芯。**オーナー代理の逐語: 「私が怖いのはジョブが落ちることでは
-    // ありません。『HF から取れなかった』が『想起の質が下がった』に見えることです。」
-    // ⟹ 「測れなかった」を「基準値と違う」に化けさせない。
     const markdown = buildSummaryMarkdown({
       measured: {
         status: "weights_unavailable",
@@ -276,15 +244,13 @@ describe("buildSummaryMarkdown", () => {
     expect(markdown).not.toContain("## 基準値との差分");
     expect(markdown).not.toContain("一致（差分なし）");
     expect(markdown).not.toContain("相違した群");
-    // 基準値の側にある数字・条件が1つも漏れていないこと。
     expect(markdown).not.toContain("0.810");
     expect(markdown).not.toContain("ruri-v3-30m/sym");
     expect(markdown).not.toContain("sparse");
   });
 
   it("🔴 weights_unavailable のときは、指定の文言をこの要約自体が出す（detail 由来ではない）", () => {
-    // ⚠ **足場が測定対象と同じ文字列を含むと歯は偽陽性になる。**だから `detail` には
-    // わざと指定の文言を含めない——それでも出るなら、出しているのは要約側である。
+    // 足場が測定対象と同じ文字列を含むと偽陽性になるので、`detail` にはわざと指定の文言を含めない。
     const markdown = buildSummaryMarkdown({
       measured: { status: "weights_unavailable", detail: "HTTP 503 from the model host" },
     });
@@ -315,8 +281,6 @@ describe("buildSummaryMarkdown", () => {
     const markdown = buildSummaryMarkdown({ measured, baseline: baselineFrom(measured) });
     expect(markdown).toContain("## 基準値との差分");
     expect(markdown).toContain("一致（差分なし）");
-    // ⭐ ADR 0088 §3-3「常に同じ量を出す観測口は読まれない」——一致のときに
-    // 内訳を出していないことを、この2点で固定する。
     expect(markdown).not.toContain("| 項目 | 基準値 | 実測 |");
     expect(markdown).not.toContain("### japanese");
   });
@@ -329,7 +293,6 @@ describe("buildSummaryMarkdown", () => {
     expect(markdown).toContain("相違した群が 1 件ある");
     expect(markdown).toContain("### japanese");
     expect(markdown).toContain("| hit1Count | 4 | 5 |");
-    // 相違していない群は展開しない。
     expect(markdown).not.toContain("### identifiersSparse");
     expect(markdown).not.toContain("### identifiersDense");
     expect(markdown).not.toContain("一致（差分なし）");
@@ -350,7 +313,6 @@ describe("buildSummaryMarkdown", () => {
   it("🔴 embeddingSpace だけが違うときも相違として展開される（数字は同じ）", () => {
     const measured = makeMeasured();
     const baseline = baselineFrom(measured);
-    // 数字・haystack・label は一切動かさず、空間の model だけを動かす。
     baseline.groups[2].embeddingSpace.model = "text-embedding-3-small";
     const markdown = buildSummaryMarkdown({ measured, baseline });
     expect(markdown).toContain("相違した群が 1 件ある");

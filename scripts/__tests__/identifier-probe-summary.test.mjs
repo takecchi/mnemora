@@ -5,22 +5,6 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { spawnSyncWithDeadline } from "./spawn-with-deadline.mjs";
 
-/**
- * `scripts/identifier-probe-summary.mjs` の歯。**本物のスクリプトを子プロセスとして
- * 実際に起動する**(`scripts/__tests__/retrieval-quality-summary.test.mjs` と同じ形・
- * 同じ理由)——`identifier-probe-summary-lib.test.mjs` は純関数だけを見ており、
- * 「CLI としての配線」(引数の読み方・ファイル I/O・**exit code**)はここでしか測れない。
- *
- * 🔴 **このファイルが固定している線**:
- *
- * 1. **基準値と相違しても exit 0**(⛔ 門ではない。ADR 0094 / ADR 0088 §2.1)。
- * 2. **`status: "weights_unavailable"` でも exit 0**、かつ比較を1つも出さない。
- * 3. **入力そのものが壊れていれば非0**(JSON が読めない・parse できない・`status` が
- *    未知・`"measured"` なのに必須項目が無い・`--baseline` が壊れている)。
- *
- * DB もネットワークも要求しない——このスクリプトは JSON ファイルを最大2つ読むだけである。
- */
-
 const script = fileURLToPath(new URL("../identifier-probe-summary.mjs", import.meta.url));
 
 function makeGroup(overrides = {}) {
