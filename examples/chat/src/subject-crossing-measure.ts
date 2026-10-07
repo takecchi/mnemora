@@ -11,99 +11,10 @@ import type { ExampleRuntimeHandle } from "./runtime-factory.js";
 import { createExampleRuntime } from "./runtime-factory.js";
 
 /**
- * `subject-crossing-cost` ベンチ（`pnpm --filter @mnemora/example-chat run subject-crossing-cost`）。
- *
- * ## これは何を測るか
- *
- * [Issue #579](https://github.com/takecchi/mnemora/issues/579) の「残り」——
- * `runtime.consolidate` の対象が subject をまたぐと、統合後の `Memory.subjectId` が
- * `null` に畳まれる（`packages/core/src/strategies/consolidate.ts`
- * `buildConsolidatedMemory`）——について、**案B（subjectId を集合にする。migration 要）を
- * やるかどうかの判断材料**として、「subject をまたぐ統合がどれくらいの頻度で起きるか」を
- * 測る。ADR 0310 が、この測定を踏まえて案B着手の判断を記録する（このファイル自身は
- * 判断を持たない——測定だけ）。
- *
- * **測る経路は、呼び出し側が `{ memoryIds }` を自分で選ぶ形ではない。** 混在は呼び出し側の
- * 選び方次第になり頻度を問えないため。問えるのは mnemora 自身が近傍を集める
- * **`{ seedMemoryId }` 形**（`runtime.ts` の ADR 0152。`runtime.consolidate` 内で
- * `recall(ctx, { text: seed.digest })` を1回呼び、`computeAffinity(score) >= minAffinity`
- * （既定 {@link DEFAULT_CONSOLIDATE_MIN_AFFINITY} = 0.8）の近傍を候補に足す）と、
- * それを使う自動経路（`autoQueueConsolidateReflectOnExtract` → `processConsolidateJob`）
- * である。`runtime.consolidate(ctx, { target: { seedMemoryId }, dryRun: true })` を
- * 実際に呼び、`dryRun` が返す `sources`（`kind: "eligible"`）を数える——**別の類似度判定を
- * 自分で書かない**（本ファイルが検算目的で新しい「似ている」を発明すると、測っているものが
- * `consolidate()` の実装とずれる）。
- *
- * 実測で、`dryRun: true` の `eligible` 集合は、同じ target で `dryRun` 無しで呼んだときの
- * `superseded` 集合と完全に一致することを別途確認している（1件、手動の対照実行。この
- * ベンチのコードには残していない——`dryRun` の契約自体は `packages/core` 側の歯
- * （`consolidate.test.ts`）が持つべきものであり、ここで固定するものではない）。
- *
- * ## ⛔ これは判定ではない。CI には載せない
- *
- * `lexical-tie-density-bench.ts`/`embedding-fingerprint.ts` と同じ規律——**どの数字が
- * 出ても exit code は変えない**。混在率に「正しい値」は無く、実際の使われ方（主題あたりの
- * 記憶数・話題が主題間で被るか）に依存する。Issue #579 の「案Bをやるか」には**何も
- * 答えない**——それはこの測定結果を見た上でのオーナー/マネージャーの判断である。
- * ⟹ **CI の必須チェックには配線しない。** 実行結果は `examples/chat/bench-results/
- * subject-crossing-local.md`（`subject-crossing-summary.ts` が生成）に手動でコミットする、
- * 一回性の記録として扱う。
- *
- * ## 使う provider 層 —— LLM は一切呼ばない
- *
- * `consolidate(..., { dryRun: true })` は LLM を呼ばない（`packages/core/src/runtime.ts`
- * の `consolidate` 実装、dryRun はいちばん早い段で打ち切る）。`observe()`（抽出 LLM
- * 経由の取り込み）も使わない——`buildNewMemoryFixture`（`@mnemora/testkit`）で
- * `NewMemory` を直接組み、`MemoryStore.createMemoryWithOutbox(ctx, input, ["embed"])` +
- * `runtime.tick({ kinds: ["embed"] })` で埋め込みだけ処理する
- * （`time-weighting-bench.ts` の `seedTimeWeightingMemories` と同じ配線）。
- *
- * 埋め込みは既定で **`local`**（`@mnemora/local-embedding`、外部サービスに繋がない実 ONNX
- * 推論、`identifier-probes`/`consolidation-cost`/`archive-sweep-cost` と同じ層）。
- * `MNEMORA_EMBEDDING=deterministic` を渡すと対照群として `deterministic` 埋め込みでも
- * 走るが、**近さに意味を持たないため頻度の測定には使えない**（AGENTS.md「`deterministic`
- * で測った想起の質は性能について何も言っていない」）——対照としてだけ読むこと。
- * `MNEMORA_LLM` は明示していない限り `deterministic` を使う（LLM は呼ばれないので
- * どちらでも実害は無いが、鍵が無い環境でも既定で動くことを明示するため固定する。
- * `consolidation-cost` と同じ理由・同じ組み合わせ、ADR 0094）。
- *
- * ## ⚠ 踏んだ穴 —— `buildNewMemoryFixture` の既定 `recordedAt` は decay gate を通さない
- *
- * `buildNewMemoryFixture` の既定 `recordedAt` は固定日付（2026-01-01）である。既定
- * `halfLifeHours`（720h = 30日）と組むと、実行時点の壁時計からは既に decay floor を
- * 過ぎており、`recall()` の decay gate（ANN 候補生成の前段）が**候補を1件も返さない**
- * （`recall().explain.stages.candidate_generation.hits: 0`——埋め込みは `ready` で正常に
- * 存在するのに、である）。**このベンチでは常に `recordedAt`/`occurredAt` に「いま」を
- * 明示して回避している**（`seedCorpus` 参照）。`time-weighting-bench.ts` は元々明示の
- * `recordedAt` を渡す設計なので踏んでいないが、`buildNewMemoryFixture` を素のまま
- * 直接書きに使う今後のベンチは同じ穴を踏む可能性がある——fixture 自身は変更していない
- * （このファイルの対処だけ）。
- *
- * ## 実行方法
- *
- * ```bash
- * DATABASE_URL=postgresql://... pnpm --filter @mnemora/example-chat run subject-crossing-cost
- * ```
- *
- * 環境変数（すべて省略可能。既定は Issue #579 の測定で使った値と同じ）:
- * - `MEASURE_S`: subject 数のリスト（既定 `"2,5,10"`）
- * - `MEASURE_N`: subject あたり記憶数のリスト（既定 `"1,2,5,10,20,50,100"`）
- * - `MEASURE_MINAFFINITY`: `minAffinity` のリスト（既定 `String(DEFAULT_CONSOLIDATE_MIN_AFFINITY)`、
- *   すなわち `"0.8"`）
- * - `MEASURE_SEED_CAP`: 1コーパスあたりの種の上限（既定 `150`。`S・N` がこれを超える
- *   コーパスは決定的サンプリングで間引く——`mulberry32` の擬似乱数を `S`/`N`/`pole` から
- *   固定 seed するので、再実行しても同じ標本になる）
- * - `MEASURE_OUT_DIR`: raw JSON の書き出し先（既定 `./bench-results`）
- * - `MNEMORA_EMBEDDING`: `"local"`（既定）| `"deterministic"`（対照群、上記の警告参照）
- *
- * 生データ（raw JSON）はサイズが大きく（S・N の全域では数MB〜十数MB）、
- * commit しない。集計表（`subject-crossing-summary.ts` が生成する Markdown）だけを
- * `examples/chat/bench-results/subject-crossing-local.md` に commit する。
+ * `runtime.consolidate(ctx, { target: { seedMemoryId }, dryRun: true })` を実際に呼んで `eligible` を数える。別の類似度判定を自分で書かない（測っているものが `consolidate()` の実装とずれる）。
+ * 判定ではない: どの数字が出ても exit code は変えず、CI の必須チェックには配線しない。生の JSON は大きいので commit しない。
+ * `MNEMORA_EMBEDDING=deterministic` は近さに意味が無く頻度の測定には使えないので、対照としてだけ読む。
  */
-
-// ---------------------------------------------------------------------------
-// 話題ドメイン(コーパス生成)
-// ---------------------------------------------------------------------------
 
 interface Domain {
   name: string;
@@ -492,14 +403,6 @@ export interface CorpusSpec {
   pole: CorpusPole;
 }
 
-/**
- * コーパスの2極（マネージャー指示）:
- * - "disjoint": 主題ごとに話題ドメインが排他的（重ならない）。実運用の下限側の近似。
- * - "shared": 話題ドメインの並びを全 subject で共有する（同じ話題を複数の相手と話す）。
- *   実運用の上限側の近似。
- * 実運用はこの間にあるはずだが、それがどちらに近いかは測っていない
- * （オーナーが「主題あたりの記憶数 N は不明」と答えた不明点と同じ種類の不明点）。
- */
 export function buildUtterances(spec: CorpusSpec): { subjectId: string; text: string }[] {
   const out: { subjectId: string; text: string }[] = [];
   for (let k = 0; k < spec.s; k++) {
@@ -513,19 +416,13 @@ export function buildUtterances(spec: CorpusSpec): { subjectId: string; text: st
   return out;
 }
 
-// ---------------------------------------------------------------------------
-// 記憶を直接書く(抽出 LLM を通さない、`time-weighting-bench.ts` と同じ配線)
-// ---------------------------------------------------------------------------
-
 async function seedCorpus(
   handle: ExampleRuntimeHandle,
   ctx: Ctx,
   utterances: { subjectId: string; text: string }[],
 ): Promise<{ id: string; subjectId: string }[]> {
   const ids: { id: string; subjectId: string }[] = [];
-  // ⚠ 上の docstring「踏んだ穴」参照——`buildNewMemoryFixture` の既定 `recordedAt`
-  // (2026-01-01)は既定 `halfLifeHours` と組むと decay gate に落ちるため、常に「いま」を
-  // 明示する。
+  // 既定の `recordedAt`（固定日付）は decay gate に落ちるので、常に「いま」を明示する。
   const now = new Date();
   let i = 0;
   for (const u of utterances) {
@@ -553,10 +450,6 @@ async function seedCorpus(
   return ids;
 }
 
-// ---------------------------------------------------------------------------
-// 測定本体
-// ---------------------------------------------------------------------------
-
 export type CtxSubjectVariant = "none" | "own" | "mismatched";
 
 export interface TrialResult {
@@ -572,15 +465,6 @@ export interface TrialResult {
   mixed: boolean; // eligibleCount >= 2 && eligibleSubjectCount >= 2
 }
 
-/**
- * ctx.subjectId の3変種。
- * - "none": ctx に subjectId を付けない(テナント全体から近傍を探す——`tick()` を
- *   subject 指定せず呼ぶ、実運用でありそうな形)。
- * - "own": ctx.subjectId = seed 自身の subjectId(呼び出し側が正しく絞った想定)。
- * - "mismatched": ctx.subjectId = seed とは別の subjectId。Issue #579 のコメントが
- *   指摘する「`ClaimOutboxJobsOptions` に `subjectId` が無いため、`tick()` の claim が
- *   種を主題で絞れない——ctx.subjectId を付けても、種が別主題のジョブを引ける」場面の近似。
- */
 export function pickCtx(
   tenantId: string,
   variant: CtxSubjectVariant,
@@ -594,7 +478,6 @@ export function pickCtx(
   return { tenantId, subjectId: other };
 }
 
-/** 決定的な疑似乱数(mulberry32)——実行ごとに同じサンプルを選ぶ。 */
 export function mulberry32(seed: number): () => number {
   let a = seed;
   return () => {
@@ -670,10 +553,6 @@ async function runTrialsForCorpus(
   return results;
 }
 
-// ---------------------------------------------------------------------------
-// エントリポイント
-// ---------------------------------------------------------------------------
-
 function parseNumberList(value: string | undefined, fallback: number[]): number[] {
   if (value === undefined) return fallback;
   return value.split(",").map(Number);
@@ -700,10 +579,6 @@ async function main(): Promise<void> {
 
   mkdirSync(outDir, { recursive: true });
 
-  // `consolidation-cost` と同じ組み合わせ・同じ理由(ADR 0094): 主測定は dryRun のため
-  // LLM を一度も呼ばない——`MNEMORA_LLM` は明示していない限り `deterministic` に固定する。
-  // `MNEMORA_EMBEDDING` は既定 `local`(このベンチの主目的)。上の docstring の警告どおり、
-  // `deterministic` へ上書きしたら対照群としてだけ読むこと。
   const handle = await createExampleRuntime(databaseUrl, {
     ...process.env,
     MNEMORA_LLM: process.env.MNEMORA_LLM ?? "deterministic",
@@ -753,7 +628,6 @@ async function main(): Promise<void> {
             `[subject-crossing-cost] (${combo}/${totalCombos}) pole=${pole} S=${s} N=${n} ` +
               `memories=${s * n} trials=${results.length} took=${ms}ms`,
           );
-          // 区切りごとに書き出す(長時間実行が中断しても、そこまでの結果を失わない)。
           const outPath = path.join(outDir, `subject-crossing-${handle.embeddingMode}.json`);
           writeFileSync(
             outPath,

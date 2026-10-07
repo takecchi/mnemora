@@ -1,25 +1,5 @@
 #!/usr/bin/env node
-/**
- * `subject-crossing-cost` ベンチ(`subject-crossing-measure.ts`)の raw JSON
- * (`{ commit, measuredAt, results }`)を Markdown へ変換する CLI(Issue #579)。
- *
- * 組み立ては `./subject-crossing-summary-lib.ts` の純関数に委ねる
- * (`consolidation-cost-summary.mjs`/`consolidation-cost-summary-lib.mjs` と同じ分担)。
- * ここは
- *
- * 1. `<raw.json> <out.md>` の2引数を読む
- * 2. ファイルを読んで JSON.parse する(壊れていたら理由を stderr に出して非0で終わる)
- * 3. Markdown を書き出す
- *
- * だけを行う。
- *
- * 使い方:
- *   tsx src/subject-crossing-summary.ts <raw.json> <out.md>
- *
- * ⛔ **これは判定ではない。** `subject-crossing-measure.ts` の docstring と同じ規律——
- * 集計に「正しい値」は無いので、このスクリプトは exit code で何かを判定しない
- * (入力そのものが読めない・壊れている場合だけ非0)。
- */
+/** 判定ではない: exit code では何も判定しない（入力が読めない・壊れている場合だけ非0）。 */
 import { readFileSync, writeFileSync } from "node:fs";
 import {
   parseRawFile,
