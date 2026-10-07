@@ -110,6 +110,46 @@ async function waitForBackend(
   );
 }
 
+/** `DB` の relcache の init file（`base/<dboid>/pg_internal.init`）が在るか。 */
+async function relcacheInitFileExists(): Promise<boolean> {
+  const { rows } = await admin.query<{ present: boolean }>(
+    `SELECT (pg_stat_file('base/' || oid || '/pg_internal.init', true)).size IS NOT NULL AS present
+       FROM pg_database WHERE datname = $1`,
+    [DB],
+  );
+  return rows[0]!.present;
+}
+
+/** システムカタログの統計を更新して、`client` の接続のまま init file を消させる（autovacuum が同じことをする）。 */
+async function invalidateRelcacheInitFile(client: Client): Promise<void> {
+  await client.query("CREATE TEMP TABLE relcache_churn (i int)");
+  await client.query("INSERT INTO relcache_churn SELECT generate_series(1, 2000)");
+  await client.query("DROP TABLE relcache_churn");
+  for (const catalog of ["pg_class", "pg_attribute", "pg_type"]) {
+    await client.query(`VACUUM ${catalog}`);
+  }
+}
+
+/**
+ * `pg_extension` を排他で握る接続を返す。`CREATE EXTENSION IF NOT EXISTS`（存在の確認）は、これが
+ * ROLLBACK されるまでそこで待つ。`prepare` は、握る前に holder 自身の接続で流す。
+ */
+async function holdPgExtensionExclusively(
+  prepare?: (holder: Client) => Promise<void>,
+): Promise<Client> {
+  const holder = new Client({ connectionString: connectionStringFor() });
+  await holder.connect();
+  try {
+    await prepare?.(holder);
+    await holder.query("BEGIN");
+    await holder.query("LOCK TABLE pg_extension IN ACCESS EXCLUSIVE MODE");
+    return holder;
+  } catch (error) {
+    await holder.end().catch(() => {});
+    throw error;
+  }
+}
+
 describe("runMigrations: 共有の拡張ロック（EXTENSION_LOCK_KEY）", () => {
   // Issue #1775 の #780（変異M3・M4）: 共有の拡張ロックは「拡張を作る未適用のファイルがあり、
   // `extensionMode: "create"`」のときだけ取る（PR 本文「未適用に該当ファイルが無ければ取らない」・
@@ -247,12 +287,8 @@ describe("runMigrations: 共有の拡張ロック（EXTENSION_LOCK_KEY）", () =
 
   it("拡張を作っている最中にロックの接続が切れると、その元の失敗で reject する", async () => {
     const dir = dirWith("9505_ext_lock_connloss_create.sql", "SELECT 1;");
-    // `pg_extension` を排他で握ると、`CREATE EXTENSION IF NOT EXISTS`（存在の確認）がそこで待つ。
-    const holder = new Client({ connectionString: connectionStringFor() });
-    await holder.connect();
+    const holder = await holdPgExtensionExclusively();
     try {
-      await holder.query("BEGIN");
-      await holder.query("LOCK TABLE pg_extension IN ACCESS EXCLUSIVE MODE");
       const run = runMigrations(pool, dir, { schema: "ext_lock_connloss_create" });
       const outcome = run.then(
         () => new Error("resolved"),
@@ -270,6 +306,37 @@ describe("runMigrations: 共有の拡張ロック（EXTENSION_LOCK_KEY）", () =
     } finally {
       await holder.query("ROLLBACK").catch(() => {});
       await holder.end();
+    }
+  }, 20_000);
+
+  it("pool が冷えていて relcache の init file も無いとき、拡張を作る段の Lock 待ちに着き、その元の失敗で reject する", async () => {
+    const dir = dirWith("9506_ext_lock_cold_pool.sql", "SELECT 1;");
+    const coldPool = new Pool({ connectionString: connectionStringFor(), max: 4 });
+    const holder = await holdPgExtensionExclusively(async (client) => {
+      await invalidateRelcacheInitFile(client);
+      expect(
+        await relcacheInitFileExists(),
+        "前提が崩れた: init file が消えていない（陽性対照）",
+      ).toBe(false);
+    });
+    try {
+      const run = runMigrations(coldPool, dir, { schema: "ext_lock_cold_pool" });
+      const outcome = run.then(
+        () => new Error("resolved"),
+        (error: unknown) => error as Error,
+      );
+      const pid = await waitForBackend("CREATE EXTENSION IF NOT EXISTS%", {
+        onlyWaitingOnLock: true,
+        outcome: run,
+      });
+      await admin.query("SELECT pg_terminate_backend($1)", [pid]);
+      expect((await outcome).message).toMatch(
+        /terminating connection due to administrator command/,
+      );
+    } finally {
+      await holder.query("ROLLBACK").catch(() => {});
+      await holder.end();
+      await coldPool.end();
     }
   }, 20_000);
 
