@@ -90,6 +90,25 @@ describe("FakeMemoryStore.supersedeWithNewMemories: CAS に弾かれた対象の
     expect((await store.getMany(ctx, [old.id]))[0]?.status).toBe("active");
   });
 
+  // 再確かめ（2026-10-07 マージ分、#1871）。`expectedStatus` を付けない対象は CAS が常に通る側（CAS を通る対象）で、
+  // 悪いイベントなら、expectedStatus を付けた対象と同じく、状態を書き換える前に投げる。
+  it.each(BAD_EVENTS)(
+    "%s なら、expectedStatus を付けない対象（CAS が常に通る）も投げ、何も書かない",
+    async (_name, bad) => {
+      const { store, old, input, event, backing } = await setup();
+      await expect(
+        store.supersedeWithNewMemories!(
+          ctx,
+          [{ input, jobKinds: ["embed"] }],
+          [{ id: old.id, supersededByIndex: 0, event: event(bad) }],
+        ),
+      ).rejects.toThrow();
+      expect(backing.events).toHaveLength(0);
+      expect(backing.outboxJobs).toHaveLength(0);
+      expect((await store.getMany(ctx, [old.id]))[0]?.status).toBe("active");
+    },
+  );
+
   it("1つ目が CAS に弾かれ（悪いイベント）、2つ目が通る（正しいイベント）なら、書くのは2つ目のイベントだけ", async () => {
     const { store, old, input, event, backing } = await setup();
     const other = await store.createMemory(ctx, newMemory("other"));
