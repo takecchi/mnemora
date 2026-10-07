@@ -29,10 +29,8 @@ import type { ProvenanceKind } from "../provenance.js";
  * （`subjectId`/`excludeProvenanceKinds` は ADR 0056、`period` は ADR 0059、
  * `validAt` は Issue #280、`status` は ADR 0432、忘却ゲートは ADR 0153）
  * ——ただしこれは「段1で絞らなくてよい」ことの根拠ではない。
- * （2026-10-03 訂正）この段落は以前、「後段は `status` と `decayFloorAtAfter` を見ないので、
- * ここの契約を adapter が守ることが唯一の防衛線である」と書いていた。ADR 0432 AL-1 の
- * `survivesStatusGate` と、ADR 0153 の `survivesDecayGate`（`recall-runtime.ts`）で、どちらも
- * 後段が見るようになったため、今は成り立たない。
+ * 後段は `status`（`survivesStatusGate`、ADR 0432 AL-1）と `decayFloorAtAfter`
+ * （`survivesDecayGate`、ADR 0153。どちらも `recall-runtime.ts`）も見る。
  * 段1の絞りは over-fetch の窓（k'）を無駄にしないための最適化であり、後段フィルタが
  * 在ることは、どの場合も「filter を無視してよい」ことの根拠ではない。
  */
@@ -309,10 +307,10 @@ export interface VectorStore {
    * | `vector` | `@mnemora/postgres` | `@mnemora/testkit` の `InMemoryVectorStore` |
    * |---|---|---|
    * | 長さが `space.dimensions` と違う・空 | 例外（pgvector の `expected N dimensions` など）。前の埋め込みは残る | そのまま保存する。`search` ではその行の距離が `NaN` になる |
-   * | `NaN`・`Infinity`・float4 に収まらない値（`1e308` など）を含む | 例外（DB に触れる前の `RangeError`。ADR 0424） | 同じ（ADR 0424 で揃えた。以前はそのまま保存していた） |
+   * | `NaN`・`Infinity`・float4 に収まらない値（`1e308` など）を含む | 例外（DB に触れる前の `RangeError`。ADR 0424） | 同じ（ADR 0424） |
    * | 成分がすべて `0` | 保存する（ADR 0040。`search` の距離は比較不能） | 同じ |
    *
-   * ⚠ **2026-09-30 追記（ADR 0393）: `Runtime.tick` の embed ジョブは、`upsert` へ渡す前に
+   * ⚠ **`Runtime.tick` の embed ジョブは（ADR 0393）、`upsert` へ渡す前に
    * ベクトルの長さが `embeddingProvider.space.dimensions` と等しいことを確かめる。**違えば
    * `upsert` を呼ばずにジョブを失敗にし、`embeddingStatus: 'failed'`（`recall()` では
    * `not_indexed`）にする——provider が第三者の実装でも、store が `@mnemora/postgres` でも
@@ -330,9 +328,7 @@ export interface VectorStore {
    * 含むメッセージの `Error` を投げる**（ADR 0436。ADR 0398 の `RelationStore.link` と同じ作法。クラス名の接頭辞は
    * `PostgresVectorStore:`／`InMemoryVectorStore:`）。実在しない id・別のテナントの Memory の id・uuid の形でない id
    * （`@mnemora/postgres`）を区別しない。`@mnemora/postgres` は確かめと書き込みを1つの SQL 文にしている。
-   * ⚠ **ADR 0436 より前は違った**: `@mnemora/postgres` はほかのテナントの Memory の id も受け付け、呼んだテナントの行として書いた
-   * （その行は `search` には出ないが、指された Memory のテナントの `eraseTenant` を `blocked_by_foreign_reference` で止めた）。
-   * `docs/memory-model.md` §5 の 2026-09-27 追記（Issue #1051）の表は、その当時の記録である。
+   * （他テナントの Memory に行を書けると、その行が指された側の `eraseTenant` を `blocked_by_foreign_reference` で止めるため。Issue #1051）
    */
   upsert(ctx: Ctx, space: EmbeddingSpaceId, memoryId: MemoryId, vector: number[]): Promise<void>;
   /**
@@ -355,7 +351,7 @@ export interface VectorStore {
    * 同じ振る舞いをする（実装の詳細である `NaN` という値そのものは揃えない——ADR 0040
    * 決定1と同じ自由度）。**`query` が有限でない成分（`NaN`・`Infinity`）を含むときも
    * 同じく「比較不能」であり、`search` は例外を投げない**（`PostgresVectorStore` は同じゼロベクトルへの
-   * 差し替えで満たす）。⚠ 2026-09-30（ADR 0393）: 埋め込み provider がクエリに有限でない成分を返した場合は、
+   * 差し替えで満たす）。⚠ ADR 0393: 埋め込み provider がクエリに有限でない成分を返した場合は、
    * `Runtime.recall` がここへ渡す前に弾いて `embedding_provider_unavailable` にする。この段落が指すのは
    * `search`/`searchMany` を直接呼ぶ場合と、長さ違いの `RecallQuery.vector` の直接指定である。
    *
@@ -376,13 +372,13 @@ export interface VectorStore {
    * **adapter を新しく書くときは、距離だけでなく完全なタイブレークまで含めて
    * 決定的な順序を返すこと。**
    *
-   * ⚠ **2026-09-28 追記（[Issue #1268](https://github.com/takecchi/mnemora/issues/1268)）: 距離はベクトルを float4 に
-   * 丸めてから比べる。**`PostgresVectorStore`（pgvector の `vector` 型）は成分を float4 で持ち、クエリも float4 に
+   * ⚠ **距離はベクトルを float4 に丸めてから比べる**（[Issue #1268](https://github.com/takecchi/mnemora/issues/1268)）。
+   * `PostgresVectorStore`（pgvector の `vector` 型）は成分を float4 で持ち、クエリも float4 に
    * 変換する。`@mnemora/testkit` の `InMemoryVectorStore` も、保存するベクトルとクエリを `Math.fround` で丸める
-   * （以前は丸めず、距離の差が float4 の桁より小さい2件の並びと、`limit` で切った集合が Postgres と割れていた）。
+   * （丸めないと、距離の差が float4 の桁より小さい2件の並びと、`limit` で切った集合が Postgres と割れる）。
    * ⟹ **何が「距離の同点」になるかは、2実装で同じである。**ただし距離の値そのものの下の桁は揃わない
    * ——pgvector は積と和を float4 で重ねてから最後だけ倍精度で割り、fixture は丸めた成分を倍精度で計算する。
-   * 【実測 2026-09-28】`vector-search-float4-tie.postgres.test.ts`（並びと同点）、
+   * 歯は `vector-search-float4-tie.postgres.test.ts`（並びと同点）、
    * `in-memory-fixtures-vector-float4.test.ts`（fixture の丸め）、`recall-association-float4-parity.postgres.test.ts`
    * （同点を `search()` の順のまま保つ段3.5 の、`recall()` の最終の並びまで揃うこと）。
    */
@@ -423,8 +419,6 @@ export interface VectorStore {
    * `search()` が投げない入力では、`searchMany` も投げない。`key` はどんな文字列でもよい（NUL（U+0000）を含んで
    * いてもよい）——`PostgresVectorStore` は key を SQL に送らず、`queries` の添字で結果を引き直す。
    * `limit` の負数・非整数・`NaN`、filter の日時の Invalid Date では、`search()` と同じく投げる。
-   * ⚠ 2026-09-28 までは `PostgresVectorStore` が key を `text` として SQL に送っていたので、NUL を含む key で
-   * 投げていた（`search()` には key が無いので投げない）。
    *
    * **契約: `queries` に同じ `key` が2回以上あるときは、最後のクエリの結果だけを返す**（後勝ち、
    * [Issue #1284](https://github.com/takecchi/mnemora/issues/1284)）。それより前の同じ key のクエリは、結果に
@@ -432,12 +426,9 @@ export interface VectorStore {
    * `new Map(queries.map((q) => [q.key, search(ctx, space, q.vector, opts)]))` と同じ。ただし、同じ key のうち
    * **前のクエリだけが投げる入力**（そのベクトルだけが DB に拒まれる値。float4 の範囲を超える有限の値など）では、
    * この式は投げるが、`searchMany` は投げずに返す——前のクエリは SQL に送らないため。
-   * どの key の結果も、`search()` と同じく `limit` を超えない。投げる入力は、2026-09-28 より前と比べて減る側にしか
-   * 変わらない（前のクエリのベクトルだけが DB に拒まれる値だった入力は、以前は投げ、今は投げない）。
+   * どの key の結果も、`search()` と同じく `limit` を超えない。
    * `Runtime` はアンカーの `memoryId` を key にするので、同じ key を渡さない。
-   * ⚠ 2026-09-28 までは、`PostgresVectorStore` がその key のクエリすべての結果を1つの配列に続けて積んでいた
-   * （件数は結果の和で、`limit` を超えうる）。
-   * 【実測 2026-09-28】`packages/postgres/src/__tests__/vector-search-many-diff.postgres.test.ts`
+   * 歯は `packages/postgres/src/__tests__/vector-search-many-diff.postgres.test.ts`
    * （`search()` を並べたものとの差分の歯。例外の有無も比べる。同じ key の場面は、上の `new Map(…)` と同じく畳んで比べる）。
    */
   searchMany?(
