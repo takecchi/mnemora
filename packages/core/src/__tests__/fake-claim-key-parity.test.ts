@@ -703,7 +703,7 @@ function newMemory(ctx: Ctx, tag: string, over: Partial<NewMemory>): NewMemory {
 }
 
 describe("claim key と矛盾の検出の読み口（Fake）", () => {
-  it("Postgres で実測した結果（EXPECTED）と一致する", async () => {
+  it("findActiveByClaimKey・findContestedByClaimKey・listActiveClaimPredicates と、claim key を有効にした observe の結果が、Postgres で実測した値（EXPECTED）と一致する", async () => {
     const stores = createFakeRuntimeStores();
     const space = { provider: "fake", model: "fake-model", dimensions: 3 };
     const runtime: Runtime = createRuntime({

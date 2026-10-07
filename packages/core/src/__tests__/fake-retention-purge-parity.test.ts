@@ -523,7 +523,7 @@ function newMemory(ctx: Ctx, tag: string): NewMemory {
 }
 
 describe("保持と掃除の口（Fake）", () => {
-  it("Postgres で実測した結果（EXPECTED）と一致する", async () => {
+  it("保持日数による event の purge と、purgeExpiredRecalls・purgeCompletedJobs の結果が、Postgres で実測した値（EXPECTED）と一致する", async () => {
     const stores = createFakeRuntimeStores();
     let n = 0;
     const out = await scenario({

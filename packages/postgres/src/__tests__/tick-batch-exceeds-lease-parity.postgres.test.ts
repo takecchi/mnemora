@@ -592,7 +592,7 @@ function build(base: string, stores: Stores, rows: Env["rows"]): Env {
 }
 
 describe("1回の tick の2件目の処理中にリースが切れたとき、別の tick が再 claim した結末（InMemory・Postgres）", () => {
-  it("InMemory は Postgres で実測した結果（EXPECTED）と一致する", async () => {
+  it("InMemory の、embed・extract・consolidate・reflect それぞれで2件目の処理中にリースが切れて別の tick が再 claim したときの結末が、Postgres で実測した値（EXPECTED）と一致する", async () => {
     const m = new InMemoryMemoryStore();
     const env = build(
       "batch-lease-inmem",
@@ -622,7 +622,7 @@ describe("1回の tick の2件目の処理中にリースが切れたとき、�
     expect(await scenario(env)).toEqual(EXPECTED);
   });
 
-  it("Postgres は EXPECTED と一致する", async () => {
+  it("Postgres の、embed・extract・consolidate・reflect それぞれで2件目の処理中にリースが切れて別の tick が再 claim したときの結末が、EXPECTED と一致する", async () => {
     await resetTestDatabase();
     const { db } = await getTestClient();
     const env = build(

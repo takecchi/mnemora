@@ -553,7 +553,7 @@ describe("recall() — MemoryStore.listLabels? を実装しない adapter（Issu
   });
 });
 
-describe("recall() — labels の追加の歯（#743）", () => {
+describe("recall() — labels の絞りは、連想枠・目次帯・contested の同伴・taxonomyGroups の opt-in・名前の完全一致でも守られる（#743）", () => {
   it("連想枠: 連想用の search() だけが labels を無視して外の記憶を返しても、連想枠に乗らない（変異13）", async () => {
     const { runtime, stores } = buildRuntime();
     const originalSearch = stores.vectorStore.search.bind(stores.vectorStore);

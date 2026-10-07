@@ -289,7 +289,7 @@ function build(stores: {
 }
 
 describe("Runtime 層の「消した後の参照」と purgeExpiredEvents の後の参照（InMemory・Postgres）", () => {
-  it("InMemory は Postgres で実測した結果（EXPECTED）と一致する", async () => {
+  it("InMemory の、active・forgotten・archived・purged の記憶への forget・purge・restoreArchived・markContested の結果と purgeExpiredEvents の件数が、Postgres で実測した値（EXPECTED）と一致する", async () => {
     const m = new InMemoryMemoryStore();
     const env = build({
       mem: m,
@@ -307,7 +307,7 @@ describe("Runtime 層の「消した後の参照」と purgeExpiredEvents の後
     expect(await scenario(env)).toEqual(EXPECTED);
   });
 
-  it("Postgres は EXPECTED と一致する", async () => {
+  it("Postgres の、active・forgotten・archived・purged の記憶への forget・purge・restoreArchived・markContested の結果と purgeExpiredEvents の件数が、EXPECTED と一致する", async () => {
     await resetTestDatabase();
     const { db } = await getTestClient();
     const mem = new PostgresMemoryStore(db);

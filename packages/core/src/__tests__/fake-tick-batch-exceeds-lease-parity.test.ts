@@ -485,7 +485,7 @@ function newMemory(ctx: Ctx, content: string, pending: boolean): NewMemory {
 }
 
 describe("1回の tick の2件目の処理中にリースが切れたとき、別の tick が再 claim した結末（Fake）", () => {
-  it("Postgres で実測した結果（EXPECTED）と一致する", async () => {
+  it("embed・extract・consolidate・reflect それぞれで、2件目の処理中にリースが切れて別の tick が再 claim したときの結末が、Postgres で実測した値（EXPECTED）と一致する", async () => {
     const stores = createFakeRuntimeStores();
     const space = { provider: "fake", model: "fake-model", dimensions: 3 };
     clockOffsetMs = 0;
