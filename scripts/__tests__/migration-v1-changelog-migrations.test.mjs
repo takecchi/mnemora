@@ -4,36 +4,9 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
-/**
- * ⭐ **この歯が測っているもの（消す前に読むこと）**
- *
- * **`CHANGELOG.md` の未リリース節が名指しした migration ファイルが、`docs/migration-v1.md`
- * にも書かれていること。**
- *
- * 🔴 **なぜ要るか**
- *
- * `docs/migration-v1.md` の「DB マイグレーション」は、DB を更新する利用者が「何本当てることに
- * なるか・適用中に何が止まるか」を読む場所であり、CHANGELOG の項目はそこへ案内する。
- * ところが両者を突き合わせる歯が無く、`0029`・`0030` は CHANGELOG にだけ書かれて
- * migration-v1.md から抜けたまま出荷されかけた（`mnemora-postgres-migrate` は台帳をファイル名で
- * 見るので動作は壊れず、文書の正確さだけが黙って崩れる）。
- *
- * 🔴 **数や版を持たない**（`AGENTS.md`「⚠ 数を、道具と生成物に焼き込まない」）。
- * 「未リリース節」は CHANGELOG の見出しに `未リリース` を含む節として、その場で引く。
- * tag も、migration の本数も、ファイル名も、この歯には書いていない。
- *
- * 🔴 **この歯が捕まえないもの:**
- * - **CHANGELOG が migration を名指ししていない**ときは見えない（ファイルが増えたのに
- *   CHANGELOG が黙っている、という逆向きは、tag との差が要るので測っていない）。
- * - migration-v1.md の**どの節に**書かれているかは見ていない（ファイル全体に現れればよい）。
- *   **本数の文言**（「N本」）も見ていない。
- * - 出荷済みの節が名指した migration は対象外（未リリース節だけを見る）。
- */
-
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
 const MIGRATION_NAME = /\b\d{4}_[a-z0-9_]+\.sql\b/g;
 
-/** 見出しに `未リリース` を含む `## [` 節の本文を、すべて連結して返す。 */
 function unreleasedSections(changelog) {
   const out = [];
   let inside = false;
@@ -44,17 +17,14 @@ function unreleasedSections(changelog) {
   return out.join("\n");
 }
 
-/** テキストに現れる migration ファイル名（重複なし）。 */
 function migrationNames(text) {
   return [...new Set(text.match(MIGRATION_NAME) ?? [])].sort();
 }
 
-/** `names` のうち `doc` に現れないもの。 */
 function missingFrom(names, doc) {
   return names.filter((n) => !doc.includes(n));
 }
 
-/** `names` のうち、`dir` に実在しないもの。 */
 function missingMigrationFiles(names, dir) {
   return names.filter((n) => !existsSync(`${dir}/${n}`));
 }

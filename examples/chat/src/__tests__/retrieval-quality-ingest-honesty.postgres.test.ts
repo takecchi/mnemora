@@ -14,21 +14,8 @@ import {
   resetTestDatabase,
 } from "./test-db.js";
 
-/**
- * ADR 0068 の核心を、2回実行して測る歯(オーナーの明示指示——
- * 「1回目だけを測る歯では、この欠陥は一生捕まらない」)。
- *
- * **背景**: `cli.ts` の `runRetrieval` は arm の `tenantId` が固定だった。DB を
- * リセットしないため、2回目の実行は `observe()` の externalId 冪等性に当たって
- * 新規 observation を1件も作らず、`ingest.singleTickWouldHaveStalled` が
- * 「測っていない」のに `false`(＝1回で足りた)を返す——1回目とちょうど逆の結論。
- * 順位(goldRank 等)は DB に残った前回の記憶からそのまま正しく出るため、数字を見て
- * いても気付けない。
- *
- * `haystackSize` は既定(`DEFAULT_HAYSTACK_SIZE`=60)より小さいが、
- * `DEFAULT_TICK_LIMIT`(50、`packages/core/src/runtime.ts`)は必ず超える値にしてある
- * ——超えないと `singleTickWouldHaveStalled` の分岐そのものが死ぬ。
- */
+// 2回目を測る。同じ tenant の2回目は observe() の冪等性で新規 observation が0件になり、1回目だけを測る歯では欠陥が捕まらない（ADR 0068）。
+// haystackSize は DEFAULT_TICK_LIMIT(50) を超える値にする。超えないと singleTickWouldHaveStalled の分岐が死ぬ。
 const HAYSTACK_SIZE = 55;
 
 async function runOnce(tenantId: string): Promise<ArmIngestSummary> {
@@ -65,8 +52,6 @@ describe("retrieval-quality: ingest の結論は run を跨いで正直か（ADR
       const second = await runOnce(buildArmTenantId(armKey, newRunToken()));
 
       expect(second).toEqual(first);
-      // 両方とも実際に測っており、既定 tick() 1回では足りなかったはず
-      // (haystackSize=55 は DEFAULT_TICK_LIMIT=50 を超える)。
       expect(first.measurement).toBe("measured");
       expect(second.measurement).toBe("measured");
       expect(first.singleTickWouldHaveStalled).toBe(true);
@@ -91,12 +76,8 @@ describe("retrieval-quality: ingest の結論は run を跨いで正直か（ADR
         llmFailedWholeObservation: 0,
       });
 
-      // 同じテナントで2回目——`observe()` は externalId の冪等性に当たり、
-      // 新規 observation を1件も作らない。
       const second = await runOnce(tenantId);
       expect(second.measurement).toBe("replayed");
-      // ⚠ ここが本 ADR の核心: 測っていないので `false`(足りた)ではなく、
-      // 「測っていない」と言える値(`null`)でなければならない。
       expect(second.singleTickWouldHaveStalled).toBeNull();
       expect(second.extractionCounts).toEqual({
         ok: 0,
@@ -120,10 +101,8 @@ describe("retrieval-quality: ingest の結論は run を跨いで正直か（ADR
       expect(secondReport.ingest.measurement).toBe("replayed");
       const out = formatArmDetail(secondReport);
       expect(out).not.toContain("この arm では既定の tick() 1回で全件処理できる件数だった");
-      // 「測っていない」ことは、何らかの形で明示されていること。
       expect(out).toMatch(/測っていない/);
 
-      // 対照: 1回目(実際に測った run)は、通常通りの判定文言を出す。
       const firstOut = formatArmDetail(firstReport);
       expect(firstOut).toContain("既定の tick() を1回だけ呼ぶ実装だったら");
     },

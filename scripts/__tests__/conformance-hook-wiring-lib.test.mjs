@@ -5,17 +5,6 @@ import {
   findConformanceCalls,
 } from "../conformance-hook-wiring-lib.mjs";
 
-/**
- * `scripts/conformance-hook-wiring-lib.mjs`（走査そのもの）の歯。
- *
- * ⚠ **このファイルはリポジトリのソースを1バイトも読まない。**現物に当てる側は
- * `tenant-settings-conformance-hook-wiring.test.mjs` が見る
- * （`workflow-expression-lib.test.mjs` / `initdb-args-lib.test.mjs` と同じ役割分担）。
- *
- * 🔴 **この歯が無いと、走査が「何も見つけない」実装へ退化しても誰も気づかない**——
- * 現物に当てる側の主張は「**挙がった集合が空**」なので、**走査が壊れて空になっても
- * 緑で通る。**⟹ 走査そのものを直接測る。
- */
 const FN = "describeTenantSettingsStoreConformance";
 const HOOK = "setDefaultHalfLifeHours";
 
@@ -90,19 +79,12 @@ describe("findConformanceCalls", () => {
 });
 
 describe("findCallsMissingHook（⛔ 陰性対照は件数ではなく集合の一致で書く）", () => {
-  // 🔴 `toBeGreaterThan(0)` のような「入力が1件でもあれば常に真」の形は使わない。
-  // ⟹ **弾くものと弾いてはいけないものを同じ1回の呼び出しに混ぜ**、
-  // **挙げた集合**と**挙げなかった集合（補集合）**の**両方**が厳密に一致することを見る。
-  // ⟹ 「全部挙げる」実装でも「何も挙げない」実装でも赤くなる。
+  // `toBeGreaterThan(0)` のような、入力が1件でもあれば常に真になる形は使わない。
   const MIXED = [
-    // ⭐ 弾いてはいけない側: フックを渡している（1行目 / 2行目）
     `${FN}({ name: "ok-normal", createStore: c, ${HOOK}: h });`,
     `${FN}({ name: "ok-shorthand", createStore: c, ${HOOK} });`,
-    // 🔴 弾くべき側: フックを渡していない（3行目）
     `${FN}({ name: "missing", createStore: c });`,
-    // 🔴 弾くべき側: 入れ子にしか無い（4行目）——「渡している」と読んではいけない
     `${FN}({ name: "nested-only", createStore: () => ({ ${HOOK}: h }) });`,
-    // 🔴 弾くべき側: 引数が読めない（5行目）——⛔「読めない」を緑で通さない
     `${FN}(sharedOptions);`,
   ].join("\n");
 
@@ -111,7 +93,6 @@ describe("findCallsMissingHook（⛔ 陰性対照は件数ではなく集合の�
 
     expect(flaggedLines).toEqual(new Set([3, 4, 5]));
 
-    // ⭐ 挙げなかった側（補集合）も厳密に一致すること。
     const allLines = findConformanceCalls(MIXED, FN).map((c) => c.line);
     expect(new Set(allLines.filter((line) => !flaggedLines.has(line)))).toEqual(new Set([1, 2]));
   });

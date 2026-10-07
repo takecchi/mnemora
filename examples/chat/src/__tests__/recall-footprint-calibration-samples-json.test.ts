@@ -3,16 +3,6 @@ import type { IndexBand } from "@mnemora/core";
 import { buildRecallFootprintCalibrationSamplesJson } from "../recall-footprint-calibration-samples-json.js";
 import type { CalibrationSampleRow } from "../recall-footprint-calibration-samples.js";
 
-/**
- * Issue #340 フォローアップ（ADR 0314）: `recall-footprint-calibration-samples-json.ts` の
- * 出力口。DB もネットワークも要らない（純関数）。
- *
- * ⭐ **最重要の検査**: `CalibrationSampleRow[]` をそのまま写していること（集計を
- * 作り直さない）、`rawIndex` を丸ごと保持すること（`compare-json.ts` の `omitted` と
- * 同じ理由）、`compare-baseline.json`（⭐門）のスキーマを一切変えていないこと
- * （このファイルはそちらのテストではない——別ファイル用の出力口である）。
- */
-
 function makeIndex(overrides: Partial<IndexBand> = {}): IndexBand {
   return {
     groups: [],

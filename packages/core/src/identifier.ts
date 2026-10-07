@@ -4,15 +4,9 @@ import { matchesStoreErrorKind } from "./store-error-kind.js";
 /**
  * 識別子の文字の扱い（[ADR 0423](../../../docs/decisions/0423-identifier-well-formed-and-error-message-without-params.md)）。
  *
- * 識別子（`tenantId`・`subjectId`・`externalId`）は正規化せず、完全一致で比べる（{@link Ctx}）。ただし
- * 次の2つを含む値は、保存の形（Postgres の `text` 列の UTF-8）で別の値と区別できなくなる、あるいは
- * 保存できないため、**入口で明示の例外で断る**。**書き換えて通すことはしない。**
- *
- * - **孤立サロゲート**（対をなさない UTF-16 のサロゲートコードユニット。`\uD800` 単体など）。
- *   対をなすサロゲート（絵文字など、BMP の外の文字）は正しい文字であり、断らない。
- * - **NUL**（U+0000）。
- *
- * 本文（`text`・`content` など）はこの検査の対象ではない。本文の扱いは変えていない。
+ * 識別子（`tenantId`・`subjectId`・`externalId`）は正規化せず、完全一致で比べる（{@link Ctx}）。
+ * 孤立サロゲート（`\uD800` 単体など。対をなすサロゲートは断らない）と NUL（U+0000）を含む値は、
+ * **入口で明示の例外で断る**。書き換えて通すことはしない。本文（`text`・`content` など）は対象外。
  */
 
 /** 断った理由。 */
@@ -21,7 +15,7 @@ export type MalformedIdentifierReason = "lone_surrogate" | "nul";
 /**
  * 識別子に、孤立サロゲートか NUL が含まれていたときに投げる例外（ADR 0423）。
  *
- * 🔴 **message に入力値は入れない**（欄の名前・理由・位置だけ）。判別は `instanceof` ではなく
+ * **message に入力値は入れない**（欄の名前・理由・位置だけ）。判別は `instanceof` ではなく
  * {@link isMalformedIdentifierError} で行う（ADR 0418）。
  */
 export class MalformedIdentifierError extends Error {

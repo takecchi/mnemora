@@ -7,32 +7,8 @@ import { blankOutWorkflowComments } from "../workflow-comment-blank-lib.mjs";
 import { spawnSyncWithDeadline } from "./spawn-with-deadline.mjs";
 
 /**
- * ⭐ **この歯が測っているもの(消す前に読むこと)**
- *
- * **`.github/workflows/ci.yml` の `consolidation-cost` ジョブが、実際に
- * `scripts/consolidation-cost-summary.mjs` へ配線されていること。**
- *
- * ⚠ **これは `consolidation-cost-summary.test.mjs` / `consolidation-cost-summary-lib.test.mjs`
- * の重複ではない**(`ci-yml-retrieval-wiring.test.mjs` の docstring と同じ理由)。
- * その2本は**入力を自分で作って**要約の中身と exit code を測る——**どちらも `ci.yml` を
- * 1バイトも読まない。**⟹ 誰かが `ci.yml` から要約の段を消しても、`--baseline` のパスを
- * 打ち間違えても、`MNEMORA_CONSOLIDATION_JSON` の書き先と `--measured` の読み先を
- * ずらしても、**その2本は緑のまま通る。**この歯だけが `ci.yml` を入力に取る。
- *
- * ⚠ **`examples/chat/consolidation-baseline.json` は `22c0731`（ADR 0101、2026-09-11）でコミットされている**。この歯の当初のコメントは
- * 「まだコミットされていない（マネージャーが実測値で作る予定であり、この歯が作ってはいけない）」と
- * 書いており、その前提で次の形にした——今もこの形のままである。そのため
- * `identifier-probes` 版の歯(`ci-yml-identifier-probes-wiring.test.mjs`)と違い、
- * **実行系のテストでは summary 段の `--baseline` の値をこの歯の中の一時ファイルへ
- * 差し替えて**走らせる(`substituteBaselinePath`)。**yml に書かれた本来のパス自体**
- * (`examples/chat/consolidation-baseline.json`)は、別のテストで文字列としてだけ固定する
- * ——ファイルの存在は要求しない。
- *
- * ⚠ **YAML は構造として解析していない(文字列で見ている)。**
- * 既存2本の wiring テストと同じ判断で、歯のために YAML パーサの依存を足していない
- * (依存追加はオーナー専権。`docs/autonomy.md`)。**だからこの歯は書き方の変更に弱い。**
- * 壊れたときは「配線が変わった」か「書き方が変わった」かを見て、**配線が変わっていない
- * なら取り出し方のほうを直すこと(歯を消さないこと)。**
+ * YAML は構造として解析せず文字列で見る（依存追加はオーナー専権）。壊れたときは、配線が変わったのか書き方が変わったのかを見て、配線が変わっていないなら取り出し方を直す。
+ * 実行系のテストは、summary 段の `--baseline` を一時ファイルへ差し替えて走らせる（`substituteBaselinePath`）。yml の本来のパスは文字列としてだけ固定し、ファイルの存在は要求しない。
  */
 
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
@@ -43,9 +19,6 @@ const JOB_ID = "consolidation-cost";
 const BASELINE_RELATIVE_PATH = "examples/chat/consolidation-baseline.json";
 
 /**
- * `jobs:` の下の1ジョブ(`  <id>:` から、次の同じ深さの `  <id>:` まで)を切り出す
- * (`ci-yml-retrieval-wiring.test.mjs` の `extractJob` と同じ形)。
- *
  * @param {string} yaml
  * @param {string} jobId
  * @returns {string}
@@ -70,8 +43,6 @@ function extractJob(yaml, jobId) {
 }
 
 /**
- * ジョブ直下の `env:` を読む(段の中の `env:` は拾わない)。
- *
  * @param {string} jobBlock
  * @returns {Record<string, string>}
  */
@@ -98,9 +69,6 @@ function parseJobEnv(jobBlock) {
 }
 
 /**
- * `steps:` を段へ切り分け、各段の `name` / `env` / `run` だけを取り出す
- * (既存2本の wiring テストと同じ形)。
- *
  * @param {string} jobBlock
  * @returns {{ name: string, env: Record<string, string>, run: string }[]}
  */
@@ -180,38 +148,12 @@ const benchStep = steps.find((step) => step.env.MNEMORA_CONSOLIDATION_JSON !== u
 const summaryStep = steps.find((step) => step.run.includes("consolidation-cost-summary.mjs"));
 const artifactStep = steps.find((step) => step.name.includes("成果物として残す"));
 
-/**
- * このファイル内で `extractStepBlock` が `blankOutWorkflowComments` を通した結果、
- * 「扱えない」と名乗った箇所をすべて集める(呼び出し側がこれを無視できないようにするため
- * ——下の describe("コメント潰しが …") が空であることを固定する)。
- *
- * @type {{ stepName: string, unhandled: { lineNumber: number, reason: string, line: string }[] }[]}
- */
+/** @type {{ stepName: string, unhandled: { lineNumber: number, reason: string, line: string }[] }[]} */
 const stepBlockCommentUnhandled = [];
 
 /**
- * ある段の生テキスト(`- name: <name>` から次の段の `- name:` まで)を切り出す。
- * `parseSteps` は `if:`/`uses:`/`with:` を読まないので、それらを検査したいときは
- * こちらを使う。
- *
- * 🔴 **返す前にコメントを空白へ潰す(Issue #160 段0/段B の変異H で実測)。**
- * `it("要約ステップに if: always() が付いている…")` はこの関数の生テキストへ
- * `toContain("if: always()")` を当てていたが、consolidation-cost ジョブの要約ステップは
- * 787行目に「このステップは常に走る(`if: always()`)——…」という**地の文のコメント**
- * が実キー(791行目)と同じ行を引用している。⟹ 791行目を `if: success()` に変異させても
- * (実キーを壊しても)、787行目のコメントがまだ `if: always()` という文字列を含んでいる
- * ため `toContain` は一致したまま緑で通っていた(段Bの変異Hで実測。歯がここに直る前は
- * 欠陥だった)。artifact ステップ(799行目)にはそのようなコメントの引用が無いため、
- * 同じ変異(変異H')は直す前から赤くなっていた——⟹ 欠陥は「コメントが実キーと同じ文字列を
- * 引用している段」に限られていた。
- *
- * この直しは `ci-yml-postgres-regime-wiring.test.mjs` が同じ変異H(段0)を踏んで
- * 入れたのと同じ形(`scripts/workflow-comment-blank-lib.mjs` の docstring)を
- * そのまま踏襲する——独自設計をしない。
- *
- * ⛔ **この関数は照合専用であり、実行はしない。**`jobBlock`/`parseSteps` 側
- * (`summaryStep.run` → `runSummaryStepFromWorkflow` が子プロセスで実際に走らせる)には
- * 適用しない——実行するテキストからコメントを潰すと歯の意味が変わる。
+ * 返す前にコメントを空白へ潰す。要約の段のコメントが実キーと同じ `if: always()` を引用しており、実キーを壊しても `toContain` が緑のまま通った。
+ * 照合専用で、実行するテキストには適用しない（コメントを潰すと歯の意味が変わる）。
  *
  * @param {string} stepName
  * @returns {string | undefined}
@@ -238,8 +180,6 @@ function extractStepBlock(stepName) {
 }
 
 /**
- * `${{ github.workspace }}` を実際の場所に置き換える。
- *
  * @param {string} text
  * @param {string} workspace
  * @returns {string}
@@ -256,9 +196,7 @@ function substituteWorkspace(text, workspace) {
 }
 
 /**
- * bench が JSON を書く先(`MNEMORA_CONSOLIDATION_JSON`)を yml から読む。
- * **この歯はパスを自分では書かない**——書き写すと、yml 側が変わったときに
- * 歯のほうが古いまま緑になる。
+ * この歯はパスを自分では書かない。書き写すと、yml 側が変わったときに歯のほうが古いまま緑になる。
  *
  * @returns {string}
  */
@@ -272,20 +210,13 @@ function benchStepMeasuredPath() {
   return benchStep.env.MNEMORA_CONSOLIDATION_JSON;
 }
 
-/** `--baseline <path>` を yml から読む(引用符あり・なしの両方を拾う)。 */
 function summaryStepBaselinePath() {
   const matched = /--baseline\s+(?:"([^"]+)"|([^\s\\]+))/.exec(summaryStep?.run ?? "");
   return matched ? (matched[1] ?? matched[2]) : undefined;
 }
 
 /**
- * yml から取り出した要約の段を、実際に走らせる。
- *
- * ⛔ **baseline のパスは、yml に書かれた実物ではなく、この歯が用意した一時ファイルへ
- * 差し替える**(この歯を書いた時の前提は「`examples/chat/consolidation-baseline.json` はまだ
- * コミットされていない」だった。ファイルは今は在るが、実行系のテストが実物の中身に依存しない
- * よう、差し替えの形のままにしてある)。差し替えは文字列置換のみ——script の他の部分(node の呼び出し・`--measured` の
- * パスなど)はそのまま使う。
+ * baseline のパスは、yml に書かれた実物ではなく一時ファイルへ差し替える。実行系のテストが実物の中身に依存しないようにする。
  *
  * @param {unknown} measured `--measured` が読むファイルに書き込む中身
  * @param {unknown} [baseline] `--baseline` が読むファイルに書き込む中身。省略時は
@@ -313,7 +244,6 @@ function runSummaryStepFromWorkflow(measured, baseline) {
       "utf8",
     );
     if (baseline === undefined) {
-      // --baseline の指定ごと落として、measured のみで走らせる。
       script = script.replace(/\s*--baseline\s+(?:"[^"]+"|[^\s\\]+)/, "");
     } else {
       const tempBaselinePath = join(workspace, "baseline.json");
@@ -435,10 +365,6 @@ describe("ci.yml の consolidation-cost ジョブの配線", () => {
   });
 
   it("🔴 要約の段が --baseline を、マネージャーが用意する予定の基準値ファイルへ渡している", () => {
-    // ⭐ **これが「輪が閉じている」ことの固定点。**この行が消えると、値が動いても
-    // 誰も気づかず、誰も基準値を更新せず、新しい値が PR の diff に現れなくなる。
-    // ⚠ ファイル自体は今はコミットされている（`22c0731`）が、ここではパスの文字列だけを
-    // 固定し、存在は要求しない（実物の中身を読むのは CI の consolidation の段である）。
     expect(summaryStepBaselinePath(), "要約の段に --baseline の指定が無い").toBe(
       BASELINE_RELATIVE_PATH,
     );
@@ -522,11 +448,6 @@ describe("ci.yml の consolidation-cost ジョブの配線", () => {
 });
 
 describe("コメント潰しが consolidation-cost ジョブの対象範囲で「扱えない」形に当たっていないこと(Issue #160)", () => {
-  // 🔴 `extractStepBlock` が返す前に通す `blankOutWorkflowComments` の
-  // unhandled を無視できないようにする(呼び出し側が黙って安全側へ倒さないための
-  // 配線そのもの。`scripts/workflow-comment-blank-lib.mjs` の docstring)。
-  // ⚠ 特定の呼び出し履歴に依存しないよう、ここで consolidation-cost ジョブの
-  // 全段を洗い直してから確かめる。
   it("consolidation-cost ジョブの全段(name 段)に unhandled が無い", () => {
     stepBlockCommentUnhandled.length = 0;
     for (const step of steps) {

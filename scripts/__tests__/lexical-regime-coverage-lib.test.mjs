@@ -6,16 +6,6 @@ import {
   evaluateCoverage,
 } from "../lexical-regime-coverage-lib.mjs";
 
-/**
- * `scripts/lexical-regime-coverage-lib.mjs` の純関数の歯(Issue #155 満たすべきこと2)。
- *
- * ⭐ **この歯が測っているもの**: matrix 化した `postgres` ジョブの両脚が実際に
- * 別々の regime を走らせたか、という判定そのもの。CLI としての配線(引数の読み方・
- * ファイル I/O)は `lexical-regime-coverage.test.mjs` が別に測る
- * (`lexical-regime-summary-lib.test.mjs` / `lexical-regime-summary.test.mjs` の
- * 分担と同じ)。
- */
-
 function present(encoding, measuredEncoding = encoding) {
   return { encoding, present: true, measuredEncoding };
 }
@@ -74,18 +64,12 @@ describe("evaluateCoverage", () => {
   });
 
   it("🔴🔴 両方の artifact が揃っていても、実際に測れた server_encoding が1種類しかないと非ok(POSTGRES_INITDB_ARGS が効いていない疑い)", () => {
-    // artifact 名はそれぞれの脚どおりだが、中身の serverEncoding が両方 UTF8。
     const result = evaluateCoverage([present("UTF8", "UTF8"), present("SQL_ASCII", "UTF8")]);
-    // この場合、SQL_ASCII 脚の中身が期待(SQL_ASCII)と食い違うので、まず「不一致」で
-    // 非okになる。中身の食い違いを先に見るのは仕様である——不一致自体が
-    // 「効いていない」ことの直接的な証拠だからである。
     expect(result.ok).toBe(false);
   });
 
   it("🔴 名前どおりの脚が2種類とも同じ値を測ってしまう理論上のケース(名前と中身が一致しているのに種類が足りない)でも非ok", () => {
-    // encoding と measuredEncoding が同じ値になるよう artifact 名を偽装できないため、
-    // ここでは evaluateCoverage の「distinctMeasured が期待数未満」分岐を直接、
-    // 中身食い違いが起きない形(=期待エンコーディングが1種類しかない)で確かめる。
+    // 名前と中身の食い違いを偽装できないので、期待エンコーディングが1種類の形で「distinctMeasured が期待数未満」の分岐を直接確かめる。
     const result = evaluateCoverage([present("UTF8"), present("UTF8")]);
     expect(result.ok).toBe(false);
     if (!result.ok) {

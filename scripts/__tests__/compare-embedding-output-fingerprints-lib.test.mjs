@@ -4,21 +4,6 @@ import {
   compareFingerprints,
 } from "../compare-embedding-output-fingerprints-lib.mjs";
 
-/**
- * `scripts/compare-embedding-output-fingerprints-lib.mjs` の歯（Issue #565）。
- *
- * ⛔ **本物のモデルは一度も呼ばない。** 固定の測定 JSON（偽の測定結果）を直接渡して、
- * 一致/不一致/比較できなかったの判定だけを測る。
- *
- * 🔴 **歯2（マネージャー指示）**: 2つの結果が一致 →「一致」、不一致 →「不一致」と
- * 両方の lscpu の差が並ぶ。**この pure 関数自体は exit code を持たない**——
- * 「どちらでも終了コードは0」は CLI 側の契約であり、その固定は
- * `compare-embedding-output-fingerprints-cli.test.mjs`（別ファイル）が持つ。
- *
- * 🔴 **歯3（陽性対照）**: 片方の artifact が無いときは「比較できなかった」と名乗る
- * ——一致とも不一致とも言わない。
- */
-
 const cpuInfoA = { source: "lscpu", "Model name": "cpu-a", Flags: "avx2 sse4_2" };
 const cpuInfoB = { source: "lscpu", "Model name": "cpu-b", Flags: "avx2 sse4_2" };
 
@@ -128,8 +113,7 @@ describe("buildComparisonSummaryMarkdown", () => {
     const result = compareFingerprints(legA, legB);
     const markdown = buildComparisonSummaryMarkdown([legA, legB], result);
     expect(markdown).toContain("✅ 一致");
-    // ⚠ 冒頭の注意書きは定型文として「不一致」という語を含むため(門にしていない
-    // ことの説明)、判定そのものを表す強調付きの表記だけを見る。
+    // 冒頭の注意書きは定型文として「不一致」という語を含むため、強調付きの表記だけを見る。
     expect(markdown).not.toContain("⚠ **不一致**");
   });
 

@@ -159,16 +159,13 @@ describe("formatConsolidationCostReport — round途中の例外による打ち�
 
       const report = formatConsolidationCostReport(json);
 
-      // (2) round < N(=3) の行が出力に在る(=測れた分を捨てていない)。
       expect(report).toContain("| 0 |");
       expect(report).toContain("| 1 |");
       expect(report).toContain("| 2 |");
-      // round ごとに変わる実データ値(makeRound の allContentChars = 100 + round*10)。
       expect(report).toContain("100"); // round0
       expect(report).toContain("110"); // round1
       expect(report).toContain("120"); // round2
 
-      // (3) 元の cause のメッセージ(または sqlState)が含まれる(=畳んでいない)。
       expect(report).toContain("outer-format-test-message-7q2z");
       expect(report).toContain("inner-format-test-message-k9x1");
       expect(report).toContain("23503");

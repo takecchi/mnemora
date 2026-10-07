@@ -3,17 +3,6 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
-/**
- * `examples/chat/README.md` が名指しする `pnpm --filter <パッケージ> run <名前>` の `<名前>` が、
- * そのパッケージの `package.json` の `scripts` に在ることを縛る。README は手で叩くコマンドの
- * 一覧なので、script の名前を変えたり消したりすると、読んだとおりに打った人が
- * `Command "<名前>" not found` で止まる。
- *
- * - 見るのは README の中の `pnpm --filter @mnemora/<name> run <script>` の形だけである（`exec` は見ない）。
- * - パッケージ名から package.json への対応は、下の表で持つ（README が名指ししているパッケージだけ）。
- *   表に無いパッケージを README が名指ししたら赤にする（黙って見落とさない）。
- */
-
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
 const README_PATH = "examples/chat/README.md";
 const readme = readFileSync(join(repoRoot, README_PATH), "utf8");

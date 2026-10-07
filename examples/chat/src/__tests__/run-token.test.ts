@@ -1,12 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildArmTenantId, newRunToken } from "../retrieval-quality.js";
 
-/**
- * `newRunToken`/`buildArmTenantId`(ADR 0068 ①-1c)の契約そのものを、DB 無しで
- * 素早く測る歯。`retrieval-quality-ingest-honesty.postgres.test.ts` の①-1が
- * end-to-end で同じ契約を踏むが、それは DB を要求する分遅い——ここでは純関数としての
- * 契約(「2回呼べば必ず違う」「同じ token なら同じ tenantId」)だけを高速に固定する。
- */
 describe("newRunToken", () => {
   it("2回呼べば必ず違う値を返す(多数回呼んでも衝突しない)", () => {
     const seen = new Set<string>();

@@ -2,15 +2,6 @@ import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { buildUtterances, type CorpusPole } from "../subject-crossing-measure.js";
 
-/**
- * Issue #1024: `subject-crossing-measure`（ADR 0310）のコーパスの歯。
- *
- * disjoint 極は subject k に話題 `k mod 10` だけを話させる。以前は1つの話題の本文が
- * テンプレート4 × filler 12 = 48通りしかなく、1 subject あたり48件を超えると本文まで同一の
- * 発話を繰り返していた（N=100 で52%）。ADR 0310 の表は N=100 まで測るので、
- * 1 subject の中で N=100 まで本文が重複しないことを要求する。
- */
-
 function sha256(value: unknown): string {
   return createHash("sha256").update(JSON.stringify(value)).digest("hex");
 }
@@ -33,12 +24,7 @@ describe("subject-crossing のコーパス（Issue #1024）", () => {
     }
   }
 
-  /**
-   * 🔴 重複の無かった行（disjoint の N ≤ 48、shared の N ≤ 100）は、ADR 0310 が測った
-   * コーパスそのままでなければならない——表のそれらの行は測り直していないため。
-   * 生成は前から順に作る（subject も発話も）ので、disjoint S=10 N=48 と shared S=10 N=100 の
-   * 2つが、それより小さい全ての行を含む。値は main 8a5c9a0（修正前）の生成物の sha256。
-   */
+  // 重複の無かった行は ADR 0310 が測ったコーパスそのままでなければならない（表のそれらの行は測り直していない）。値は修正前の生成物の sha256。
   it("重複の無かった行のコーパスは変わらない（disjoint S=10 N=48・shared S=10 N=100）", () => {
     expect(sha256(buildUtterances({ s: 10, n: 48, pole: "disjoint" }))).toBe(
       "34752d0b9e2ebcc44cd75ccc4d6869ff9662ad40e98240306b460f7f4b7023ac",

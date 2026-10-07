@@ -153,34 +153,7 @@ describe("deriveMigrationObjects", () => {
       .sort();
     const texts = fileNames.map((name) => readFileSync(`${migrationsDir}/${name}`, "utf8"));
     const result = deriveMigrationObjects(texts);
-    // Issue #201 / ADR 0318: migrations/0020_taxonomy_labels.sql が `labels`/
-    // `memory_labels`（テーブル+2）と `idx_labels_by_status`/`idx_memory_labels_by_label`
-    // （索引+2）を足した。Issue #152/#153 / ADR 0312: migrations/0019_observations_memories_attributes.sql
-    // が `idx_memories_attributes`（索引+1）を足した。8→10・20→23 はその反映であり、
-    // 回帰ではない。Issue #371: migrations/0021_memories_claim_key.sql が
-    // `idx_memories_claim_key`（索引+1）を足した。23→24 も同様に反映であり、回帰ではない。
-    // ADR 0352 / Issue #338: migrations/0024_tenant_subject_activity.sql が
-    // `tenant_subject_activity`（テーブル+1）を足した。10→11 も同様に反映であり、回帰ではない。
-    // ADR 0364 / Issue #1222: migrations/0025_lexical_tsvector_fallback.sql が
-    // `mnemora_lexical_tsvector`（関数+1）を足し、`idx_memories_lexical` を作り直した（索引は数が変わらない）。
-    // 関数 5→6 も同様に反映であり、回帰ではない。
-    // Issue #207/#933 / ADR 0381: migrations/0026_memory_relations.sql が
-    // `memory_relations`（テーブル+1）と `idx_memory_relations_from`/`idx_memory_relations_to`
-    // （索引+2）を足した。11→12・24→26 も同様に反映であり、回帰ではない。
-    // Issue #1207 / ADR 0383: migrations/0027_erase_tenant_fk_indexes.sql が外部キー検査用の
-    // 単一列索引8本（`idx_memory_events_memory_id` 等。`memory_relations` の2本を含む）を足した。26→34 も同様に反映であり、
-    // 回帰ではない（埋め込み空間の表の `(memory_id)` 索引は `DO` ブロックの動的 SQL で、数に入らない）。
-    // ADR 0384 / PR #1455: migrations/0028_digest_band_index.sql が `idx_memories_digest_band`
-    // （索引+1）を足した。34→35 も同様に反映であり、回帰ではない。
-    // ADR 0389: migrations/0030_recalls_digest_band_index.sql が `idx_recalls_digest_band`
-    // （索引+1）を足した。35→36 も同様に反映であり、回帰ではない。
-    // ADR 0329 の 2026-09-30 追記: migrations/0029_memories_claim_predicates_index.sql が
-    // `idx_memories_claim_predicates`（索引+1）を足した。36→37 も同様に反映であり、回帰ではない。
     expect(result.tables).toHaveLength(12);
-    // ADR 0400: migrations/0031_memory_labels_label_id_index.sql が `idx_memory_labels_label_id`
-    // （索引+1）を足した。37→38 も同様に反映であり、回帰ではない。
-    // ADR 0412: migrations/0032_purge_indexes.sql が `idx_recalls_by_created` と
-    // `idx_outbox_completed`（索引+2）を足した。38→40 も同様に反映であり、回帰ではない。
     expect(result.indexes).toHaveLength(40);
     expect(result.functions).toEqual([
       "mnemora_lexical_coverage",

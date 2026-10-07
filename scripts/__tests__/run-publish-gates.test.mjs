@@ -5,33 +5,13 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { spawnSyncWithDeadline } from "./spawn-with-deadline.mjs";
 
-/**
- * `scripts/run-publish-gates.mjs`（`.github/workflows/publish.yml` の門ステップの CLI 入口）の歯。
- *
- * **これは何を直したものか（Issue #476、ADR 0210 追記）**
- *
- * `publish.yml` の門ステップは、直す前は `run: |` に5行（`pnpm run typecheck` /
- * `lint` / `format:check` / `test` / `build`）を並べただけで、既定シェル（`bash -e`）に
- * 任せていた——`-e` が保たれている限り「壊れているのに緑になる」偽陽性は起きないが
- * （それは `scripts/__tests__/publish-yml-gate-shell-wiring.test.mjs` が別に縛る）、
- * **1本目が落ちた時点でステップ全体が止まり、2本目以降が実際に壊れているかどうかが
- * 一度も分からない**——ADR 0210 がルートの `test` 門（`&&` 連結）について直した族と
- * 同じ形（同 ADR「数え直した結果」の表・6番）。この script は、ADR 0210 の
- * `scripts/run-root-test-gate.mjs` と同じ形で、5段を**前段の成否に関わらず全部**
- * 起動し、終了コードは最後にまとめて決める。
- *
- * ⛔ **本物の `pnpm run typecheck` 等を子プロセスとして起動しない。**
- * `MNEMORA_PUBLISH_GATE_STAGES_JSON`（この script だけが読む、テスト専用の環境変数。
- * `publish.yml` は設定しない）で、5段を「成功する偽のコマンド」「失敗する偽のコマンド」
- * に差し替えて確かめる。
- */
+// 本物の pnpm run typecheck 等は起動しない。MNEMORA_PUBLISH_GATE_STAGES_JSON（テスト専用）で、
+// 5段を偽のコマンドに差し替える。
 
 const script = fileURLToPath(new URL("../run-publish-gates.mjs", import.meta.url));
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
 
 /**
- * 偽の段（`node -e "process.exit(N)"`）を作る。本物の pnpm コマンドは一切起動しない。
- *
  * @param {string} name
  * @param {number} exitCode
  */
@@ -46,10 +26,8 @@ function runGate(stages, workflow = "test-of-run-publish-gates") {
   return spawnSyncWithDeadline(process.execPath, [script], {
     cwd: repoRoot,
     encoding: "utf8",
-    // **`GITHUB_WORKFLOW` を明示的に上書きする。** `publish.yml` の門そのものが
-    // `pnpm run test` でこの歯を走らせるので、publish の job の中では親の
-    // `GITHUB_WORKFLOW` が `Publish` になっている。受け継ぐと、下の「publish の
-    // workflow の中では差し替えを断る」守りに歯自体が当たって落ち、publish を止める。
+    // GITHUB_WORKFLOW を上書きする（publish の job の中で走ると親の値が Publish になり、
+    // 差し替えを断る守りに歯自体が当たる）。
     env: {
       ...process.env,
       GITHUB_WORKFLOW: workflow,
@@ -86,14 +64,10 @@ describe("scripts/run-publish-gates.mjs（偽の5段で、前段の成否に関�
     ];
     const result = runGate(stages);
     expect(result.status).not.toBe(0);
-    // 3〜5本目も実際に起動され、成功したと出ていること
-    // （直す前の bash -e なら、2本目が落ちた時点でステップ全体が止まり、
-    //   3〜5本目が動いたかどうかは出力からは一切分からなかった）。
     expect(result.stdout).toContain("gate-3");
     expect(result.stdout).toContain("gate-4");
     expect(result.stdout).toContain("gate-5");
     expect(result.stdout).not.toContain("未起動");
-    // 落ちた門の名前が名指しで出ること。
     expect(result.stdout).toContain("失敗した段");
     expect(result.stdout).toContain("gate-2");
   });

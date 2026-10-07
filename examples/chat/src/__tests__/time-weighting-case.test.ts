@@ -5,11 +5,6 @@ import { TIME_WEIGHTING_CASE_SET_DEV } from "../time-weighting-case-set.dev.js";
 import { TIME_WEIGHTING_CASE_SET_EVAL } from "../time-weighting-case-set.eval.js";
 import { TIME_WEIGHTING_CASE_SET_EVAL_UNDATED } from "../time-weighting-case-set.eval-undated.js";
 
-/**
- * `time-weighting-case.ts` の検査関数と、ケース集合そのものの機械的な形の検査。
- * **DB 不要・鍵不要**——純関数のみを対象にする。
- */
-
 const ORIGINAL_KINDS: TimeWeightingCaseKind[] = [
   "reinforced-fact-vs-fresh-weak",
   "old-event-not-outrank-new",

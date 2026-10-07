@@ -1,19 +1,14 @@
 /**
- * ADR 0504: store が投げる例外（drizzle の `DrizzleQueryError`。`message` が
- * `Failed query: <SQL>\nparams: <値>`）から、`params:` より後ろ（SQL に渡した値。`searchMany` では最大
- * 16384 件のベクトル）を落とす。`Runtime` を通れば `omitParamsFromError`（core、ADR 0423）が落とすが、
- * store を直接呼ぶ呼び出しでは落ちない。
+ * ADR 0504: store が投げる例外（drizzle の `DrizzleQueryError`。`message` は `Failed query: <SQL>\nparams: <値>`）から、
+ * `params:` より後ろ（SQL に渡した値。`searchMany` では最大 16384 件のベクトル）を落とす。
+ * `Runtime` を通れば core の `omitParamsFromError` が落とすが、store を直接呼ぶ場合は落ちない。
  *
- * **core の `omitParamsFromError` / `omitDrizzleParams`（`failure-description.ts`）と同じ作法・同じ印**
- * （`params: (omitted by mnemora, N chars)`）。core のそれは `index.ts` から出ていない内部関数で、
- * postgres パッケージからは import できない。公開の export を足さないため、同じ形の小さな複製をここに置く
- * （複製は負債。ADR 0504）。印が同じなので、あとから `Runtime` が掛けても、すでに落とした印はそのまま残る。
+ * core の `omitParamsFromError` と同じ印（`params: (omitted by mnemora, N chars)`）。
+ * core のそれは `index.ts` から出ていない内部関数で import できず、公開 export を足さないために小さな複製をここに置く。
  *
- * - 例外そのものを返す（新しい例外を作らない。`code`・`name`・`cause` はそのまま）。落とすのは `message` の
- *   `params:` より後ろと、その文字列を含む `stack` の行だけ。SQL の文は残す。`cause` の連鎖にも掛ける。
- * - 目印が無い例外は何も変えない。書き換えられない（凍結された）例外はそのまま返す。
- * - ⚠ `DrizzleQueryError` の `params` プロパティ（値の配列）と、`cause` の pg エラーの `message`・`detail` は
- *   変えない（core と同じ。ADR 0423「塞がらない経路」）。
+ * - 例外そのものを返す。落とすのは `message` の `params:` より後ろと、それを含む `stack` の行だけ（`cause` の連鎖にも掛ける）。
+ * - 目印が無い例外、書き換えられない（凍結された）例外は、そのまま返す。
+ * - `DrizzleQueryError` の `params` プロパティと、`cause` の pg エラーの `message`・`detail` は変えない（ADR 0423）。
  */
 const PARAMS_MARKER = "\nparams: ";
 const OMITTED_MARK = /^\(omitted by mnemora, \d+ chars\)$/;

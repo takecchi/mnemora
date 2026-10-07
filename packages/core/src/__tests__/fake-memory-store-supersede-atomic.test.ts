@@ -5,17 +5,6 @@ import type { NewMemoryEvent } from "../event.js";
 import type { NewMemory } from "../memory.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * `FakeMemoryStore.supersedeWithNewMemories` が**原子的**であることの歯（ADR 0564、Issue #768）。
- *
- * `news` の2件目が書けない（`sourceObservationId` が実在しない）とき、以前の Fake は1件目を作ったまま投げた
- * （記憶・冪等キーの索引・ラベル・outbox の行が残る）。`InMemoryMemoryStore`・`PostgresMemoryStore` は何も残さない
- * （testkit の conformance「news[1] の sourceObservationId が実在しないと投げ…何も残さない」）。
- *
- * **testkit の conformance の対象ではない**（Issue #768 コメント2: Fake は conformance に通さない）。
- * 直したものはここで押さえる。
- */
-
 const ctx: Ctx = { tenantId: "tenant-1" };
 let counter = 0;
 

@@ -5,43 +5,11 @@ import * as prettier from "prettier";
 import { describe, expect, it } from "vitest";
 import { execFileSyncWithDeadline } from "./spawn-with-deadline.mjs";
 
-/**
- * ⭐ **この歯が測っているもの（消す前に読むこと）**
- *
- * **`.github/workflows/` の workflow ファイルが、YAML として構文上読めること、
- * そして最上位に `jobs:` を持つこと**（Issue #628 の件2）。
- *
- * 件2 で実際に起きたこと: `ci.yml` に段を足す際、段名を `'omitted' の …` と書いた
- * ⟹ YAML が先頭のシングルクォートを引用符として読んで壊れ、**workflow がそもそも
- * 起動しなかった**（`jobs` が0件のまま `failure`。PR #625 / ADR 0280）。そのとき、
- * 手元のテストはすべて緑だった——既存の `ci-yml-*-wiring` の歯は、どれも docstring で
- * 「YAML は構造として解析していない（文字列で見ている）」と断っている。⟹ **YAML が
- * 構文として読めるかを見る門が、repo に1つも無かった。**`pnpm run format:check` も
- * YAML を対象にしていない（`*.{ts,tsx,mts,cts,js,mjs,cjs,json}` だけを見る）。
- *
- * ## 読み方
- *
- * - **対象は `git ls-files` から導出する**（ベタ書きしない——workflow が増えたとき、
- *   この歯が黙って陳腐化しないため）。
- * - **YAML パーサの依存は足さない**（依存の追加はオーナー専権。`docs/autonomy.md`）。
- *   既存の開発用の依存である Prettier の YAML パーサで読む。構文が壊れていれば
- *   `prettier.format` が例外を投げる。
- * - **`jobs:` は最上位の行として在るかだけを見る**（件2 の「`jobs` が0件」の形）。
- *   各ジョブの中身は見ない——それは既存の `ci-yml-*-wiring` の歯の持ち場である。
- * - ⛔ **workflow ファイルは読むだけで、1バイトも書き換えない**（`publish.yml` を含む）。
- *
- * ## この歯が測っていないこと
- *
- * - **GitHub Actions としての妥当性**（`on:` の書式、`runs-on:` の値、式 `${{ }}` の
- *   中身など）は見ない。構文として読める YAML でも、Actions が受け付けない形はある。
- * - **Prettier の YAML パーサが、GitHub の YAML パーサと同じ判定をすること**は
- *   確かめていない。件2 の形（引用符で始まって、閉じた後ろに文字が続くスカラー）で
- *   両者が同じく壊れることは、下の陽性の歯が固定している。
- */
+// YAML パーサの依存は足さず、開発用依存の Prettier の YAML パーサで読む（壊れていれば prettier.format が例外を投げる）。
+// 対象は git ls-files から導出する（ベタ書きすると、workflow が増えたとき黙って陳腐化する）。
 
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
 
-/** `git ls-files` から、`.github/workflows/` 直下の YAML ファイルを導出する。 */
 function listWorkflowFiles() {
   const raw = execFileSyncWithDeadline(
     "git",
@@ -55,8 +23,6 @@ function listWorkflowFiles() {
 }
 
 /**
- * workflow の本文を当てて、壊れていれば理由を返す（壊れていなければ `null`）。
- *
  * @param {string} text
  * @returns {Promise<string | null>}
  */

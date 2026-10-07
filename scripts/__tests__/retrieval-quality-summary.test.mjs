@@ -5,16 +5,6 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { spawnSyncWithDeadline } from "./spawn-with-deadline.mjs";
 
-/**
- * `scripts/retrieval-quality-summary.mjs` の歯。**本物のスクリプトを子プロセスとして
- * 実際に起動する**(`scripts/__tests__/publish-yml-dry-run-wiring.test.mjs` /
- * `scripts/__tests__/decide-publish-dry-run.test.mjs` と同じ判断)——
- * `retrieval-quality-summary-lib.test.mjs` は純関数だけを見ており、
- * 「CLI としての配線」(引数の読み方・ファイル I/O・exit code)はここでしか測れない。
- *
- * DB は要求しない——このスクリプトは JSON ファイル2つを読むだけである。
- */
-
 const script = fileURLToPath(new URL("../retrieval-quality-summary.mjs", import.meta.url));
 
 function makeArm(overrides = {}) {

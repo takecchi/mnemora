@@ -2,13 +2,6 @@ import { describe, expect, it } from "vitest";
 import { compareGroupNoiseOutcomes } from "../local-noise-grid-comparison.js";
 import type { CapturedProbeCandidates } from "../synthetic-score-noise.js";
 
-/**
- * Issue #109（06:58Z のコメント4番）が残した仮説——「ADR 0322 の sparse/dense 群の
- * 結果が σ・seed の全組で完全に一致した」——を数値として突き合わせる
- * `compareGroupNoiseOutcomes` に対する、DB 非依存の純関数の歯。実際の `local` 埋め込みでの
- * 全組突き合わせは `src/scripts/local-noise-arm-candidate-diff.ts` を手で実行して行う。
- */
-
 function probe(
   probeId: string,
   candidates: { externalId: string | null; score: number }[],
@@ -60,8 +53,6 @@ describe("compareGroupNoiseOutcomes", () => {
       probe("p1", [
         { externalId: "gold-p1", score: 0.9 },
         { externalId: "distractor-p1", score: 0.5 },
-        // dense 固有・常に最下位のスコア。低い σ ではこの候補が gold/distractor を
-        // 追い越すことはない。
         { externalId: "dense-only", score: 0.05 },
       ]),
     ];
@@ -88,14 +79,10 @@ describe("compareGroupNoiseOutcomes", () => {
       probe("p1", [
         { externalId: "gold-p1", score: 0.9 },
         { externalId: "distractor-p1", score: 0.1 },
-        // gold に極めて近いスコア。大きな σ ならノイズだけで逆転しうる。
         { externalId: "dense-only", score: 0.89 },
       ]),
     ];
 
-    // σ=0.9 のような極端な値なら、位置0(gold)と位置2(dense-only)の間でノイズにより
-    // 逆転が起きるはず。sparse 側にはそもそも位置2の候補が無いので、この逆転は
-    // dense 側だけで起き、mismatch が最低1件は出る。
     const summary = compareGroupNoiseOutcomes("g", sparseProbes, denseProbes, [0.9], SEEDS);
 
     expect(summary.mismatches.length).toBeGreaterThan(0);

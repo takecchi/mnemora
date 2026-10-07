@@ -3,27 +3,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { computeAssociationEnabled } from "../association-arm.js";
 
-/**
- * `computeAssociationEnabled`（Issue #291 フォローアップ、ADR 0385 §7 が見つけた表示
- * バグの修正、2026-09-30）の歯。DB もネットワークも要らない（純関数）。
- *
- * ⭐ **この歯が固定しているもの**: `off` arm は `recall()` へ `association: null` を
- * **明示的に**渡す（`association-arm.ts` の `runAssociationArm` 本体のコメント参照、
- * ADR 0337 後の規律）。`associationEnabled` はこの `null` も `undefined` も
- * 「連想枠を渡していない＝off」として扱わなければならない——もとの実装
- * （`association !== undefined`）は `null !== undefined` が `true` になるため、
- * `off` arm でも `associationEnabled: true` になっていた。
- *
- * ⚠ **`runAssociationArm` 本体（`options.runtime`/`options.memoryStore` を要求する、
- * 実質 Postgres が要る重い経路）は、この歯では実行しない**（`docs/autonomy.md` の
- * `initdb` 手順が要り、この判定だけを固定するには重すぎる）。代わりに:
- *
- * 1. `computeAssociationEnabled` を直接呼んで判定そのものを固定する（この describe）。
- * 2. `runAssociationArm` の `return` 文が実際にこの関数を呼んでいることを、
- *    ソースを直接読んで固定する（下の describe）——呼び出し側が別のロジック
- *    （例: 元の `association !== undefined` へ差し戻す）に差し替わっても検出できるように、
- *    関数単体のテストとは別に置く。
- */
+// runAssociationArm 本体は Postgres が要って重いので、ここでは実行しない。代わりに、return 文がこの関数を呼ぶことをソースの文字列で固定する。
 describe("computeAssociationEnabled", () => {
   it("null(off arm が明示的に渡す値)なら false", () => {
     expect(computeAssociationEnabled(null)).toBe(false);

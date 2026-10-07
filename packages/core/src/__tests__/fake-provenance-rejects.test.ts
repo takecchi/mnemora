@@ -5,15 +5,7 @@ import type { Memory, NewMemory } from "../memory.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
 /**
- * core の Fake（`FakeMemoryStore`）が `provenance` をどう扱うかの歯（8回目の TSDoc の棚卸し。`MemoryStore.createMemory` の TSDoc）。
- * testkit の fixture と `@mnemora/postgres` が拒む3つの形を、Fake も拒む:
- * - `provenance.kind` が列挙に無い → 投げる
- * - `provenance` が `null` → 投げる（`TypeError`）
- * - `stated`・`inferred` なのに列の `sourceObservationId` が `null` → 投げる（Postgres の CHECK と同じ）
- *
- * ADR 0630: それ以外の中身の欠け（欄が無い・値域の外。`stated` で `at` が無い、など）は、Postgres・fixture と同じく、
- * 読み戻すと `MemorySchema` を通らない値として入口で拒む（`fake-new-memory-rejects.test.ts` が全形を縛る。ここは1つだけ）。
- * Postgres と fixture の側の歯は `packages/postgres/src/__tests__/store-input-current-behaviour.postgres.test.ts`。
+ * 中身の欠けの全形は `fake-new-memory-rejects.test.ts` が縛るので、ここには1つだけ置く。
  */
 
 const ctx: Ctx = { tenantId: "fake-provenance" };

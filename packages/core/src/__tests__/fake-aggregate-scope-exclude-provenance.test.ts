@@ -4,15 +4,7 @@ import type { NewMemory } from "../memory.js";
 import type { Provenance } from "../provenance.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * `FakeMemoryStore.aggregateScope` の `options.excludeProvenanceKinds`（ADR 0390）が返す
- * 任意の欄 `excludedProvenanceIndexedCount`（「除外される kind で、索引済み
- * （embeddingStatus='ready'）の行の数」）の歯。`InMemoryMemoryStore` 側は
- * `packages/testkit/src/__tests__/in-memory-fixtures-aggregate-scope-exclude-provenance.test.ts`。
- * **`memory-store-conformance.ts` には足さない**（Issue #809 の方針。外部 adapter へ要求を増やさない。
- * `fake-aggregate-scope-include-subjectless.test.ts` と同じ理由・同じ形）。
- * `totalInScope`・`groups` は除外を渡しても変わらない（意味を動かさない）ことも固定する。
- */
+/** `memory-store-conformance.ts` には足さない: 外部 adapter へ要求を増やさないため。 */
 
 const ctx: Ctx = { tenantId: "tenant-1" };
 let counter = 0;
@@ -49,7 +41,6 @@ async function seed() {
   await memoryStore.createMemory(ctx, newMemory());
   await memoryStore.createMemory(ctx, newMemory({ provenance: consolidated }));
   await memoryStore.createMemory(ctx, newMemory({ provenance: consolidated }));
-  // 未索引（pending）の除外 kind の行は「索引済み」に数えない。
   await memoryStore.createMemory(
     ctx,
     newMemory({ provenance: consolidated, embeddingStatus: "pending" }),
@@ -68,7 +59,6 @@ describe("FakeMemoryStore.aggregateScope: options.excludeProvenanceKinds（ADR 0
       },
     );
     expect(aggregate.excludedProvenanceIndexedCount).toBe(2);
-    // totalInScope の意味は変えない（除外行も数える）。
     expect(aggregate.totalInScope).toBe(4);
   });
 

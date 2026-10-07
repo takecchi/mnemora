@@ -1,20 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { databaseErrorHint } from "../db-error-hint.js";
 
-/**
- * examples/chat の CLI が DB のエラーで止まったとき、元のエラーに加えて README の
- * 「DB を用意する」節を指す一行を出す（素の clone から README どおりに動かして見つけた、
- * 利用者が踏む形）。元のエラーは消さない——ここで返すのは「次の一手」の一行だけである。
- *
- * エラーの形は手元の PostgreSQL 17 + pgvector で実際に起こして確かめた:
- * - DB が起動していない: `connect ECONNREFUSED 127.0.0.1:<port>`（`code: 'ECONNREFUSED'`）
- * - ホストが引けない: `getaddrinfo ENOTFOUND <host>`（`code: 'ENOTFOUND'`）
- * - データベースが無い: `database "x" does not exist`（`code: '3D000'`）
- * - ロールが無い: `role "x" does not exist`（`code: '28000'`）
- * - 拡張を作る権限が無い: `migration 0001_init.sql failed: permission denied to create extension "vector"`
- *   （`runMigrations` が包み、`cause` に `code: '42501'` の pg のエラーが入る）
- */
-
 function withCode(message: string, code: string): Error {
   return Object.assign(new Error(message), { code });
 }

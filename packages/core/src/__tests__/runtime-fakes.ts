@@ -1,5 +1,6 @@
 import type { ClaimKey } from "../claim-key.js";
 import type { Ctx } from "../ctx.js";
+import { sliceAtGraphemeBoundary } from "../text-truncation.js";
 import type { EmbeddingProvider } from "../interfaces/embedding-provider.js";
 import type { EventStore } from "../interfaces/event-store.js";
 import type { Relation, RelationKind, RelationStore } from "../interfaces/relation-store.js";
@@ -4296,14 +4297,14 @@ export const LEXICAL_QUERY_MAX_WORD_CHARS = 64;
 export const LEXICAL_QUERY_MAX_TOTAL_CHARS = 600;
 
 /**
- * `query` が {@link LEXICAL_QUERY_MAX_TOTAL_CHARS} を超える場合、先頭からその文字数に
- * 切り詰める。超えなければ `query` をそのまま返す。他のどの上限（語数・1語の文字数）
+ * `query` が {@link LEXICAL_QUERY_MAX_TOTAL_CHARS} を超える場合、先頭からその文字数以下に、
+ * 書記素を割らずに切り詰める。超えなければ `query` をそのまま返す。他のどの上限（語数・1語の文字数）
  * よりも先に適用する（`packages/postgres` の `capLexicalQueryTotalChars` と同じ
  * 位置づけ）。
  */
 function capFakeLexicalQueryTotalChars(query: string): string {
   return query.length > LEXICAL_QUERY_MAX_TOTAL_CHARS
-    ? query.slice(0, LEXICAL_QUERY_MAX_TOTAL_CHARS)
+    ? sliceAtGraphemeBoundary(query, LEXICAL_QUERY_MAX_TOTAL_CHARS)
     : query;
 }
 

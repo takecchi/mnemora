@@ -9,23 +9,7 @@ import {
 } from "../cross-runner-embedding-fingerprint-lib.mjs";
 
 /**
- * ⭐ **この歯が測っているもの（消す前に読むこと）**
- *
- * `.github/workflows/embedding-cross-runner-reproducibility.yml` の matrix・artifact 名が、
- * `scripts/cross-runner-embedding-fingerprint-lib.mjs` の宣言（`CROSS_RUNNER_RUNNERS` /
- * `CROSS_RUNNER_NUM_THREADS` / `CROSS_RUNNER_REPS` / `crossRunnerArtifactName`）と
- * 実際に一致していること。
- *
- * ⚠ **YAML は構造として解析していない（文字列で見ている）。**
- * `ci-yml-embedding-output-fingerprint-wiring.test.mjs` と同じ判断——依存追加は
- * オーナー専権であり（`docs/autonomy.md`）、YAML パーサを追加で入れない。壊れたときは
- * 「配線が変わった」か「書き方が変わった」かを見て、配線が変わっていないなら
- * 取り出し方のほうを直すこと（歯を消さないこと）。
- *
- * このずれを検出しないと何が起きるか: matrix の `runner:` を変えたのに
- * `crossRunnerArtifactName` の呼び先（`compare-cross-runner-embedding-fingerprints.mjs`
- * の `allExpectedCrossRunnerLegs()`）を直し忘れると、比較段が実際には存在する artifact を
- * 「無い」として扱う——測っているのに「測れていない」と報告する、という壊れ方になる。
+ * YAML は構造として解析せず文字列で見る（依存追加はオーナー専権）。
  */
 
 const workflowPath = fileURLToPath(

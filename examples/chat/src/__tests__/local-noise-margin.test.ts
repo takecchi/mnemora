@@ -7,11 +7,6 @@ import {
 import { noiseEpsilon } from "../synthetic-score-noise.js";
 import type { CapturedProbeCandidates, ScoredCandidate } from "../synthetic-score-noise.js";
 
-/**
- * `local-noise-margin.ts`(Issue #109 残件「A」候補案1を local 反実仮想データにも
- * 当てるための margin 計算)の歯。DB もネットワークも要らない。
- */
-
 function candidates(pairs: [string, number][]): ScoredCandidate[] {
   return pairs.map(([externalId, score]) => ({ externalId, score }));
 }

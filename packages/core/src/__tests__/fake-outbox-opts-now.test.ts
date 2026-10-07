@@ -5,21 +5,6 @@ import type { NewMemory } from "../memory.js";
 import type { OutboxJobRecord } from "../outbox.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * ADR 0555: outbox 行の時刻について、`FakeMemoryStore` を `MemoryStore` の約束（`InMemoryMemoryStore`・
- * `PostgresMemoryStore` の振る舞い）に揃える歯。
- *
- * 約束は4つの口にある:
- *  - `createObservationWithOutbox` の `opts.now`（と `opts.claimedBy` のときの `claimedAt`）
- *  - `createMemoryWithOutbox` の `opts.now`
- *  - `supersedeWithNewMemories` の `opts.now`
- *  - `requeueEmbedJobs` の `writeOpts.now`
- * どれも、積む outbox 行の `availableAt`・`createdAt` にその値を使い（claim 済みで積むなら `claimedAt` も）、
- * 省略時は壁時計を**1回だけ**読んで、その呼び出しで積む全部の行に使う。
- *
- * `packages/testkit` の適合テストは Fake を通らない（Issue #768）ので、同じ期待をここで当てる。
- */
-
 const ctx: Ctx = { tenantId: "tenant-1" };
 const PAST = new Date("2020-01-01T00:00:00.000Z");
 const LEASE_MS = 60_000;
@@ -181,8 +166,8 @@ describe.each(ports)("FakeMemoryStore.$name: outbox 行の時刻（ADR 0555）",
   });
 
   it("省略すると、availableAt・createdAt は壁時計そのもの（固定した壁時計と一致する。±1ms もずらさない）", async () => {
-    // 呼ぶ前後の Date.now() で挟む形だと、既定が Date.now() ± 1ms の誤りが同じミリ秒の中に収まって見逃される
-    // （実測: 40回中 32〜37回しか赤くならなかった）。壁時計を固定して、値そのものを比べる。
+    // 呼ぶ前後の Date.now() で挟む形だと、既定が Date.now() ± 1ms の誤りが同じミリ秒の中に収まって見逃される。
+    // 壁時計を固定して、値そのものを比べる。
     const WALL = new Date("2026-06-01T12:34:56.789Z");
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(WALL);
@@ -290,9 +275,6 @@ describe("FakeMemoryStore: opts を受けた検査（ADR 0434・0493・0555）",
   });
 });
 
-// testkit の適合テスト（`memory-store-conformance.ts` の「createObservationWithOutbox / createMemoryWithOutbox は
-// opts.now を渡すと、outbox 行の availableAt・createdAt にその値を使う」）は、*戻り値の* `jobs` を見る。
-// Fake は適合テストを通らない（Issue #768）ので、同じ形を戻り値で当てる（上の歯は `listJobs` を見る）。
 describe("FakeMemoryStore: 戻り値の jobs も opts.now を使う（適合テストの opts.now のケースに相当。ADR 0555）", () => {
   it("createObservationWithOutbox の戻り値の jobs", async () => {
     const { memoryStore } = createFakeRuntimeStores();

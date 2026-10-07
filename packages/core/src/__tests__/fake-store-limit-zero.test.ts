@@ -5,15 +5,6 @@ import type { NewMemory } from "../memory.js";
 import { defaultDecayStrategy } from "../strategies/decay.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * Fake の `limit` の検査は、負数・`NaN`・`Infinity`・非整数・bigint に収まらない値だけを断る。
- * `0` は断らず、「0件だけ返す」（Postgres の `LIMIT 0` と同じ）形で通す。
- * 断る側の歯は `fake-store-postgres-parity.test.ts` にある。ここは、断りすぎない側
- * （`limit: 0` を断る・`limit: 0` を「上限なし」と読む）を縛る。
- * 対象は、`limit` を検査する6つの口（claimBatch・VectorStore.search・LexicalStore.search・
- * EventStore.list・purgeExpiredEvents・aggregateScope の digestBand）。
- */
-
 const TENANT = "fake-limit-zero-tenant";
 const ctx: Ctx = { tenantId: TENANT };
 const SPACE: EmbeddingSpaceId = { provider: "test", model: "fixture-model", dimensions: 3 };

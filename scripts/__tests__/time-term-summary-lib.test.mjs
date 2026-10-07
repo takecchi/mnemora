@@ -6,16 +6,6 @@ import {
   validateMeasured,
 } from "../time-term-summary-lib.mjs";
 
-/**
- * Issue #217: `time-term-summary-lib.mjs`(純関数の側)の歯。DB を要求しない。
- *
- * ⭐ **最重要の検査**: `outcome`/`totalInScope`/`omittedKinds` という**離散値**だけを
- * 比べ、`freshnessRatio`/`decayRatio`/`totalRatio` のような**連続値**は基準値との
- * 比較に使わないこと(壁時計時間にわずかに依存し、厳密等価では常に「相違あり」になる
- * ——ADR 0088 §2 が `retrieval-quality` の `decay`/`freshness` について実測したのと
- * 同じ理由)。
- */
-
 function makeProbe(overrides = {}) {
   return {
     probeId: "half-life",
@@ -55,8 +45,6 @@ function makeMeasured(overrides = {}) {
   };
 }
 
-/** 実測から基準値ファイルの形(`probes` 配列)を作る。連続値欄はそのまま持たせても害は無い
- *  (`DIFF_FIELDS` に無いので比較には使われない)——実測の形と基準値の形を近く保つため。 */
 function baselineFrom(measured) {
   return { probes: measured.probes.map((p) => structuredClone(p)) };
 }

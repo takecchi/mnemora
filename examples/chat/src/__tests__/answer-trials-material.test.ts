@@ -13,17 +13,11 @@ import {
   stableStringify,
 } from "../answer-trials-material.js";
 
-/**
- * `answer-trials-material.ts` の単体試験。**DB 不要・鍵不要**——実カセット
- * （`cassettes/answer.json`）を読むだけの純粋な parser を検査する（Issue #705）。
- */
-
 const ANSWER_SYSTEM_PROMPT_SOURCE_FILE = new URL("../answer-bench.ts", import.meta.url);
 
 describe("ANSWER_SYSTEM_PROMPT の複製が answer-bench.ts の原文とずれていないこと", () => {
   it("answer-bench.ts のソーステキストに、この module が複製した system 文がそのまま現れる", () => {
-    // ⚠ `answer-bench.ts` を import しない(DB を import しない規律のため)。
-    // ソーステキストを直接読んで文字列一致だけを見る——import しない自己整合性の検査。
+    // answer-bench.ts は import しない（DB を import しない規律）。ソーステキストを直接読む。
     const source = readFileSync(ANSWER_SYSTEM_PROMPT_SOURCE_FILE, "utf8");
     expect(source).toContain(
       "以下の会話ログだけを根拠に、簡潔に答えてください。根拠が無ければ『分かりません』と答えてください。",
@@ -123,10 +117,6 @@ describe("parseMnemoraPromptBody", () => {
     expect(() => parseMnemoraPromptBody(body)).toThrow();
   });
 
-  /**
-   * Issue #691 続き: `order-legend` 描画の凡例行を先頭で剥がしてから記憶行を
-   * 解析する（同じ穴を `isMnemoraShapedContent` 側でも塞いだ、この PR の本題）。
-   */
   it("先頭が ORDER_LEGEND_LINE の本体は、その行を記憶行として解析せず hasOrderLegend=true を返す", () => {
     const body =
       "(記録順: 数が大きいほど後に記録された。行は記録の古い順に並べてある)\n" +
@@ -209,9 +199,6 @@ describe("loadAnswerTrialsMaterial(実カセット)", () => {
   });
 
   it("pref-tea-over-coffee ケースは、カセットに2件のmnemora形式エントリがあっても曖昧にならない", () => {
-    // カセットには pref-tea-over-coffee の質問に対して mnemora 形式のエントリが2件ある
-    // (正規の1件 + answer-retention-mutation.ts の陽性対照1件)。既知の変異マーカーで
-    // 後者を除外できるので、ここは例外にならず1件に定まるはずである。
     const m = material.cases.find((c) => c.caseId === "pref-tea-over-coffee");
     expect(m).toBeDefined();
     expect(m?.rawContent).not.toContain("要約失敗");
@@ -224,10 +211,6 @@ describe("loadAnswerTrialsMaterial(実カセット)", () => {
   });
 
   it("digest の中身が実カセットの実測値と一致する(材料を作り直さず、カセットから読んでいることの陽性対照)", () => {
-    // ⭐ 変異試験(a)向けの陽性対照。「材料取得で抽出・recall をやり直す実装」（＝カセットを
-    // 読まず、別の記憶集合を合成する実装）に置き換わると、この具体的な文字列は再現できない
-    // ——digest はカセットに記録された実 API の抽出結果そのものであり、でっちあげでは
-    // 一致しない。
     const pref = material.cases.find((c) => c.caseId === "pref-tea-over-coffee");
     expect(pref?.lines.map((l) => l.digest)).toEqual([
       "打ち合わせのとき、飲み物はコーヒーより紅茶のほうが好き",
@@ -241,8 +224,6 @@ describe("loadAnswerTrialsMaterial(実カセット)", () => {
       "旅行の計画を立てている",
       "最近読んだ本がとても面白かったです。",
     ]);
-    // ADR 0295 追記2 が見つけた通り、この訂正後の digest 自体が reject 語「金曜」を
-    // 含む——digest-only 描画でもこのケースが割れうる構造がここに現れている。
     expect(schedule?.lines[1]?.digest).toContain("金曜");
     expect(schedule?.lines[1]?.digest).toContain("水曜");
   });
@@ -313,18 +294,7 @@ describe("loadAnswerTrialsMaterial(異常系。一時ファイルで作った合
     expect(() => loadAnswerTrialsMaterial("/no/such/path/cassette.json")).toThrow();
   });
 
-  /**
-   * Issue #691 続き: `order-legend` 描画（ADR 0309）の凡例行
-   * （`(記録順: 数が大きいほど後に記録された。行は記録の古い順に並べてある)`）で
-   * 始まる content を、`findMnemoraEntryContent` が「記憶経路のプロンプトではない」
-   * として黙って弾いていた穴（`isMnemoraShapedContent` の3条件目を足すまで、この
-   * PR の作業中に実際に踏んだ）。この歯は、その3条件目が無いと赤くなる。
-   */
   it("凡例行（ORDER_LEGEND_LINE）で始まる content も記憶経路のプロンプトとして見つかる", () => {
-    // ⭐ loadAnswerTrialsMaterial は ANSWER_CASE_SET_DEV の全件を引き当てようとする
-    // （`buildCaseMaterial` が dev 6件それぞれに対して呼ばれる）——1件だけ用意すると
-    // 他の5件が「見つからない」で例外になる（このテストが検査したいのはそこではない
-    // ので、6件すべてに凡例行つきの content を用意する）。
     const entries: Record<string, unknown> = {};
     for (const [i, c] of ANSWER_CASE_SET_DEV.entries()) {
       const content =

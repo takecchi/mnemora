@@ -5,18 +5,6 @@ import type { NewMemory } from "../memory.js";
 import { defaultDecayStrategy } from "../strategies/decay.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * `FakeVectorStore.search` の tie-break（Issue #339 / ADR 0170 の追随。
- * `packages/testkit/src/__tests__/in-memory-vector-store-tiebreak.test.ts` と対になる、
- * `packages/core` 専用の `Fake*` 側——`InMemoryVectorStore` だけを直しても
- * `FakeVectorStore` 側の食い違いはどこからも測れないままになる、という
- * ADR 0049 が `reinforce` について踏んだのと同じ形（適合スイートは `InMemory*` だけを
- * 対象にしており、`packages/core` 専用の `Fake*` には届かない）。
- *
- * `PostgresVectorStore.search`（ADR 0170）は 距離 → `recorded_at` DESC → `memory_id` の
- * 3段で tie-break する。`VectorStore.search` の doc（`../interfaces/vector-store.ts`）は
- * 「距離が完全一致する行の順序も adapter の責務である」と明記している。
- */
 const TENANT = "vector-search-tiebreak-tenant";
 const SPACE: EmbeddingSpaceId = { provider: "test", model: "fixture-model", dimensions: 3 };
 const QUERY_VECTOR: number[] = [1, 0, 0];

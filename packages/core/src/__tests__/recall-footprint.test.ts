@@ -386,6 +386,34 @@ describe("calibrateRecallFootprint — 3階建て", () => {
     expect(profile.charsPerDigest).toBe(fallback.charsPerDigest);
   });
 
+  it("(b') memoryCount が1種類で、傾きがちょうど0（借りた切片が標本の総量と等しい）でも、0を採らず charsPerDigest も借りて名乗る", () => {
+    const fallback = BUILTIN_RECALL_FOOTPRINT_PROFILE;
+    const profile = calibrateRecallFootprint(
+      [{ totalChars: fallback.fixedIndexChars, memoryCount: 10, bandEntryCount: 0 }],
+      fallback,
+    );
+    if (profile.origin.kind !== "calibrated") throw new Error("unreachable");
+    expect(profile.origin.borrowedFromDefault).toEqual(["fixedIndexChars", "charsPerDigest"]);
+    expect(profile.charsPerDigest).toBe(fallback.charsPerDigest);
+  });
+
+  it("使えない標本（帯のある標本）が混ざっていても、係数・sampleCount・observedMemoryCount は使える標本だけで決まる", () => {
+    const samples: RecallFootprintSample[] = [
+      { totalChars: 300, memoryCount: 5, bandEntryCount: 0 },
+      { totalChars: 9000, memoryCount: 40, bandEntryCount: 3 },
+      { totalChars: 500, memoryCount: 10, bandEntryCount: 0 },
+      { totalChars: 1, memoryCount: 2, bandEntryCount: 1 },
+      { totalChars: 700, memoryCount: 15, bandEntryCount: 0 },
+    ];
+    const profile = calibrateRecallFootprint(samples);
+    if (profile.origin.kind !== "calibrated") throw new Error("unreachable");
+    expect(profile.origin.borrowedFromDefault).toEqual([]);
+    expect(profile.origin.sampleCount).toBe(3);
+    expect(profile.origin.observedMemoryCount).toEqual({ min: 5, max: 15 });
+    expect(profile.charsPerDigest).toBeCloseTo(40, 9);
+    expect(profile.fixedIndexChars).toBeCloseTo(100, 9);
+  });
+
   // 最小二乗の枝（memoryCount が2種類以上）でも、1種類の枝と同じ規律を守る——
   // digest の平均長が0以下であることはありえないので、その傾きを係数として採らず、
   // 既定値から借りて borrowedFromDefault に名前で出す（借りていない顔で負の係数を返さない）。
@@ -592,6 +620,33 @@ describe("calibrateRecallFootprint — 構造項を差し引く（Issue #340 フ
 
   it("totalInScope を渡せば、2桁/3桁標本が混ざっても真の係数へ戻る（構造項を差し引いた最小二乗）", () => {
     const samples = SCOPE_COUNTS.map((n) => syntheticSample(n, true));
+    const profile = calibrateRecallFootprint(samples);
+    if (profile.origin.kind !== "calibrated") throw new Error("unreachable");
+    expect(profile.origin.borrowedFromDefault).toEqual([]);
+    expect(profile.charsPerDigest).toBeCloseTo(TRUE_CHARS_PER_DIGEST, 8);
+    expect(profile.fixedIndexChars).toBeCloseTo(TRUE_FIXED_INDEX_CHARS, 6);
+  });
+
+  it("帯が空でも帯の資格件数（totalInScope − memoryCount）が在る標本は、その桁上がりと limitedBy の分も差し引いて真の係数へ戻る", () => {
+    const scopeAndReturned: Array<[number, number]> = [
+      [12, 3],
+      [1500, 6],
+      [120, 9],
+    ];
+    const samples = scopeAndReturned.map(([totalInScope, memoryCount]): RecallFootprintSample => {
+      const eligible = totalInScope - memoryCount;
+      const structuralCarry =
+        2 * extraDigitsBeyondOneForTest(totalInScope) +
+        extraDigitsBeyondOneForTest(eligible) +
+        (eligible > 0 ? 26 : 0);
+      return {
+        totalChars: TRUE_FIXED_INDEX_CHARS + TRUE_CHARS_PER_DIGEST * memoryCount + structuralCarry,
+        memoryCount,
+        bandEntryCount: 0,
+        totalInScope,
+      };
+    });
+
     const profile = calibrateRecallFootprint(samples);
     if (profile.origin.kind !== "calibrated") throw new Error("unreachable");
     expect(profile.origin.borrowedFromDefault).toEqual([]);

@@ -12,13 +12,6 @@ import {
   splitBySignal,
 } from "../release-candidates-lib.mjs";
 
-/**
- * `scripts/release-candidates-lib.mjs`（リリース候補を分類する純関数の側）の歯。
- *
- * ⚠ このファイルは `git`/`gh` を1度も呼ばない。commit は合成した入力で表現する
- * ——`ci-green-check-lib.test.mjs` が check-runs を合成するのと同じ役割分担。
- */
-
 describe("parseCommitSubject", () => {
   it("`feat(core)!: x (#1)` を type=feat, scope=core, bang=true, pr=1 にパースする", () => {
     const result = parseCommitSubject("feat(core)!: x (#1)");
@@ -42,17 +35,13 @@ describe("parseCommitSubject", () => {
   });
 
   it("パースできない subject を例外にせず、type: null として捨てずに残す", () => {
-    // この repo の実履歴に実在する形（conventional の prefix を持たない）:
-    // `PRタイトル/本文が…（Issue #405の後始末・本文側 / ADR 0211） (#466)`
     const subject =
       "PRタイトル/本文が付け替え後の古いADR番号を名指ししていないかをCIで検査する（Issue #405の後始末・本文側 / ADR 0211） (#466)";
     const result = parseCommitSubject(subject);
     expect(result.type).toBeNull();
     expect(result.scope).toBeNull();
     expect(result.bang).toBe(false);
-    // ⭐ 捨てずに残す: description に元の subject が丸ごと入っている
     expect(result.description).toBe(subject);
-    // PR 番号は conventional の形が崩れていても独立に読み取れる
     expect(result.prNumber).toBe(466);
   });
 
@@ -176,24 +165,6 @@ describe("classifyCommit / classifyCommits", () => {
 });
 
 describe("母集合の保持 — 信号ゼロの commit を落とさない", () => {
-  /**
-   * ⭐ なぜこの歯が要るか【実測】: `v0.2.0..origin/main`（70 commit、2026-09-17時点）を
-   * `node scripts/release-candidates.mjs --since v0.2.0` で実際に洗ったところ、
-   * `c4a3dc7`（`FilteredOmission.scopeRelation` を足した確定的な破壊的変更。
-   * `docs/decisions/0174-filtered-omission-scope-relation.md`）は、`bang`/
-   * `body-breaking`/`public-api` の3信号のいずれにも掛からなかった——それでいて
-   * `CHANGELOG.md` の「変更（破壊的）」節には載っている。
-   *
-   * ⚠ `c4a3dc7` 自身は `packages/core/src/recall.ts` を直接触るため、この道具の
-   * 4つ目の信号 `src` は実際には立つ（実行結果で確認済み。詳細は
-   * `scripts/release-candidates.mjs` の doc コメントと、この作業の報告に書く）。
-   * ⟹ この歯は「`c4a3dc7` とビット単位で同じ入力」を再現するのではなく、
-   * **4つの信号すべてがゼロになりうる commit（docs のみ・test のみで、src も
-   * public-api も触らない）が実在しうる**という、`c4a3dc7` が示した現象の一般形
-   * ——「狭い信号がゼロの候補が実在し、それを母集合から落としてはいけない」——
-   * を検査する。ここで母集合から signal ゼロの commit を落とす変異を入れると、
-   * この it が赤くなる（`docs/autonomy.md` §2 の変異試験参照）。
-   */
   it("4つの信号がどれも立たない commit も、分類結果の配列と『信号なし』側に残る", () => {
     const commits = [
       {
@@ -267,12 +238,6 @@ describe("extractChangelogBaseSha", () => {
     expect(extractChangelogBaseSha("")).toBeNull();
   });
 
-  /**
-   * `CHANGELOG.md` の `[1.1.0]` 節の27回目の棚卸し（追記29）が実際に踏んだ形——
-   * 目印「の範囲を数えたものである」そのものの真ん中に、Markdown の折り返しによる
-   * 改行が入る。直す前は素の `indexOf` がこの目印を見失い、ファイル中で次に
-   * 見つかる別の節（この歯では `[1.0.0]` 節を模した2番目の節）の sha を誤って拾っていた。
-   */
   it("目印「の範囲を数えたものである」自体が改行をまたいでいても、直前の sha を拾う（見失って別の節へ落ちない）", () => {
     const text =
       "⭐ **数えた基準を明記する。**この節は `v1.0.2`（tag が指す `b981ecd`、PR #1098）… **`62def34`**（PR #1434）の範囲を\n" +

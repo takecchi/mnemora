@@ -7,13 +7,6 @@ import {
   otherExternalId,
 } from "../validity-probe-set.js";
 
-/**
- * 純関数だけを検査する（`time-term-arm.test.ts` と同型）。**⛔ DB も provider も
- * 使わない**——`buildValidityConversation`/`VALIDITY_PROBES`/`historicalValidAt` という
- * 「仕組み」だけを検査する。recall() を実際に走らせる検査は
- * `validity.postgres.test.ts`（本物の Postgres、Issue #280）の側に置く。
- */
-
 describe("buildValidityConversation", () => {
   it("current/other の text は厳密に等しい（ペアの本文を同一にすることがこの arm の要）", () => {
     const now = new Date("2026-09-08T00:00:00.000Z");
@@ -36,10 +29,8 @@ describe("buildValidityConversation", () => {
     const now = new Date("2026-09-08T12:00:00.000Z");
     const probe = VALIDITY_PROBES.find((p) => p.id === "address")!;
     const [current, other] = buildValidityConversation(probe, now);
-    // current: validFrom 30日前・validUntil 無し。
     expect(current!.validFrom).toEqual(new Date("2026-08-09T12:00:00.000Z"));
     expect(current!.validUntil).toBeUndefined();
-    // other: validFrom 365日前・validUntil 30日前。
     expect(other!.validFrom).toEqual(new Date("2025-09-08T12:00:00.000Z"));
     expect(other!.validUntil).toEqual(new Date("2026-08-09T12:00:00.000Z"));
   });
@@ -48,7 +39,6 @@ describe("buildValidityConversation", () => {
     const now = new Date("2026-09-08T00:00:00.000Z");
     const probe = VALIDITY_PROBES.find((p) => p.id === "subscription-plan")!;
     const [, other] = buildValidityConversation(probe, now);
-    // other: validFrom は -30（30日後）。
     expect(other!.validFrom).toEqual(new Date("2026-10-08T00:00:00.000Z"));
     expect(other!.validFrom!.getTime()).toBeGreaterThan(now.getTime());
   });
@@ -83,10 +73,8 @@ describe("historicalValidAt", () => {
     const at = historicalValidAt(probe, now)!;
     const [current, other] = buildValidityConversation(probe, now);
 
-    // other: validFrom <= at < validUntil（真であるべき）。
     expect(other!.validFrom!.getTime()).toBeLessThanOrEqual(at.getTime());
     expect(other!.validUntil!.getTime()).toBeGreaterThan(at.getTime());
-    // current: validFrom > at（まだ真になっていないべき）。
     expect(current!.validFrom!.getTime()).toBeGreaterThan(at.getTime());
   });
 });

@@ -2,16 +2,6 @@ import { describe, expect, it } from "vitest";
 import { buildOpenAiArmRunJson } from "../openai-arm-json.js";
 import type { IdentifierArmReport, IdentifierProbeOutcome } from "../identifier-arm.js";
 
-/**
- * `openai-arm-json.ts` の `buildOpenAiArmRunJson` の歯。DB もネットワークも要らない
- * ——`IdentifierArmReport` を手で組み立てて渡すだけ。
- *
- * ADR 0333 §2.1・§4.3「A」の後続作業(クローン miku の判断)。この検査が対象にするのは
- * **`probeMargins`(probe ごとの margin)を JSON へ書き出す新しい欄**——ADR 0333 が
- * 指摘した欠落(群レベルの `marginStats` だけで probe ごとの値を保存していなかった)を
- * 埋める変更である。既存の欄(`marginStats` 等)の書き出しには触れていない。
- */
-
 function makeProbe(overrides: Partial<IdentifierProbeOutcome> = {}): IdentifierProbeOutcome {
   return {
     probeId: "p1",

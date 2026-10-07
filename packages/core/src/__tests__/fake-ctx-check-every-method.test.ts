@@ -1,11 +1,5 @@
-// 確かめ直し（Issue #1759、B 群 #1603 / ADR 0493 E1）の歯。
-//
-// ADR 0493 E1: 「全 Fake の全公開メソッドの冒頭で `assertWellFormedCtx(ctx)` を呼ぶ」。
-// 既存の歯（fake-input-checks-round2.test.ts の E1）は 15 口の代表だけを見ていたので、残りのメソッドから
-// 呼び出しを外しても赤にならなかった（FakeTenantSettingsStore.setDefaultHalfLifeRecalls・getTaxonomyMode など）。
-// ここでは各 Fake の prototype のメソッドを全部列挙し、壊れた ctx（NUL）を渡して MalformedIdentifierError で
-// 断ることを見る。ctx を取らない補助のメソッドは EXEMPT に名指しで置く（増えたメソッドが黙って素通りしないよう、
-// EXEMPT に無いものは全部この歯が見る）。
+// 各 Fake の prototype のメソッドを全列挙する（代表だけを見ると、残りのメソッドから呼び出しを外しても赤にならない）。
+// ctx を取らない補助は EXEMPT に名指しで置き、それ以外は全部この歯が見る。
 import { describe, expect, it } from "vitest";
 import { MalformedIdentifierError } from "../identifier.js";
 import {

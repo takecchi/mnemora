@@ -1,15 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { gateExitCode, summarizeStages } from "../publish-gates.mjs";
 
-/**
- * `scripts/publish-gates.mjs` の歯（純関数のみ）。`scripts/__tests__/root-test-gate.test.mjs`
- * と同じ形（Issue #476、ADR 0210 追記）。
- *
- * `scripts/__tests__/run-publish-gates.test.mjs` が CLI 全体（子プロセス起動）を
- * 実プロセスとして測るのに対し、ここでは `summarizeStages` / `gateExitCode` の
- * 判定ロジックだけを、子プロセスを起動せずに直接測る。
- */
-
 const allPassed = [
   { name: "typecheck", ran: true, exitCode: 0 },
   { name: "lint", ran: true, exitCode: 0 },
@@ -43,11 +34,6 @@ describe("gateExitCode", () => {
 });
 
 describe("summarizeStages", () => {
-  /**
-   * ⭐ 芯。直す前の門は `bash -e` に任せていたため、1本目が落ちると2〜5本目は
-   * 一度も起動されなかった。直した後の門はこの5段を必ず全部起動する——だから、
-   * **5段すべてが失敗していても**、要約には5段すべてが「走った」と出ること。
-   */
   it("全段が失敗していても、5段すべてが「走った」と要約に出る", () => {
     const summary = summarizeStages(allFailed);
     for (const stage of allFailed) {

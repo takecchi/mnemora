@@ -3,16 +3,6 @@ import type { Cassette } from "@mnemora/testkit";
 import { buildRetrievalQualityJson } from "../retrieval-json.js";
 import type { ArmReport, ProbeOutcome } from "../retrieval-quality.js";
 
-/**
- * `buildRetrievalQualityJson`（DB を要求しない純関数）の歯。
- *
- * **DB 無しで測れる**——`ArmReport` はただのオブジェクトなので、`runRetrievalQualityArm`
- * を実際に走らせずに、ここで手で組み立てる。`examples/chat` には `test` スクリプトが無く
- * `test:db` しか無いため（ADR 0015/0016）、この検査も実際には `DATABASE_URL` が在るときにしか
- * 走らないが、**中身は DB を一切要求しない**——`ADR 0033`「引き受ける負債」が
- * `retrieval-quality-score.test.ts` について明記したのと同じ限界を、このファイルも引き継ぐ。
- */
-
 function fakeProbe(overrides: Partial<ProbeOutcome> = {}): ProbeOutcome {
   return {
     probeId: "p",
@@ -80,8 +70,6 @@ describe("buildRetrievalQualityJson", () => {
     });
     expect(json.arms).toHaveLength(1);
     const arm = json.arms[0]!;
-    // armHeadline() を直接呼んで、独立に照合する(このファイル自身は armHeadline を
-    // import せず、値を手で書いた場合との食い違いを検知するため、別経路の期待値を作る)。
     expect(arm.mrrOverall).toBe(0.5);
     expect(arm.hit1Count).toBe(report.probes.filter((p) => p.hit1).length);
     expect(arm.hit10Count).toBe(report.probes.filter((p) => p.hit10).length);
@@ -91,7 +79,6 @@ describe("buildRetrievalQualityJson", () => {
   });
 
   it("lexicalMatchRows/recalledRows を probes の実カウントの総和として運ぶ(ADR 0108)", () => {
-    // 7 probe、うち2件は語彙チャンネルが引き当てた(lexicalMatchRows > 0)体で作る。
     const report = fakeReport({
       probes: [
         fakeProbe({ probeId: "p0", recalledRows: 10, lexicalMatchRows: 3 }),
@@ -198,7 +185,6 @@ describe("buildRetrievalQualityJson", () => {
 
   it("probeCount/haystackSize を ingest.observationCount と probes.length から導く(定数を書き写さない)", () => {
     const report = fakeReport({}, 7);
-    // observationCount = 7*2(gold+distractor) + 60(haystack)
     const json = buildRetrievalQualityJson({
       reports: [report],
       providerSource: "recorded",
@@ -235,10 +221,6 @@ describe("buildRetrievalQualityJson", () => {
     expect(json.haystackSize).toBe(0);
   });
 
-  /**
-   * ⭐ ADR 0109: `termDistinct`/`decayFreshnessEqualRows`/`decayFreshnessDifferentRows`
-   * が省略可能欄として運ばれること。
-   */
   it("termDistinct/decayFreshnessEqualRows/decayFreshnessDifferentRows を運ぶ(ADR 0109)", () => {
     const report = fakeReport({
       probes: [

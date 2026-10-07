@@ -53,10 +53,10 @@ const LEXICAL_QUERY_MAX_DISTINCT_WORDS = 32;
 const LEXICAL_QUERY_MAX_WORD_CHARS = 64;
 const LEXICAL_QUERY_MAX_TOTAL_CHARS = 600;
 
-/** `query` が {@link LEXICAL_QUERY_MAX_TOTAL_CHARS} を超えるとき、先頭からその文字数に切り詰める。他のどの上限よりも先に適用する。 */
+/** `query` が {@link LEXICAL_QUERY_MAX_TOTAL_CHARS} を超えるとき、先頭からその文字数以下に、書記素を割らずに切り詰める。他のどの上限よりも先に適用する。 */
 function capQueryTotalChars(query: string): string {
   return query.length > LEXICAL_QUERY_MAX_TOTAL_CHARS
-    ? query.slice(0, LEXICAL_QUERY_MAX_TOTAL_CHARS)
+    ? sliceAtGraphemeBoundary(query, LEXICAL_QUERY_MAX_TOTAL_CHARS)
     : query;
 }
 
@@ -270,3 +270,26 @@ export class InMemoryLexicalStore implements LexicalStore {
       .map(({ memoryId, coverage, rank }) => ({ memoryId, coverage, rank }));
   }
 }
+
+/**
+ * `@mnemora/core` の `sliceAtGraphemeBoundary`（`packages/core/src/text-truncation.ts`）の写し。`@mnemora/postgres` の `lexical-query-cap.ts` にも同じ写しがある。
+ * core から import しないのは、core の内部関数で公開していないため（公開すると公開 API の snapshot が増える）。
+ * export しないのは、このパッケージの公開面に出さないため。切り詰めの規則を変えるときは3つとも見ること。
+ */
+function sliceAtGraphemeBoundary(text: string, maxLength: number): string {
+  const limit = Math.max(0, maxLength);
+  if (text.length <= limit) {
+    return text;
+  }
+  let end = 0;
+  for (const { segment, index } of graphemeSegmenter.segment(text)) {
+    const next = index + segment.length;
+    if (next > limit) {
+      break;
+    }
+    end = next;
+  }
+  return text.slice(0, end);
+}
+
+const graphemeSegmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });

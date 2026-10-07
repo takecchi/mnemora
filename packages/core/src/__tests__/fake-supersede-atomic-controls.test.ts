@@ -6,19 +6,6 @@ import type { NewMemory } from "../memory.js";
 import type { TaxonomyMode } from "../interfaces/tenant-settings-store.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * ADR 0564 の歯の穴（変異 O1・O3・O5・O6）を塞ぐ対照の歯（ADR 0572）。
- *
- * - O1: 失敗時の巻き戻しが、無関係な既存イベントまで消す。
- * - O3: 成功したときにも冪等キーの索引を巻き戻す。
- * - O5: 断られた書き込み（`setTaxonomyMode`・`setDefaultHalfLifeRecalls`）も、行（保持期間のキー）を作る。
- * - O6: テスト専用の `setDefaultHalfLifeRecallsForTest` が行を作る（ADR 0564 の決定3「変えていない」）。
- *
- * ADR 0581 は、ADR 0572 の変異監査で生き残った4つ（A4・B4・C6・B8）の歯を足す。
- *
- * core の Fake は testkit の conformance に通さない（Issue #768 コメント2）。
- */
-
 const ctx: Ctx = { tenantId: "tenant-1" };
 const ctxA: Ctx = { tenantId: "tenant-ctl-a" };
 let counter = 0;

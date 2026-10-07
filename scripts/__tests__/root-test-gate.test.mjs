@@ -1,19 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { gateExitCode, summarizeStages } from "../root-test-gate.mjs";
 
-/**
- * `scripts/root-test-gate.mjs` の歯（純関数のみ）。
- *
- * これはルートの `test` 門の `&&` 連結を塞いだ変更の芯である（Issue #453）。
- * 直す前は `vitest run && pnpm -r --if-present run test && node scripts/run-db-tests.mjs`
- * だったため、段1が落ちると段2・段3は**一度も起動されず**、「赤1件」としか
- * 見えなかった。
- *
- * ⛔ ここでは門そのもの（`scripts/run-root-test-gate.mjs`）を子プロセスとして
- * 起動しない——それは段2で `pnpm -r run test` を呼ぶため、歯の中から起動すると
- * 再帰してしまう。ここで測るのは、副作用の無い `summarizeStages` / `gateExitCode`
- * だけである。
- */
+// 門そのものは子プロセスで起動しない（段2が pnpm -r run test を呼ぶので再帰する）。
 
 const allPassed = [
   { name: "vitest run", ran: true, exitCode: 0 },
@@ -56,12 +44,6 @@ describe("gateExitCode", () => {
 });
 
 describe("summarizeStages", () => {
-  /**
-   * ⭐ 芯。直す前の門は、段1が落ちると段2・段3を一度も起動しなかった。
-   * 直した後の門はこの3段を必ず全部起動する——だから、**3段すべてが失敗していても**、
-   * 要約には3段すべてが「走った」と出ること。これが出なければ、この Issue が
-   * 直そうとしている性質（未起動の段が読み取れること）が測れていない。
-   */
   it("全段が失敗していても、3段すべてが「走った」と要約に出る", () => {
     const summary = summarizeStages(allFailed);
     for (const stage of allFailed) {

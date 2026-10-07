@@ -10,14 +10,6 @@ import {
   formatRankListingMarkdown,
 } from "../retrieval-rank-listing.js";
 
-/**
- * `retrieval-rank-listing`(Issue #572、ADR 0276 の 2026-09-28 の追記)の純関数の歯。DB 不要。
- *
- * ⭐ **いちばん守りたい契約は「順位がどうであっても exit 0」である**——この一覧は門ではない。
- * 逆向きに、**一覧を作れない(bench が壊れた)ときは非0**であることも同じ強さで固定する。
- * ⛔ 数値(実測の順位・スコア)は焼き込まない。ここで使う値はすべて合成である。
- */
-
 function score(total: number): ScoreBreakdown {
   return { similarity: total, decay: 1, tagMatch: 1, freshness: 1, strength: 1, total };
 }

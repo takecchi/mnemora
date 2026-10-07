@@ -69,7 +69,6 @@ describe("noiseEpsilon(決定的な擬似乱数)", () => {
     const values = SEEDS.map((seed) => noiseEpsilon(seed, 4, 11));
     const mean = values.reduce((s, v) => s + v, 0) / values.length;
     expect(Math.abs(mean)).toBeLessThan(0.3);
-    // 正負どちらも実際に出ることを確認する(陽性対照——「出た」ことの確認)。
     expect(values.some((v) => v > 0)).toBe(true);
     expect(values.some((v) => v < 0)).toBe(true);
   });
@@ -100,8 +99,6 @@ describe("applySymmetricScoreNoise", () => {
   });
 
   it("sigma=0 は、スコアの差が極小(1e-6)な接戦でも並びを変えない(僅かでもノイズが漏れる実装を検出する)", () => {
-    // gap がわずか 1e-6 —— sigma=0 でも「わずかに」ノイズが混ざる実装(例: sigma の代わりに
-    // sigma+定数を使う)があれば、この接戦は必ずどこかの seed でひっくり返る。
     const tight: ScoredCandidate[] = [
       candidate("a", 1),
       candidate("b", 0.999999),
@@ -130,10 +127,6 @@ describe("applySymmetricScoreNoise", () => {
   });
 
   it("同点の候補にノイズを掛けたとき、index0 だけが特別扱い(非対称)されない", () => {
-    // 4件を完全に同点にし、200 seed にわたって「どの位置(index)の候補が rank1 を
-    // 取ったか」を数える。**対称なノイズなら、どの index も概ね同じ頻度で勝つはず**
-    // ——「gold(index0 に置かれがちな候補)だけを狙って下げる」非対称な実装は、
-    // index0 の勝率を著しく下げる(⚠ 統計的検定ではない。極端な偏りだけを見る)。
     const tiedScore = 1;
     const ids = ["c0", "c1", "c2", "c3"];
     const winsByIndex = [0, 0, 0, 0];
@@ -147,8 +140,6 @@ describe("applySymmetricScoreNoise", () => {
     for (const wins of winsByIndex) {
       expect(wins).toBeGreaterThan(0);
     }
-    // 完全に対称なら期待値は trials/4(=50)。10%(=20)を切るのは、著しい偏りが
-    // 無ければまず起きない(二項分布 B(200, 0.25) で 20 以下になる確率は極小)。
     expect(winsByIndex[0]).toBeGreaterThan(trials * 0.1);
   });
 
@@ -200,7 +191,6 @@ describe("computeNoisyGroupMetrics", () => {
 
   it("sigma=0: MRR/hit@1 が素朴な順位計算と一致する(基準線の再現)", () => {
     const metrics = computeNoisyGroupMetrics(probes, 0, 1);
-    // p1: goldRank=1 → RR=1 / p2: goldRank=2 → RR=0.5
     expect(metrics.mrrOverall).toBeCloseTo((1 + 0.5) / 2, 10);
     expect(metrics.hit1Count).toBe(1);
     expect(metrics.hit10Count).toBe(2);
@@ -278,7 +268,6 @@ describe("summarizeSigmaLevels / aggregateFalsePositiveBand", () => {
     expect(levels[2]!.medianPreservesBaseline).toBe(false);
 
     const band = aggregateFalsePositiveBand(levels);
-    // σ=0.01(中央値1、red1件)と σ=0.02(中央値1、red0件)だけが帯に入る。
     expect(band.bandSigmas).toEqual([0.01, 0.02]);
     expect(band.redCount).toBe(1);
     expect(band.trials).toBe(6);

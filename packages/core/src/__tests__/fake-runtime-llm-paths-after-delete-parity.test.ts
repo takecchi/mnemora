@@ -8,10 +8,7 @@ import type { Memory, NewMemory } from "../memory.js";
 import { createRuntime, type ConsolidateOptions, type Runtime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * ADR 0524: `consolidate`・`reflect`・`reextract`・`observe` の「消した後の参照」（Fake）。同じ `EXPECTED` を実 Postgres と InMemory の側
- * （`packages/postgres/src/__tests__/runtime-llm-paths-after-delete-parity.postgres.test.ts`）が縛る。大文字の uuid の id は含めない。
- */
+// 大文字の uuid の id は含めない: 実装ごとの差が出るのはそこだけで、fixture の id は `mem-N` のため。同じ `EXPECTED` を実 Postgres と InMemory の側も縛る。
 interface Env {
   runtime: Runtime;
   mem: MemoryStore;
@@ -27,12 +24,6 @@ interface Env {
 
 type Result = Record<string, unknown>;
 
-/**
- * ADR 0524（ADR 0522 の「測っていないこと」の実測）: `consolidate`・`reflect`・`reextract`・`observe` を、消した後
- * （forgotten・archived・superseded・purge 済み）の記憶や、消えた observation に当てた結果を、平らなデータにする。
- * 実装ごとの差が出るのは、操作の対象の `id` を大文字で渡したときだけで（ADR 0446・0469。ここには含めない）、
- * 小文字の id では3者が一致した。core の Fake の歯と、InMemory・Postgres の歯が、同じ `EXPECTED` に突き合わせる。
- */
 async function scenario(env: Env): Promise<Result> {
   const { runtime, mem, ev, mk, obs, setExtracted } = env;
   const out: Result = {};
@@ -112,7 +103,6 @@ async function scenario(env: Env): Promise<Result> {
         await snap(ctx, [a, m]),
       ];
     }
-    // reextract: 1回目で作った記憶を状態 st にしてから、別の応答でもう1度 reextract する
     const ctx = fresh();
     const o = await obs(ctx, "ext-1");
     setExtracted("extracted fact");
@@ -130,7 +120,6 @@ async function scenario(env: Env): Promise<Result> {
       await snap(ctx, [prior]),
     ];
   }
-  // 消えた observation・実在しない observation
   let ctx = fresh();
   const gone = await obs(ctx, "ext-gone");
   await mem.eraseTenant!(ctx, { limit: 1000 });
@@ -144,7 +133,6 @@ async function scenario(env: Env): Promise<Result> {
       () => "resolved",
       (e: unknown) => /observation not found/.test(String(e)),
     );
-  // purge 済みの記憶の元の observation を、同じ externalId でもう一度 observe する（本文が墓石から戻らない）
   ctx = fresh();
   const o2 = await obs(ctx, "ext-x");
   const x1 = await runtime.reextract(ctx, o2.id);
@@ -160,7 +148,6 @@ async function scenario(env: Env): Promise<Result> {
     again.extraction,
     (await mem.get(ctx, x1.memoryIds[0]!))?.content,
   ];
-  // memory_usage: 消えた記憶を使ったと言う
   ctx = fresh();
   const um = await mk(ctx, "banana usage");
   const rc = await runtime.recall(ctx, { text: "banana", vector: [1, 0, 0], limit: 10 });
@@ -185,7 +172,6 @@ const llm = {
   },
   completeStructured: async <T>(_ctx: Ctx, req: StructuredRequest<T>): Promise<T> =>
     req.schema.parse({
-      // reflect・consolidate・extract のどの schema にも通る、決め打ちの応答（LLM の実 API は使わない）
       outcome: "reflected",
       content: "CANNED merged",
       digest: "canned digest",

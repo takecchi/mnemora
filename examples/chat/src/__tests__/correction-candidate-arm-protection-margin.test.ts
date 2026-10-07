@@ -5,34 +5,16 @@ import {
   maxNonProtectedScore,
 } from "../correction-candidate-arm.js";
 
-/**
- * ADR 0333 §4.2「推奨（案2）」——`protectionMargin`（`correction-candidate-arm.ts` に
- * 追加した新フィールド）の純関数の歯。DB もネットワークも要らない
- * （`correction-candidate-arm-margin.test.ts` と同じ規律で値を手で組み立てる）。
- *
- * ⛔ **`correction-candidate-arm-margin.test.ts`（ADR 0321 の回帰テスト）は1文字も
- * 変えていない**——このファイルは別ファイルとして追加した。下の
- * `describe("computeIntrusionMargin は変わっていない")` は、その回帰テストと
- * 独立に、`intrusionMargin` がこの変更で1つも動いていないことを重ねて固定する。
- *
- * ⭐ **この歯が実際に噛むことを、変異試験で示した**（報告に記録。`cp` で退避 →
- * 変異 → 赤を確認 → `cp` で戻す → 緑に戻ることを確認、という
- * `AGENTS.md`「⛔ 変異を戻すのに `git checkout` を使わない」の手順に従った）。
- */
-
 describe("computeProtectionMargin", () => {
   it("深い誤爆側（保護対象が最有力の非保護候補より高い）は正の値", () => {
-    // ADR 0333 §3.1 実測: 深い誤爆20件は全件正（mean≈+0.037452）。
     expect(computeProtectionMargin(0.9, 0.7)).toBeCloseTo(0.2, 10);
   });
 
   it("誤爆(浅)側（非保護候補が保護対象より高い）は負の値", () => {
-    // ADR 0333 §3.1 実測: 誤爆(浅)4件は全件負（mean≈-0.006089）。
     expect(computeProtectionMargin(0.6, 0.8)).toBeCloseTo(-0.2, 10);
   });
 
   it("protectedFactScore が null（保護対象が0件・棄権）なら null", () => {
-    // ADR 0333 §3.1: protectedFacts=[] の vague ケース(8件)は定義されない。
     expect(computeProtectionMargin(null, 0.8)).toBeNull();
   });
 
@@ -77,11 +59,6 @@ describe("maxNonProtectedScore", () => {
   });
 });
 
-/**
- * ⭐ この変更が `intrusionMargin` に触れていないことを、`correction-candidate-arm.ts`
- * から直接 import して重ねて確認する（`computeIntrusionMargin` はこの PR で1文字も
- * 変えていない——`correction-candidate-arm-margin.test.ts` と同じ assertion）。
- */
 describe("computeIntrusionMargin は変わっていない", () => {
   it("深い誤爆のとき topScore - protectedFactScore を返す", () => {
     expect(computeIntrusionMargin(0.9, true, 0.7)).toBeCloseTo(0.2, 10);

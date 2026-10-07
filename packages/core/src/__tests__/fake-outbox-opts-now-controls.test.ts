@@ -6,21 +6,6 @@ import type { NewObservation } from "../observation.js";
 import type { OutboxJobRecord } from "../outbox.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * ADR 0566: `fake-outbox-opts-now.test.ts`（ADR 0555）が縛らなかった「やりすぎ」と「外す」の側を縛る歯。
- * 既存のファイルは「`opts.now` を渡したら outbox 行の時刻がその値になる」側だけを見ていたので、
- * 次の誤りを入れても緑のままだった（変異試験で実測。表は ADR 0566）。
- *
- *  - A: `opts.now` が outbox 行の時刻を越えて `memory.updatedAt` にまで効く（約束では `updatedAt` は壁時計のまま）
- *  - I: `opts.now` が記憶・observation の `recordedAt` の既定にまで効く（約束が従わせるのは outbox 行の時刻だけ）
- *  - F: 冪等な再送（`created: false`）でも、`opts` を先に検査して断る（ADR 0493: 行を実際に書くときだけ見る）
- *  - D: `supersedeWithNewMemories` が、先頭の news だけを検査する
- *  - H: `enqueueJob` が、行ごとの `Date` の複製を持たず、`opts.now` や他の行と同じ参照を共有する
- *  - C: `jobKinds` が空なら `opts` を見ない、を `createObservationWithOutbox`・`supersedeWithNewMemories` でも
- *
- * 期待値は testkit の `InMemoryMemoryStore` と `PostgresMemoryStore` の振る舞い（約束）に合わせてある。
- */
-
 const ctx: Ctx = { tenantId: "tenant-1" };
 const PAST = new Date("2020-01-01T00:00:00.000Z");
 const INPUT_RECORDED_AT = new Date("2019-05-05T00:00:00.000Z");
@@ -179,9 +164,6 @@ describe("FakeMemoryStore: 冪等な再送（created: false）は opts を検査
 });
 
 describe("FakeMemoryStore.supersedeWithNewMemories: 冪等な再送の news は opts を検査しない（ADR 0493）", () => {
-  // 以前の Fake は、全部の news が既存の行に当たる再送でも、Invalid Date の opts.now・jobKinds の NUL を先に断っていた
-  // （`InMemoryMemoryStore`・`PostgresMemoryStore` は行を書くときだけ見る）。ADR 0566 の未解決で、ADR 0577 で直した
-  // ——検査は news を作る loop の中（`created` が true のとき、`enqueueJob` の前）にある。
   for (const [label, kinds, opts] of [
     ["Invalid Date の opts.now", ["embed"], { now: invalid }],
     ["jobKinds の NUL", [NUL_KIND], undefined],
@@ -219,7 +201,6 @@ describe("FakeMemoryStore.supersedeWithNewMemories: 先頭以外の news も検�
       ),
     ).rejects.toThrow(/NUL/);
     expect(outboxStore.listJobs(ctx)).toEqual([]);
-    // 1件目の記憶も作られていない（同じ入力を送ると、新しく作られる）。
     const again = await memoryStore.createMemoryWithOutbox(ctx, first, ["embed"]);
     expect(again.created).toBe(true);
   });

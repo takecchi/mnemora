@@ -10,36 +10,8 @@ import {
   runCorrectionDemo,
 } from "../correction-demo.js";
 
-/**
- * `runCorrectionDemo`/`checkCorrectionDemo`/`formatCorrectionDemo` の歯（Issue #303 / Issue #369 (C)）。
- * DB/LLM/embedding を実物で叩く代わりに、`Runtime` の必要な口だけを最小の偽物で埋める
- * （`consolidation-cost-abort.test.ts` と同じ規律）。
- *
- * **この歯が測っているもの**: `runCorrectionDemo` が
- * - 【発見の段】`findCorrectionCandidates` を正しい引数（`text`/`excludeMemoryIds`）で
- *   1回だけ呼ぶこと。
- * - 【選択の段】`choice`（呼び出し側の明示的な指名）を**候補の並びから一切導かず**、
- *   指名が候補に居るかどうかの照合にしか候補を使わないこと。
- * - `choice` が無い・指名が候補に無い、の2ケースで**書き込みを1件もしない**こと
- *   （`applyCorrection` を一度も呼ばない——[ADR 0242](../../../docs/decisions/0242-runtime-apply-correction.md)）。
- * - `applyCorrection` に*どの id を*渡すか——`scenario.contestedPair` の宣言
- *   （`firstExternalId`/`secondExternalId`/`winnerExternalId`）が、`turns` の並び順や
- *   「後に observe したほうが勝つ」という順序規則を経由せず、**そのまま**呼び出しの
- *   引数に反映されることを実測する。
- *
- * **測っていないもの**: `applyCorrection`/`recall`/`findCorrectionCandidates` 自体の
- * 実装の正しさ（それは `packages/core`/`packages/postgres` の領分であり、この歯の
- * 偽 Runtime は固定の戻り値を返すだけ）。実際の Postgres に対する一巡の実測は
- * `correction-demo.postgres.test.ts` で行う。
- */
-
 interface FakeRuntimeCalls {
   observedExternalIds: string[];
-  /**
-   * `applyCorrection` に渡った入力を、呼ばれた順にすべて記録する
-   * （`runCorrectionDemo` は最大2回呼ぶ——[ADR 0242](../../../docs/decisions/0242-runtime-apply-correction.md)
-   * の2段呼び出し。1回目は `resolution` 無し、2回目は `resolution` 付き）。
-   */
   applyCorrectionCalls: Array<{
     correctedId: string | null;
     correctingId: string;
@@ -47,19 +19,8 @@ interface FakeRuntimeCalls {
     reason: string | undefined;
   }>;
   recallCallCount: number;
-  /**
-   * `recall()` に実際に渡ったクエリを、呼ばれた順にすべて記録する。
-   *
-   * 🔑 **`limit` を見るためにこの欄が在る。**`limit: 1` は決定5の核（既定の
-   * limit=10 では対の2件が両方とも段2の `withinLimit` に収まり、段3の必須同伴取得が
-   * 発火しない）であり、それが失われたことを DB 無しで検出できるようにしておく
-   * ——これが無いと、`limit` の退行を捕まえる歯は `correction-demo.postgres.test.ts`
-   * （本物の Postgres を要求する）だけになる。
-   */
   recallQueries: unknown[];
-  /** `findCorrectionCandidates` が呼ばれた回数。 */
   findCorrectionCandidatesCallCount: number;
-  /** `findCorrectionCandidates` に実際に渡った引数（最後の呼び出し分）。 */
   findCorrectionCandidatesArgs: { text: string; excludeMemoryIds?: readonly string[] } | null;
 }
 
@@ -74,11 +35,6 @@ function emptyCalls(): FakeRuntimeCalls {
   };
 }
 
-/**
- * externalId → memoryId は `<externalId>-memid` という機械的な対応にする——
- * `observe()` の戻り値からしか得られない、という `correction-demo.ts` の前提をそのまま
- * 反映しつつ、テスト側で「どの externalId の Memory か」を id から読めるようにする。
- */
 function memoryIdFor(externalId: string): string {
   return `${externalId}-memid`;
 }
@@ -87,11 +43,6 @@ function fakeScore(total: number) {
   return { decay: 1, tagMatch: 1, freshness: 1, strength: 1, total };
 }
 
-/**
- * `findCorrectionCandidates` の既定の戻り値: `scenario.original` の1件だけを
- * 候補の1位として返す（`correctionId` は呼び出し側が `excludeMemoryIds` で
- * 自己除外している前提を、フィクスチャ側でも素直に反映する）。
- */
 function defaultDiscoveryCandidates(): CorrectionCandidate[] {
   const originalId = memoryIdFor(CORRECTION_SCENARIO.original.externalId);
   return [
@@ -109,13 +60,6 @@ function buildFakeRuntime(
   calls: FakeRuntimeCalls,
   discoveryCandidates: CorrectionCandidate[] = defaultDiscoveryCandidates(),
 ): Runtime {
-  // Issue #719 の歯（`drainEmbedTicks` の `expectedProcessed`）が実際に噛むようになった
-  // 後: 実物の `Runtime` は「`observe()` が積んだ embed ジョブを `tick()` が処理する」
-  // という契約を持つ（`packages/core/src/runtime.ts` — outbox 経由）。この偽 `Runtime`
-  // はその契約を無視して `tick` が常に `processed: 0` を返していたため、
-  // `runCorrectionDemo` が渡す `expectedProcessed`(= original/correction の2件)と
-  // 噛み合わず、実際には何も壊れていないのに `drainEmbedTicks` が例外を投げていた。
-  // ⟹ `observe()` が積んだ件数を `tick()` が消化して返す、最小限の契約通りの偽物に直す。
   let pendingEmbedJobs = 0;
   const observe: Runtime["observe"] = async (_ctx, input) => {
     const externalId = (input as { externalId: string }).externalId;
@@ -160,7 +104,6 @@ function buildFakeRuntime(
     const originalId = memoryIdFor(CORRECTION_SCENARIO.original.externalId);
     const correctionId = memoryIdFor(CORRECTION_SCENARIO.correction.externalId);
     if (calls.recallCallCount === 1) {
-      // beforeMark: まだ対向が宣言されていないので、通常の recall と同じ形で両方出る。
       return {
         recallId: "recall-1",
         memories: [
@@ -180,7 +123,6 @@ function buildFakeRuntime(
       } as unknown as Awaited<ReturnType<Runtime["recall"]>>;
     }
     if (calls.recallCallCount === 2) {
-      // afterMark: 両方出て、敗者側(=勝者でないほう)が mandatory_companion として付く。
       const winnerId = memoryIdFor(CORRECTION_SCENARIO.contestedPair.winnerExternalId);
       const loserId = winnerId === originalId ? correctionId : originalId;
       return {
@@ -211,7 +153,6 @@ function buildFakeRuntime(
         explain: { stages: [] },
       } as unknown as Awaited<ReturnType<Runtime["recall"]>>;
     }
-    // afterResolve: 勝者だけが残る。
     const winnerId = memoryIdFor(CORRECTION_SCENARIO.contestedPair.winnerExternalId);
     return {
       recallId: "recall-3",
@@ -236,14 +177,7 @@ function buildFakeRuntime(
     } as unknown as Awaited<ReturnType<Runtime["recall"]>>;
   };
 
-  /**
-   * `applyCorrection` の偽物（[ADR 0242](../../../docs/decisions/0242-runtime-apply-correction.md)）。
-   * `packages/core` の実装（`correctedId` が `discoveryCandidates` に居るかどうかの照合・
-   * `resolution` の有無での分岐）と**同じ形の分岐**を最小限に再現するだけで、CAS・
-   * イベント書き込みそのものは持たない——`markContested`/`resolveContested` 自体の
-   * 実装の正しさは `packages/core`（`apply-correction.test.ts` 等）の領分であり、
-   * ここで測るのは `runCorrectionDemo` が正しい引数でこの口を呼ぶかどうかだけである。
-   */
+  // applyCorrection の偽物は、core と同じ形の分岐だけを再現する。CAS・イベント書き込みは持たない。
   const applyCorrection: Runtime["applyCorrection"] = async (_ctx, input) => {
     calls.applyCorrectionCalls.push({
       correctedId: input.correctedId === undefined ? null : String(input.correctedId),
@@ -292,7 +226,6 @@ function buildFakeRuntime(
   } as unknown as Runtime;
 }
 
-/** `scenario.contestedPair.firstExternalId` を「記録済みの採用者の判断」として渡す。 */
 function recordedChoice(scenario: CorrectionScenario = CORRECTION_SCENARIO) {
   return { chosenExternalId: scenario.contestedPair.firstExternalId };
 }
@@ -312,19 +245,15 @@ describe("runCorrectionDemo: applyCorrection に渡す id は 指名(choice) と
     const originalId = memoryIdFor(CORRECTION_SCENARIO.original.externalId);
     const correctionId = memoryIdFor(CORRECTION_SCENARIO.correction.externalId);
 
-    // observe() は宣言順(original → correction)で呼ばれる。
     expect(calls.observedExternalIds).toEqual([
       CORRECTION_SCENARIO.original.externalId,
       CORRECTION_SCENARIO.correction.externalId,
     ]);
 
     expect(result.outcome).toBe("resolved");
-    // 🔑 指名(choice)が候補の何位だったかが結果に載る(北極星 問い3)。
     expect(result.chosenId).toBe(originalId);
     expect(result.chosenRecallRank).toBe(1);
 
-    // applyCorrection は2回呼ばれる(ADR 0242): 1回目は resolution 無し、2回目は
-    // resolution 付き。どちらも指名(chosenId)と correction の2件で呼ばれる。
     expect(calls.applyCorrectionCalls).toHaveLength(2);
     expect(calls.applyCorrectionCalls[0]).toMatchObject({
       correctedId: originalId,
@@ -332,9 +261,6 @@ describe("runCorrectionDemo: applyCorrection に渡す id は 指名(choice) と
       resolution: undefined,
     });
 
-    // 🔑 2回目の resolution.winnerId は contestedPair.winnerExternalId(=correction)が
-    // 指す memoryId であり、これは「あとから observe した」からではなく宣言だからである
-    // (下の「宣言を逆にすると勝敗も入れ替わる」の歯が、これを順序と切り分けて示す)。
     expect(calls.applyCorrectionCalls[1]).toMatchObject({
       correctedId: originalId,
       correctingId: correctionId,
@@ -365,7 +291,6 @@ describe("runCorrectionDemo: applyCorrection に渡す id は 指名(choice) と
 
     const originalId = memoryIdFor(CORRECTION_SCENARIO.original.externalId);
 
-    // observe() の呼び出し順は変わらない(original が先) — それでも winnerId は original。
     expect(calls.observedExternalIds[0]).toBe(CORRECTION_SCENARIO.original.externalId);
     expect(calls.applyCorrectionCalls[1]?.resolution).toEqual({
       kind: "supersede",
@@ -379,14 +304,8 @@ describe("runCorrectionDemo: applyCorrection に渡す id は 指名(choice) と
 
     await runCorrectionDemo(runtime, { tenantId: "t" }, CORRECTION_SCENARIO, recordedChoice());
 
-    // beforeMark / afterMark / afterResolve の3回。
     expect(calls.recallQueries).toHaveLength(3);
 
-    // 🔑 PR #320 の CI 失敗そのものの回帰検査。既定の limit(=10)へ戻すと、対の2件が
-    // 両方とも段2の withinLimit に収まってしまい、段3「矛盾の解決と必須の同伴取得」
-    // (docs/recall.md §2 段3)が一度も発火しない——afterMarkCompanionRetrieval が
-    // false になる。**この歯は DB を要求しない**ので、本物の Postgres が無い環境でも
-    // limit の退行を捕まえられる(correction-demo.postgres.test.ts だけが頼りにならない)。
     for (const query of calls.recallQueries) {
       expect(query).toEqual({ text: CORRECTION_SCENARIO.query, limit: 1 });
     }
@@ -408,21 +327,6 @@ describe("runCorrectionDemo: applyCorrection に渡す id は 指名(choice) と
   });
 });
 
-/**
- * 🔴🔴 最優先の歯: `runCorrectionDemo` が「候補の1位を機械的に採る」実装であれば
- * 赤くなる（ADR 0232 引き受けた負債1「採用側が候補[0] を機械的に採る実装を書けば、
- * 深い誤爆 75% はそのまま再現する」への応答）。
- *
- * `findCorrectionCandidates` の候補1位を decoy にし、指名(choice)は候補2位の
- * originalId にする。`candidates[0]` を採る実装なら、`applyCorrection` は decoy に
- * 対して呼ばれてしまうはずである——この歯はそれが**起きないこと**を実測する。
- *
- * ⚠ この歯だけでは「decoy が active のまま残る」ことを DB レベルでは確かめられない
- * （偽 Runtime は状態を持たない）。ここで実測しているのは「decoy の memoryId が
- * applyCorrection の引数に一度も現れない」ことであり、`examples/chat` の書き込み口を
- * 偽 Runtime で置き換えている以上、これが「decoy に触れていない」ことの実測できる範囲
- * である。
- */
 describe("🔴🔴 採用者の指名が候補1位ではないケース: candidates[0]実装なら赤くなる歯", () => {
   it("指名(originalId)は候補2位。候補1位のdecoyはapplyCorrectionの引数に一度も現れない", async () => {
     const calls = emptyCalls();
@@ -455,12 +359,9 @@ describe("🔴🔴 採用者の指名が候補1位ではないケース: candida
     );
 
     expect(result.outcome).toBe("resolved");
-    // 指名は候補の1位ではなく2位だった、ということが結果からも読める。
     expect(result.chosenRecallRank).toBe(2);
     expect(result.chosenId).toBe(originalId);
 
-    // 🔴 本体: applyCorrection は2回とも指名(originalId)に対して呼ばれ、
-    // 候補1位のdecoyは一度も引数に現れない。
     expect(calls.applyCorrectionCalls).toHaveLength(2);
     for (const call of calls.applyCorrectionCalls) {
       expect(call.correctedId).toBe(originalId);
@@ -470,14 +371,6 @@ describe("🔴🔴 採用者の指名が候補1位ではないケース: candida
   });
 });
 
-/**
- * 🔴 Issue #369 チェックボックス: 選んだ根拠（スコア・順位・候補の数・どちらへ倒したか）を
- * `memory_events.meta.note` から辿れるようにする——`applyCorrection` の `reason` に
- * 実際に載ることを実測する（`meta.note` へ実際に届いたかは DB を要求するため
- * `correction-demo.postgres.test.ts` 側で見る。ここでは「呼び出しの引数として渡ったか」
- * までを見る）。`reason` は `buildCorrectionReason`（`@mnemora/core` の公開 export、
- * [ADR 0242](../../../docs/decisions/0242-runtime-apply-correction.md)）で組み立てる。
- */
 describe("🔴 選んだ根拠が reason 経由で applyCorrection へ渡る(Issue #369)", () => {
   it("候補2位を指名したケース: reason に recallId・chosenRecallRank(=2)・candidates件数・winner が載り、applyCorrection の2回の呼び出しに同じ reason が渡る", async () => {
     const calls = emptyCalls();
@@ -511,8 +404,6 @@ describe("🔴 選んだ根拠が reason 経由で applyCorrection へ渡る(Iss
     expect(result.outcome).toBe("resolved");
     expect(result.chosenRecallRank).toBe(2);
 
-    // 🔴 片方だけにしない: applyCorrection の1回目(mark相当)・2回目(resolve相当)の
-    // 両方に同じ reason が届く。
     expect(calls.applyCorrectionCalls).toHaveLength(2);
     expect(calls.applyCorrectionCalls[0]?.reason).toBeDefined();
     expect(calls.applyCorrectionCalls[1]?.reason).toBeDefined();
@@ -524,7 +415,6 @@ describe("🔴 選んだ根拠が reason 経由で applyCorrection へ渡る(Iss
     expect(reason).toContain("recallId=correction-candidates-recall");
     expect(reason).toContain("winner=correcting");
 
-    // 🔴 選んだ根拠にスコアの生値(score.total)は載せない設計判断(ADR 参照)。
     expect(reason).not.toContain("0.87");
     expect(reason).not.toContain("0.95");
   });
@@ -572,13 +462,9 @@ describe("選択を渡さない・指名が候補に無い: 書き込み0件で�
     expect(result.resolveOutcomeKind).toBeNull();
     expect(result.afterResolve).toBeNull();
 
-    // 🔴 書き込み0件: applyCorrection はそもそも呼ばれない。
     expect(calls.applyCorrectionCalls).toHaveLength(0);
-    // 🔴 recall() (beforeMark/afterMark/afterResolve用)も一度も呼ばれない
-    // — イベントが増えない・どの Memory の状態も変わらないことの代理指標。
     expect(calls.recallCallCount).toBe(0);
 
-    // それでも候補は提示されている(棄権していない)。
     expect(result.discovery.candidates.length).toBeGreaterThan(0);
   });
 
@@ -651,10 +537,6 @@ describe("checkCorrectionDemo / formatCorrectionDemo: 固定した RecallResult 
     expect(check.resolveSucceeded).toBe(true);
     expect(check.afterMarkBothPresent).toBe(true);
     expect(check.afterMarkCompanionRetrieval).toBe(true);
-    // このフィクスチャでは buildFakeRuntime が「resolveContested の敗者(loser)が
-    // mandatory_companion になる」形で afterMark を作っているが、
-    // checkCorrectionDemo 自体はそれを前提にしていない(下の
-    // 「mandatory_companion がどちらに付くかは決め打たない」参照)。
     expect(check.afterMarkCompanionOfOther).toBe(true);
     expect(check.afterResolveOriginalAbsent).toBe(true);
     expect(check.afterResolveCorrectionPresent).toBe(true);
@@ -732,8 +614,6 @@ describe("checkCorrectionDemo: mandatory_companion がどちらに付くかを�
     ]);
     const check = checkCorrectionDemo(result);
 
-    // `correction` は resolveContested の勝者だが、段2のランキングでは limit から
-    // 落ちて mandatory_companion 側に回った——このケースでも正しく検出できること。
     expect(check.afterMarkCompanionRetrieval).toBe(true);
     expect(check.afterMarkCompanionOfOther).toBe(true);
   });
@@ -782,14 +662,6 @@ describe("checkCorrectionDemo: mandatory_companion がどちらに付くかを�
   });
 });
 
-/**
- * `checkCorrectionOmission`（Issue #374）の歯。DB を要求しない——`RecallResult.omitted`
- * を直接組み立てた固定値から読む、純粋な判定なので、`packages/postgres` を経由しない。
- *
- * **測っているもの**: 北極星 項目6「知らないことを、知らないと言える」——「消えた」
- * （machine の都合で superseded として棚上げされた）と「最初から無かった」を、
- * `omitted` の `condition: "superseded"` の有無で区別できるか。
- */
 describe("checkCorrectionOmission: omitted 側から「消えた」と「最初から無かった」を区別する(Issue #374)", () => {
   function buildAfterResolveOnly(
     omitted: Array<{ kind: string; condition?: string; count?: number; countKind?: string }>,

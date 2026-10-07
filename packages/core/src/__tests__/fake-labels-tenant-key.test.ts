@@ -3,13 +3,6 @@ import type { Ctx } from "../ctx.js";
 import type { NewMemory } from "../memory.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * `FakeMemoryStore`（`packages/core` 自身のテスト用フェイク）のラベルも、`::` を含むテナントで
- * 分かれる。`packages/testkit` の `InMemoryMemoryStore` と同じ直し（キーを
- * `JSON.stringify([tenantId, name])` にする）を、別系統のこちらにも当てた。2実装に当てる歯は
- * `packages/postgres/src/__tests__/labels-tenant-key.postgres.test.ts`。
- */
-
 const A: Ctx = { tenantId: "a" };
 const AB: Ctx = { tenantId: "a::b" };
 let contentHashCounter = 0;

@@ -5,15 +5,6 @@ import {
   validateMeasured,
 } from "../recall-footprint-calibration-samples-summary-lib.mjs";
 
-/**
- * Issue #340 フォローアップ(ADR 0314): `recall-footprint-calibration-samples-summary-lib.mjs`
- * (純関数の側)の歯。DB を要求しない。
- *
- * ⭐ **最重要の検査**: (fillerPairs, recallLimit) をキーに欄を比べること、⛔ 相違があっても
- * 門にはしない(`buildSummaryMarkdown` は常に文字列を返し、CLI 側が exit 0 を明示する
- * ——ここでは lib が `process.exit` を一切呼ばないこと自体を確認する)。
- */
-
 function makeRow(overrides = {}) {
   return {
     fillerPairs: 12,
@@ -115,8 +106,6 @@ describe("buildSummaryMarkdown", () => {
     expect(markdown).toContain("mnemoraChars");
   });
 
-  // Issue #1775 の #728（変異15）: 比べる項目はどれも、1つだけ違えば相違として名指しされる
-  // （Job Summary は `DIFF_FIELDS` の各欄を比べる。1欄でも外れると、その欄だけの相違が見えなくなる）。
   it.each([
     ["turnCount", 27],
     ["totalInScope", 10],
@@ -132,8 +121,6 @@ describe("buildSummaryMarkdown", () => {
     expect(markdown).toContain(field);
   });
 
-  // Issue #1775 の #728（変異17）: 行のキーは (fillerPairs, recallLimit)。fillerPairs だけをキーにすると、
-  // 同じ fillerPairs で recallLimit が違う2行が基準値の側で同じ設計点に潰れ、実測と同じ値でも相違に見える。
   it("同じ fillerPairs で recallLimit が違う2行は、別の設計点として比べる（同じ値なら ✅、1つだけ違えばその行だけ相違）", () => {
     const rows = [
       makeRow({ recallLimit: 20, mnemoraChars: 300 }),
@@ -156,9 +143,6 @@ describe("buildSummaryMarkdown", () => {
   it("基準値にだけある設計点(実測に無い)を報告する", () => {
     const measured = makeMeasured({ rows: [], rowCount: 0 });
     const baseline = { rows: [makeRow({ fillerPairs: 29 })] };
-    // rows が空だと validateMeasured は拒否するので、ここは buildSummaryMarkdown を直接叩く
-    // (lib は validate 済みの値だけを受け取る契約——CLI 側の validateMeasured を経ない
-    // 呼び出しでも、この関数自体は落ちないことを確認する)。
     const markdown = buildSummaryMarkdown({ measured: { ...measured, rows: [] }, baseline });
     expect(markdown).toContain("実測に無い");
   });
