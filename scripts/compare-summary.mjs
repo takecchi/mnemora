@@ -1,50 +1,15 @@
 #!/usr/bin/env node
 /**
- * `examples/chat` の `compare` ベンチ(`MNEMORA_COMPARE_JSON` が吐く JSON)を
- * 人が読める Markdown へ変換し、CI の Job Summary(`$GITHUB_STEP_SUMMARY`)へ載せる CLI
- * (Issue #242)。
+ * ⛔ `compare` は他5本と違い、門である(ADR 0133)。終了コード: 0 = pass、1 = fail(悪化・退行、または入力が壊れている)、2 = 判定不能。
+ * ⛔ 判定不能を pass に倒さない。実測と基準値の `turnCount` 集合が一致しないのは「比較していない」であって「退行が無い」ではない。
  *
- * 組み立ては `./compare-summary-lib.mjs` の純関数に委ねる
- * (`time-term-summary.mjs`/`archive-sweep-cost-summary.mjs` と同じ分担)。ここは
+ * `--baseline` を渡さない場合は exit 0(基準値が無ければ悪化の判定そのものができない)。
  *
- * 1. `--measured <path>`(必須)・`--baseline <path>`(任意)を読む
- * 2. ファイルを読んで JSON.parse する(壊れていたら理由を stderr に出して非0で終わる)
- * 3. 形を検査する(`validateMeasured`/`validateBaseline`。壊れていたら同様に非0)
- * 4. Markdown を stdout に出す
- * 5. `--baseline` が在れば `evaluateCompare` に判定させ、その `verdict` を終了コードへ写す
+ * 🔴 `--baseline`・`--measured` を渡していて値が空・無い・次のフラグなら、使い方の誤りとして exit 1。「渡さない」と同じ扱いにしない。
+ * `--baseline "$BASELINE"` の展開が空になると、門が黙って外れるため。
  *
- * だけを行う。
- *
- * 使い方:
- *   node scripts/compare-summary.mjs --measured <path> [--baseline <path>]
- *
- * ⭐ **`compare` は他5本(retrieval-quality/identifier-probes/consolidation-cost/
- * archive-sweep-cost/time-term)と違い、門である(ADR 0133)。**
- *
- * 終了コード(`check-publish-run-coverage.mjs` と同じ語彙。Issue #477):
- * - `0` = pass —— 実測と基準値の `turnCount` 集合が一致し、そのすべてで退行が無い。
- * - `1` = fail —— 集合は一致しているが、`mnemoraShareOfNaiveChars` の悪化 または
- *   `factStatementSurvived` の true→false 退行を検知した。
- * - `2` = 判定不能 —— **実測と基準値の `turnCount` 集合が一致しない**
- *   (実測に在って基準値に無い会話長は1度も比較されておらず、基準値に在って実測に
- *   無い会話長は測る点が黙って減っている)。⛔ **判定不能を pass に倒さない**
- *   ——「比較していない」を「退行が無い」と同じ顔で出さないためである。
- *   stderr に、比較できなかった `turnCount` を名指しで出す。
- *
- * それ以外で非0(`1`)になるのは、入力そのものが壊れているとき
- * (measured の JSON が読めない・parse できない・rows が欠ける・必須項目が無い。
- * `--baseline` を指定していて、それが読めない/壊れている場合も含む)である。
- *
- * `--baseline` を渡さない場合はこれまで通り exit 0(門として機能しない。
- * 基準値が無ければ悪化の判定そのものができない)。
- *
- * 🔴 `--baseline`・`--measured` を渡していて、その値が空・無い・次のフラグである場合は、
- * 使い方の誤りとして exit 1(Issue #1814)。⛔ 「渡さない」と同じ扱いにしない——
- * `--baseline "$BASELINE"` の展開が空になると、⭐門が黙って外れるため。
- *
- * ⚠ `--baseline` を渡していて、⭐門が見ない欄(`omitted` 等)が基準値と相違しているときは
- * stderr へ基準値の鮮度の警告を出す(`evaluateBaselineFreshness`、Issue #403)。
- * ⛔ **これは門ではない**——終了コード(0/1/2 の意味)は一切変えない。
+ * ⚠ 門が見ない欄(`omitted` 等)が基準値と相違しているときは、stderr へ基準値の鮮度の警告を出す(`evaluateBaselineFreshness`)。
+ * これは門ではなく、終了コードは変えない。
  */
 import { readFileSync } from "node:fs";
 import {
@@ -59,9 +24,7 @@ const args = process.argv.slice(2);
 const usage = "使い方: node scripts/compare-summary.mjs --measured <path> [--baseline <path>]";
 
 /**
- * フラグの値を読む。フラグが無ければ `undefined`。
- * **フラグが在るのに値が空・無い・次のフラグなら exit 1**(Issue #1814)——
- * 「指定した」を「指定していない」と同じ顔で通さない。
+ * フラグが在るのに値が空・無い・次のフラグなら exit 1。「指定した」を「指定していない」と同じ顔で通さない。
  *
  * @param {string} flag
  * @returns {string | undefined}
@@ -88,8 +51,7 @@ if (measuredPath === undefined) {
 }
 
 /**
- * ファイルを読んで JSON.parse する。**読めない/parse できない理由をそのまま返す**
- * ——「壊れている」と一括りにせず、次に来る人がどこを見ればいいか分かるようにする。
+ * 読めない/parse できない理由をそのまま返す。「壊れている」と一括りにしない。
  *
  * @param {string} path
  * @param {string} label
@@ -144,8 +106,7 @@ console.log(
 if (baselineValidated) {
   const evaluation = evaluateCompare(measuredValidated.value, baselineValidated.value);
 
-  // ⚠ ⭐門ではない鮮度の警告(Issue #403)。fail / indeterminate で早期 exit する前に、
-  // 必ず一度は出す——配置をここより下へ動かさないこと。
+  // ⚠ 鮮度の警告は、fail / indeterminate で早期 exit する前に必ず一度は出す。配置をここより下へ動かさないこと。
   const freshness = evaluateBaselineFreshness(measuredValidated.value, baselineValidated.value);
   if (freshness.isStale) {
     console.error(
@@ -157,7 +118,7 @@ if (baselineValidated) {
   }
 
   if (evaluation.verdict === "indeterminate") {
-    // ⛔ **判定不能を pass に倒さない**(`check-publish-run-coverage.mjs` と同じ規律)。
+    // ⛔ 判定不能を pass に倒さない。
     console.error("[compare-summary] 判定不能: 比較していない会話長が在る(Issue #477)。");
     console.error(`[compare-summary] 理由: ${evaluation.reason}`);
     console.error(
@@ -197,6 +158,5 @@ if (baselineValidated) {
   }
 }
 
-// **明示的に 0 を宣言する**——ここまで来たら、入力は壊れておらず、実測と基準値の
-// turnCount 集合が一致し、そのすべてで退行が無い。
+// 明示的に 0 を宣言する。
 process.exit(0);
