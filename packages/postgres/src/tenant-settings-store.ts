@@ -166,6 +166,7 @@ export class PostgresTenantSettingsStore implements TenantSettingsStore {
     assertHalfLifeRecallsFitsFloat4("PostgresTenantSettingsStore", recalls);
     await omittingParams(() =>
       this.db.execute(sql`
+      WITH o AS (UPDATE tenant_settings SET default_half_life_recalls = ${recalls} WHERE tenant_id <> ${ctx.tenantId})
       INSERT INTO tenant_settings (tenant_id, default_half_life_recalls, updated_at)
       VALUES (${ctx.tenantId}, ${recalls}, now())
       ON CONFLICT (tenant_id) DO UPDATE
