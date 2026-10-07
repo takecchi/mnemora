@@ -210,3 +210,7 @@ CHECK (provenance_kind = provenance->>'kind')` を足す。既存行の走査コ
 - あるいは、方向1の CHECK 制約自体が既存データで頻繁に失敗し（＝実際にずれた行が量産される
   経路が見つかり）、「一致を強制する」だけでは足りず「複製そのものを無くす」必要があると
   判明したとき。
+
+## 追記（2026-10-07）
+
+- 「jsonb に `kind` が無い行」という、この ADR が書いていなかった端は [ADR 0693](./0693-provenance-kind-must-be-present-in-jsonb.md) が決めた（`kind` を欠く jsonb を、新しい制約 `memories_provenance_kind_present` で拒む）。この ADR の決定は変えていない。

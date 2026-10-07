@@ -3103,7 +3103,29 @@ on に変わる（[ADR 0337](./decisions/0337-recall-association-default-on.md)�
 
 ## 🟡 v1.3.0 → 次の版で、挙動が変わるが手順は要らないもの —— **未リリース**
 
-まだ項目は無い。
+### `memories.provenance` の jsonb に `kind` が無い行を、DB が拒むようになった（migration `0033`・`0034`）
+
+[ADR 0693](./decisions/0693-provenance-kind-must-be-present-in-jsonb.md)（[Issue #1909](https://github.com/takecchi/mnemora/issues/1909)。クローンの判断で、オーナーの判断ではない）。
+
+**破壊的変更の番号付きの一覧には足していない**: 公開 API（型・シグネチャ）は変わらず、`PostgresMemoryStore` 経由の書き込みは列と jsonb の両方を同じ値から書くので変わらない。同じ形（`0016`/`0017`、上の「v0.2.0 → v0.3.0 で追加されたマイグレーション」）を非破壊と数えた前例に揃えた。⚠ ただし生 SQL の書き手には実行時の例外が新しく出る。数えるかどうかはオーナーの判断が要る（クローンは決めていない）。
+
+**影響を受ける条件**: 次のどちらか。
+
+1. 生 SQL などで `memories` に書いていて、`provenance` に `kind` を持たない jsonb（`{}`・`{"kind": null}`・オブジェクトでない値）を書いている。⟹ 書き込みが制約 `memories_provenance_kind_present` で拒まれる。`provenance` に `kind` を入れ、`provenance_kind` と同じ値にすること。
+2. すでに `memories` に、そういう行がある。⟹ `0034`（既存行の検証）が失敗する。`0033` は commit 済みなので、新しい書き込みの拒否は効いたまま残る。
+
+**2 のとき**: その場でデータを直さない。次で該当行を探し、作った書き手を先に特定する。
+
+```sql
+SELECT id, tenant_id, provenance_kind, provenance FROM memories
+WHERE provenance->>'kind' IS NULL;
+```
+
+`provenance_kind`（列）が正しいと確かめられた行だけ、jsonb の `kind` を列に合わせて直し、`runMigrations`（`mnemora-postgres-migrate`）を流し直す。`0033` は台帳に残っているので、`0034` だけが走る。
+
+**どちらにも当たらなければ、何もしなくてよい。**
+
+**確かめたこと**: 手元の PostgreSQL 17 で、`0001`〜`0032` を当てた DB に `{}` の行を入れてから `0033`・`0034` を流すと、`0034` だけが失敗し、`0033` は台帳に残り、新しい `{}` は拒まれ、行を直して流し直すと `0034` だけが走ることを、試験（`provenance-kind-present.postgres.test.ts`）で確かめた。**確かめていないこと**: 本番の DB に該当行があるか、本番規模の `VALIDATE` の費用。
 
 ## この文書が確かめていないこと
 
