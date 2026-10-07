@@ -18,42 +18,8 @@ import { warmupLocalEmbedding } from "../local-embedding-warmup.js";
 import { tryGitRevParseHead } from "../git-info.js";
 
 /**
- * Issue #109 の残債（ADR 0316「引き受けた負債」1番、`docs/decisions/` 新設 ADR）——
- * `local` 埋め込みの識別子系5群＋数詞2群（ADR 0316 が「既存5+2群」と呼ぶもの）に、
- * [Issue #572](https://github.com/takecchi/mnemora/issues/572) と同じ形の合成ノイズを
- * 掛け、ADR 0316 の判定（`decideEmbeddingDriftVerdict`、変えていない・再利用）が
- * 何回に1回 red になるかを実測する（**手で回す再計測の手順。CI からは呼ばない**）。
- *
- * 🔴🔴 **これは「実際の偽陽性率」ではない。**`local` の揺れは一度も観測されていない
- * （ADR 0094 は2 run のビット一致を確認しただけ）。ここで測るのは**反実仮想**——
- * 「もしスコアに σ の合成ノイズが入ったとしたら」という仮定の下での上限である。
- * 詳しい理由は `../synthetic-score-noise.ts` の doc コメントを見ること。
- *
- * ## やること
- *
- * 1. **7群**（`../local-noise-arm.ts` の `LOCAL_NOISE_GROUPS`）それぞれについて、
- *    `MNEMORA_EMBEDDING=local`（本物の ONNX 推論、@mnemora/local-embedding）・
- *    `MNEMORA_LLM=deterministic` で ingest し、probe ごとに本物の `recall()` を
- *    **1回だけ**呼んで候補全体（`externalId`・`score.total`）を捕まえる
- *    （`captureGroupCandidates`）。埋め込み自体は決定的なので、round を重ねて
- *    録り直す必要が無い（ADR 0316 の OpenAI arm との違い）。
- * 2. 捕まえた候補集合に、σ 11段 × seed 15通り(`../synthetic-score-noise.ts` の
- *    `SIGMA_GRID`/`SEEDS`、Issue #572 に揃えた値)の合成ノイズを掛けて並べ替え直し
- *    （`computeNoisyGroupMetrics`、DB 呼び出し無し）、MRR/hit@1 を再計算する。
- * 3. σ=0(捕まえたそのままの順位)を基準値とし、`decideEmbeddingDriftVerdict`
- *    （ADR 0316、変更していない）で各 (σ, seed) の red/green を判定する。
- * 4. 「MRR の中央値が基準のまま」の帯（`summarizeSigmaLevels`）に入る σ だけを
- *    合算し、Clopper–Pearson の片側95%上限(`clopperPearsonUpperBound`、ADR 0316、
- *    変更していない)を出す。σ ごとの表も別途残す。
- *
- * ## 使い方
- *
- * ```
- * DATABASE_URL=postgresql://worker@127.0.0.1:<port>/mnemora_test \
- *   pnpm --filter @mnemora/example-chat exec tsx src/scripts/local-embedding-synthetic-noise-fp.ts
- * ```
- *
- * ⛔ 実 API は一切叩かない（`OPENAI_API_KEY` は読まない）。
+ * 手で回す再計測。CI からは呼ばない。ここで出る数は実際の偽陽性率ではない: `local` の揺れは一度も観測されておらず、
+ * 「スコアに σ の合成ノイズが入ったとしたら」という反実仮想の上限である。
  */
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -72,18 +38,10 @@ interface GroupOutcome {
   group: string;
   probeCount: number;
   baseline: ProxyGroupMetrics;
-  /** σ ごとの表(11行)。 */
   sigmaLevels: ReturnType<typeof summarizeSigmaLevels>;
-  /** 「偽陽性の帯」に入る σ だけを合算した結果。 */
   band: ReturnType<typeof aggregateFalsePositiveBand>;
-  /**
-   * `band.trials === 0`(格子内のどの σ でも「中央値が基準のまま」の帯に入らなかった)
-   * ときは `null`——Clopper–Pearson は分母0では定義できない。**これは道具の欠陥では
-   * なく実測結果である**——σ=0.0025(格子で最小)の時点で、すでに中央値が動いている
-   * 群があった(下の「測ったこと」参照)。この場合、帯方式では上限を置けない。
-   */
+  /** `band.trials === 0` のときは `null`（Clopper–Pearson は分母0では定義できない）。道具の欠陥ではなく実測結果で、この場合は帯方式では上限を置けない。 */
   bandUpperBound95: number | null;
-  /** 参考: 11段全部を合算した場合(帯を無視した場合)の値。 */
   fullGridRedCount: number;
   fullGridTrials: number;
   fullGridUpperBound95: number;
@@ -211,10 +169,7 @@ async function main(): Promise<void> {
       });
     }
 
-    // --- 陽性対照: 格子(σ<=0.48)とは別に、極端に大きい σ で実際に red が出ることを確認する。
-    // ⚠ 「格子内で red が出なかった」を「揺れが無い」の証明にしない(AGENTS.md
-    // 「⚠『出なかった』を、事象が無いことの証明にしない」)——先に探り棒自体が
-    // 生きていることを、意図的に壊して確認する。
+    // 陽性対照: 格子内で red が出なかったことを「揺れが無い」の証明にしない。探り棒自体が生きているかを、極端に大きい σ で先に確かめる。
     console.log("\n=== 陽性対照(σ=5.0、SIGMA_GRID には含めない別の確認) ===");
     const POSITIVE_CONTROL_SIGMA = 5.0;
     const positiveControlResults: { group: string; redCount: number; seedCount: number }[] = [];

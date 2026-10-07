@@ -12,39 +12,7 @@ import { createExampleRuntime } from "../runtime-factory.js";
 import { warmupLocalEmbedding } from "../local-embedding-warmup.js";
 import { tryGitRevParseHead } from "../git-info.js";
 
-/**
- * Issue #109（06:58Z のコメント、4番「残っているもの」）の残債——ADR 0322 が測った
- * `local` 埋め込みの sparse/dense 群が σ・seed の全組で完全に一致した理由は、
- * 次の仮説のみで確認していなかった:
- *
- * > ノイズは (seed, probe 番号, 候補の並び位置) だけで決まるので、dense で足した
- * > distractor が `recall()` の返す候補に入らなければ、結果は完全に一致する。
- * > 群どうしで候補を突き合わせてはいない。
- *
- * このスクリプトは、その突き合わせを**実際に**行う（手で回す再計測の手順。CI からは
- * 呼ばない——ADR 0322 の「決めたこと」5番と同じ判断: この段でも CI ジョブは足さない）。
- *
- * ## やること
- *
- * 3組（`identifiers`/`japaneseNames`/`numeral`）それぞれについて、sparse/dense 両方の
- * `captureGroupCandidates`（`local-noise-arm.ts`、`../local-embedding-synthetic-noise-fp.ts`
- * と同じ捕捉経路。`recall()` は1回だけ呼ぶ）を実際に呼び、
- * 1. `local-noise-candidate-diff.ts` の `diffGroupCandidates` で probe ごとに
- *    候補配列そのもの（入力）を突き合わせ、
- * 2. `local-noise-grid-comparison.ts` の `compareGroupNoiseOutcomes` で
- *    σ 格子 × seed 全通り（ADR 0322 と同じ 11×15=165 通り）の MRR・red 判定（出力）
- *    を突き合わせる。
- *
- * ⛔ 実 API は一切叩かない（`OPENAI_API_KEY` は読まない）。`MNEMORA_EMBEDDING=local`・
- * `MNEMORA_LLM=deterministic` 固定（ADR 0322 と同じ）。
- *
- * ## 使い方
- *
- * ```
- * DATABASE_URL=postgresql://worker@127.0.0.1:<port>/mnemora_test \
- *   pnpm --filter @mnemora/example-chat exec tsx src/scripts/local-noise-arm-candidate-diff.ts
- * ```
- */
+/** 手で回す再計測。CI からは呼ばない。 */
 
 const here = dirname(fileURLToPath(import.meta.url));
 const CHAT_ROOT = join(here, "..", "..");
@@ -59,17 +27,11 @@ function requireEnv(name: string): string {
 }
 
 interface FamilySpec {
-  /** `diffGroupCandidates` に渡す表示名。 */
   name: string;
   sparseKey: LocalNoiseGroupKey;
   denseKey: LocalNoiseGroupKey;
 }
 
-/**
- * ADR 0322 が「sparse/dense の結果が完全一致した」と報告した3組
- * （`identifiersSparse`/`Dense`、`japaneseNamesSparse`/`Dense`、
- * `numeralSparse`/`Dense`）。`japanese`（sparse/dense の区別が無い群）は対象外。
- */
 const FAMILIES: readonly FamilySpec[] = [
   { name: "identifiers", sparseKey: "identifiersSparse", denseKey: "identifiersDense" },
   { name: "japaneseNames", sparseKey: "japaneseNamesSparse", denseKey: "japaneseNamesDense" },
