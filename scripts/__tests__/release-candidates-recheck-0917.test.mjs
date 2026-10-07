@@ -23,28 +23,6 @@ import {
 } from "../release-candidates-lib.mjs";
 import { execFileSyncWithDeadline, spawnSyncWithDeadline } from "./spawn-with-deadline.mjs";
 
-/**
- * Issue #1812（09/17 マージ分の確かめ直し）まとまり G6 のうち、PR #474（ADR 0214）の
- * `release-candidates.mjs`（リリース当日に「載せるべき候補」を出す道具）に対して、変異を当てて
- * 見つかった「すり抜け」だけを固定する歯。
- *
- * ⚠ **ADR 0214 追記の `changelog-candidates-summary.mjs`（CI の段）は ADR 0293 が削除した**ので、
- * ここでは測らない。残っているのは道具の本体だけ（CI に配線しない。ADR 0214）。
- *
- * 既存の `release-candidates-lib.test.mjs`（純関数）が既に守っているものは重ねていない。足したのは次の2つ。
- *
- * 1. 純関数の欠け：信号が立つ条件の境界（パスの前方一致・`packages/` の位置・`files` 省略・
- *    PR 番号は subject の末尾だけ・16進数は7桁以上）と、`type` が無く信号も無い commit が
- *    母集合の『信号なし』側に残ること（ADR 0214。`c4a3dc7` の族）。
- * 2. **CLI 本体**：既存の歯は CLI を1度も起動していなかった。実物の `release-candidates.mjs` と lib を
- *    一時の git リポジトリへ複写し（`REPO_ROOT` はスクリプトの1つ上なので、その木が対象になる）、
- *    偽の `gh` を PATH の先頭に置いて起動する。確かめるのは、決定2（母集合を落とさない）・
- *    決定4（tag も repo 名も引数・実行時の値から取る）・決定5（CHANGELOG を書き換えず鮮度を名乗る）・
- *    決定6（候補が在っても終了コードは常に 0。実行時エラーだけ 1）。
- *
- * 各 `it` の名前の記号（L1・K3 など）は、Issue #1812 のコメントの変異表の番号である。
- */
-
 const scriptsDir = fileURLToPath(new URL("..", import.meta.url));
 
 describe("release-candidates-lib: 信号と母集合の境界", () => {
@@ -135,7 +113,6 @@ describe("release-candidates.mjs（実物を一時の git リポジトリで起�
       { cwd, encoding: "utf8" },
     ).trim();
 
-  /** `fakeGh`: "fail" = gh は常に失敗する。"ok" = repo は o2/r2、最新リリースは v0 を返す。 */
   function setup({ fakeGh = "fail", changelog = "withMarker" } = {}) {
     const workDir = mkdtempSync(join(tmpdir(), "release-candidates-recheck-"));
     workDirs.push(workDir);
@@ -221,10 +198,8 @@ describe("release-candidates.mjs（実物を一時の git リポジトリで起�
     expect(signalsBySha[ctx.shas.body]).toEqual(["body-breaking", "src"]);
     expect(signalsBySha[ctx.shas.snapshot]).toEqual(["public-api"]);
     expect(signalsBySha[ctx.shas.plain]).toEqual([]);
-    // type が無く信号も無い commit は『信号なし』側に残る（ADR 0214）。
     const noType = payload.withoutSignals.find((c) => c.sha === ctx.shas.noType);
     expect(noType).toMatchObject({ type: null, prNumber: 13, signals: [] });
-    // body の読み取り：`%s%x1f%b` を subject と body に分けている。
     expect(payload.withoutSignals.map((c) => c.subject)).toContain("docs: 誤字 (#12)");
   });
 
