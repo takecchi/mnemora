@@ -6,14 +6,6 @@ import {
 } from "../recall-output-validation.js";
 import type { RecallResult } from "../recall.js";
 
-/**
- * `validateRecallOutput` 単体の歯（Issue #131、ADR 0098）。
- *
- * パイプラインを通した歯は `recall-pipeline.test.ts` の
- * 「recall() — 出力検証」節に在る。ここでは**倒れ方そのもの**（3つのモードの区別と、
- * 「無い」の3種類）を、`recall()` を経由せずに直接測る。
- */
-
 /** 検証を通るべき最小の `RecallResult`（`outputValidation` は載せる前の draft）。 */
 function validDraft(overrides: Partial<RecallResult> = {}): RecallResult {
   return {
@@ -42,7 +34,6 @@ describe("validateRecallOutput — 既定", () => {
 describe('validateRecallOutput — "off" / "report" / "throw" の3状態', () => {
   it('"off" は undefined を返す（「検証していない」——「通った」ではない）', () => {
     expect(validateRecallOutput(validDraft(), "off", "rcl-1")).toBeUndefined();
-    // 壊れた draft でも同じ。"off" は判定そのものをしない。
     expect(validateRecallOutput({ ...validDraft(), recallId: "" }, "off", "rcl-1")).toBeUndefined();
   });
 
@@ -105,10 +96,6 @@ describe('validateRecallOutput — "off" / "report" / "throw" の3状態', () =>
   });
 });
 
-/**
- * ⭐ ADR 0097 の欠陥を、この検証が隠さない／誤検出しないことを純関数の側でも固定する。
- * パイプライン側の同じ主張は `recall-pipeline.test.ts` の `T3`。
- */
 describe("validateRecallOutput — share > 1 は契約違反ではない（ADR 0097）", () => {
   const draftWithShare = (share: number) =>
     validDraft({

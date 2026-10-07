@@ -9,27 +9,7 @@ import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 import type { FakeVectorStore } from "./runtime-fakes.js";
 
-/**
- * Issue #608 項目③(b) / [ADR 0286](../../../docs/decisions/0286-recall-include-subjectless.md):
- * `RecallQuery.includeSubjectless` — `ctx.subjectId` の等値絞りを `subjectId: null`
- * （主題なし）まで広げる opt-in。
- *
- * `recall-subject-filter.test.ts`（ADR 0023）・`recall-period-filter.test.ts`（ADR 0059）と
- * 同型の3段構え:
- * 1. 配線の歯——`RecallQuery.includeSubjectless` が段1の `VectorFilter`/`LexicalFilter` に
- *    そのまま渡ること。
- * 2. **adapter がこの欄を無視しても安全であること**——`includeSubjectless` を知らない
- *    「他社 adapter」を `IncludeSubjectlessIgnoringVectorStore` で再現する。この状態で
- *    `includeSubjectless: true` を渡しても、主題なしの Memory を取りこぼすだけで、
- *    別の subject の Memory が混ざることは無い。
- *    （当初は素の `FakeVectorStore` がこの欄を参照していなかったので、それをそのまま
- *    使っていた。Issue #948 で Fake がこの欄を適用するようになったため、ラッパに置き換えた。）
- * 3. **後置フィルタ本体の歯**——`PeriodStrippingVectorStore`（ADR 0059）と同型の
- *    `SubjectFilterStrippingVectorStore` で段1の絞りを剥がし、`recall-runtime.ts` の
- *    `survivesSubjectFilter` だけで正しく絞れることを確かめる。
- *
- * `packages/core` 自身のテストなので `@mnemora/testkit` には依存しない。
- */
+/** `@mnemora/testkit` には依存しない。 */
 
 const NOW = new Date("2026-06-01T00:00:00.000Z");
 
@@ -126,10 +106,6 @@ describe("recall() — 段1の filter に includeSubjectless が載ること（�
   });
 });
 
-// ---------------------------------------------------------------------------
-// Memory の下ごしらえ（recall-period-filter.test.ts と同じ形）。
-// ---------------------------------------------------------------------------
-
 const ctx: Ctx = { tenantId: "tenant-1", subjectId: "user-a" };
 
 function newMemory(overrides: Partial<NewMemory> = {}): NewMemory {
@@ -176,12 +152,7 @@ async function createEmbeddedMemory(
   return memory;
 }
 
-// ---------------------------------------------------------------------------
-// 2. adapter がこの欄を無視しても安全である（取りこぼしはあるが、混入は無い）。
-// `IncludeSubjectlessIgnoringVectorStore` は `includeSubjectless` だけを剥がし、
-// `subjectId` の厳密一致だけを見る「includeSubjectless を知らない adapter」を再現する
-// （Issue #948 までは素の `FakeVectorStore` がこの形だった）。
-// ---------------------------------------------------------------------------
+// `IncludeSubjectlessIgnoringVectorStore` は `includeSubjectless` だけを剥がし、`subjectId` の厳密一致だけを見る「欄を知らない adapter」を再現する。
 
 class IncludeSubjectlessIgnoringVectorStore implements VectorStore {
   constructor(private readonly inner: VectorStore) {}
@@ -216,7 +187,6 @@ class IncludeSubjectlessIgnoringVectorStore implements VectorStore {
     query: number[],
     opts: { limit: number; filter: VectorFilter },
   ): Promise<VectorHit[]> {
-    // 🔑 includeSubjectless「だけ」を剥がす。subjectId を含め他は素通し。
     const { includeSubjectless: _includeSubjectless, ...stripped } = opts.filter;
     return this.inner.search(ctx, space, query, { ...opts, filter: stripped });
   }
@@ -237,20 +207,11 @@ describe("recall() — includeSubjectless を無視する adapter でも、別 s
     const ids = result.memories.map((m) => m.memoryId);
 
     expect(ids).toContain(subjectAMemory.id);
-    // 🔴 取りこぼし: adapter が `includeSubjectless` を無視して subjectId 厳密一致のまま
-    // 候補を絞るため、主題なしの Memory は段1の窓に一度も現れず、後置フィルタも
-    // 存在しないものを復活させられない。
     expect(ids).toHaveLength(1);
   });
 });
 
-// ---------------------------------------------------------------------------
-// 3. 後置フィルタ本体の歯。段1の絞りを剥がし、`survivesSubjectFilter` だけで
-// 正しく絞れることを確かめる（`PeriodStrippingVectorStore` と同型）。
-//
-// ⛔ 本番コード（recall-runtime.ts / vector-store.ts）は1文字も変えない——
-// ラッパはこの test ファイルの中に閉じている。
-// ---------------------------------------------------------------------------
+// 後置フィルタ本体の歯: 段1の絞りを剥がし、`survivesSubjectFilter` だけで絞れることを確かめる。
 
 class SubjectFilterStrippingVectorStore implements VectorStore {
   constructor(private readonly inner: VectorStore) {}
@@ -285,7 +246,6 @@ class SubjectFilterStrippingVectorStore implements VectorStore {
     query: number[],
     opts: { limit: number; filter: VectorFilter },
   ): Promise<VectorHit[]> {
-    // 🔑 subjectId/includeSubjectless「だけ」を剥がす。他は素通し。
     const {
       subjectId: _subjectId,
       includeSubjectless: _includeSubjectless,
@@ -361,25 +321,10 @@ describe("recall() — 後置フィルタ（survivesSubjectFilter）が includeS
   });
 });
 
-// ---------------------------------------------------------------------------
-// 段3.5（連想枠）専用の後置フィルタの歯（`recall-association-gates.test.ts` の
-// `AssociationGateStrippingVectorStore` と同型）。
-//
-// 🔴 **この describe が無いと、段1（`survivesSubjectFilter` の1つ目の呼び出し）だけを
-// 検査する変異試験が、段3.5（2つ目の呼び出し）を1つも通さない。** 上の
-// `SubjectFilterStrippingVectorStore` は**すべての** search() 呼び出しから subjectId/
-// includeSubjectless を剥がすため、段1の post-filter が先に候補を絞り込んでしまい、
-// 段3.5 側の post-filter が実際に「別の候補で」試されることが無い——`recall-association-
-// gates.test.ts` 冒頭のコメントが説明する「1本目で先に落ちると、2本目の後置は露出しない」
-// のと同じ理由。ここでは**2本目以降（連想用）の search() だけ**から剥がす。
-// ---------------------------------------------------------------------------
+// 段3.5専用の後置フィルタの歯。段1の post-filter が先に絞ると段3.5側の post-filter が別の候補で試されないので、2本目以降（連想用）の search() だけから剥がす。
 
-/** Q=[1,0] に対して類似度 0.7071——段1で拾われ、連想のアンカーになる。 */
 const ANCHOR_VECTOR = [0.70710678, 0.70710678];
-/**
- * Q=[1,0] との類似度は 0 ちょうど（段1では below_threshold）だが、アンカーとの類似度は
- * 0.7071（既定 minSimilarity 0.5 以上）——**連想枠でしか返ってこない**位置。
- */
+/** クエリとの類似度は 0（段1では below_threshold）だが、アンカーとの類似度は 0.7071: 連想枠でしか返ってこない位置。 */
 const ASSOCIATED_VECTOR = [0, 1];
 
 class AssociationSubjectFilterStrippingVectorStore implements VectorStore {
@@ -432,7 +377,6 @@ class AssociationSubjectFilterStrippingVectorStore implements VectorStore {
     if (this.searchCount === 1) {
       return this.inner.search(ctx, space, query, opts);
     }
-    // 🔑 2本目以降（連想用）だけ subjectId/includeSubjectless を剥がす。段1はそのまま。
     const {
       subjectId: _subjectId,
       includeSubjectless: _includeSubjectless,
@@ -500,14 +444,7 @@ describe("recall() — 連想枠（段3.5）専用の後置フィルタが inclu
   });
 });
 
-// ---------------------------------------------------------------------------
-// 連想枠（段3.5）の search() に includeSubjectless が載ること（配線の歯、#679 / ADR 0286）。
-//
-// 上の describe は「連想用 search() が欄を無視しても後置フィルタが絞る」形と既定の回帰だけを見ていて、
-// 連想枠の filter から `includeSubjectless` を外す変異（`associationFilter` の1行）が緑だった
-// （Issue #1776 の #679 のコメント、ADR 0665）。欄を尊重する adapter（Postgres）では、連想のアンカーの
-// 近傍にいる主題なしの記憶が adapter の WHERE で落ち、連想で拾えなくなる。
-// ---------------------------------------------------------------------------
+// 連想枠の filter から `includeSubjectless` を外す変異は、欄を尊重する adapter（Postgres）では連想のアンカーの近傍にいる主題なしの記憶が落ちる。上の describe は欄を無視する adapter の形しか見ていない。
 describe("recall() — 連想枠（段3.5）の VectorStore.search にも includeSubjectless が載る（配線の歯）", () => {
   async function associationFilters(includeSubjectless: boolean | undefined) {
     const { runtime, stores } = buildRuntime();

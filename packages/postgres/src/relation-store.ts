@@ -4,7 +4,7 @@ import { assertWellFormedCtx } from "@mnemora/core";
 import type { Db } from "./client.js";
 import { isUuidLike, normalizeUuidCase, parsePgTimestamp } from "./mapping.js";
 
-/** `memory_relations` の1行。`listRelated` の組み立てにだけ使う内部形。 */
+/** `memory_relations` の1行。 */
 interface MemoryRelationRow {
   from_memory_id: string;
   to_memory_id: string;
@@ -12,49 +12,40 @@ interface MemoryRelationRow {
   created_at: string;
 }
 
-/** 他の store（`PostgresMemoryStore` ほか）と同じ形の「そのテナントに無い」例外。 */
+/** 他の store と同じ形の「そのテナントに無い」例外。 */
 function memoryNotFound(id: string): Error {
   return new Error(`PostgresRelationStore: memory not found for tenant: ${id}`);
 }
 
 /**
- * `memory_relations.kind` に入れてよい値（`RelationKind` の全値。`0026_memory_relations.sql` の CHECK と同じ）。
- * `Record<RelationKind, true>` で持つので、union に値を足すと、ここに足し忘れた時点で型検査が落ちる。
+ * `memory_relations.kind` に入れてよい値（`0026_memory_relations.sql` の CHECK と同じ）。
+ * `Record<RelationKind, true>` で持つので、union に値を足してここに足し忘れると型検査が落ちる。
  */
 const KNOWN_RELATION_KINDS: Record<RelationKind, true> = { contradicts: true };
 
-/**
- * 列挙の外の kind は、CHECK 制約違反（生の DB エラー）を利用者へ漏らさず、INSERT の前にこの例外で断る。
- */
+/** 列挙の外の kind は、CHECK 制約違反（生の DB エラー）でなく、INSERT の前にこの例外で断る。 */
 function unknownRelationKind(kind: string): Error {
   return new Error(`PostgresRelationStore: unknown relation kind: ${String(kind)}`);
 }
 
 /**
- * `RelationStore` の Postgres 実装（Issue #207/#933 PR2、ADR 0292 決定1、ADR 0381）。
+ * `RelationStore` の Postgres 実装（ADR 0292、ADR 0381）。
  *
- * **群の作成・解消（`markContestedGroup?`/`resolveContestedGroup?`）はここではない**
- * ——`PostgresMemoryStore` が自分のトランザクションの中で `memory_relations` へ直接
- * SQL を発行する（`memory-store.ts` の doc コメント参照）。この class が持つのは
- * 単発の `link`/`unlink`（トランザクション外）と、読み取り専用の `listRelated`・`listRelatedMany` だけ。
+ * 群の作成・解消（`markContestedGroup?`/`resolveContestedGroup?`）はここではなく、`PostgresMemoryStore` が
+ * 自分のトランザクションの中で `memory_relations` へ直接 SQL を発行する。
  */
 export class PostgresRelationStore implements RelationStore {
   constructor(private readonly db: Db) {}
 
   /**
    * 両端の記憶が `ctx.tenantId` の `memories` に在ることを確かめてから書く（ADR 0398）。
-   * 確かめと書き込みは**1文**（存在検査の CTE と INSERT を同じ文に載せる）——検査と書き込みの間に
-   * 別の文が挟まる窓を作らない。`fromId`・`toId` は小文字にそろえてから使い、uuid の形でない id は
-   * DB へ投げる前に弾く（`isUuidLike` の doc 参照）。
-   * `kind` が `RelationKind` の列挙の外なら、端の検査・DB への書き込みより前に
-   * `unknown relation kind` を投げる。どちらかの端でも在らなければ（uuid の形でない id・別のテナントの
-   * 記憶を含む）、行を書かずに `memory not found for tenant` を投げる——両方が無いときに報告するのは
-   * `fromId` 側（他の store の同種の例外と同じ形。DB 由来のエラーは利用者に見せない）。
-   * 同じ行が既に在れば何もしない（冪等）。
+   * `kind` が `RelationKind` の列挙の外なら `unknown relation kind` を、どちらかの端でも在らなければ
+   * （uuid の形でない id・別のテナントの記憶を含む）`memory not found for tenant` を、行を書かずに投げる。
+   * 両方が無いときに報告するのは `fromId` 側。同じ行が既に在れば何もしない（冪等）。
    *
-   * ⚠ 「行を書いたか」ではなく「両端が在ったか」を、文が返す `from_ok`/`to_ok` で見る——既に同じ行が在って
-   * `ON CONFLICT DO NOTHING` が0行にした場合（冪等）と、検査で落ちた場合を、書き込みの行数では
-   * 区別できないため。
+   * 確かめと書き込みは**1文**に載せる（検査と書き込みの間に別の文が挟まる窓を作らない）。
+   * 「両端が在ったか」は、書き込みの行数でなく文が返す `from_ok`/`to_ok` で見る。冪等で
+   * `ON CONFLICT DO NOTHING` が0行にした場合と、検査で落ちた場合を、行数では区別できないため。
    */
   async link(ctx: Ctx, kind: RelationKind, fromId: MemoryId, toId: MemoryId): Promise<void> {
     assertWellFormedCtx(ctx);
@@ -97,7 +88,7 @@ export class PostgresRelationStore implements RelationStore {
     assertWellFormedCtx(ctx);
     const from = normalizeUuidCase(fromId);
     const to = normalizeUuidCase(toId);
-    // uuid の形でない id は、存在しない id と同じ（張られている行は無い）ので何もしない。
+    // uuid の形でない id は、張られている行が無いので何もしない。
     if (!isUuidLike(from) || !isUuidLike(to)) {
       return;
     }
@@ -111,11 +102,9 @@ export class PostgresRelationStore implements RelationStore {
   }
 
   /**
-   * `listRelated` を複数の起点に対して1文（`from_memory_id = ANY(...)`）で行う（Issue #1449、ADR 0402。
-   * 契約は `RelationStore.listRelatedMany` の doc）。`result[i]` は `memoryIds[i]` の相手側の一覧——
-   * 起点ごとの分け方は uuid を小文字にそろえたキーで行うので、渡した id の綴りの揺れに依らない。
-   * uuid の形でない id は DB へ投げず（型変換エラーでバッチ全体が落ちるため）、その位置は空配列にする。
-   * 重複した id は1回だけ DB へ渡し、位置ごとに別々の配列を返す。
+   * `listRelated` を複数の起点に対して1文で行う（ADR 0402。契約は `RelationStore.listRelatedMany` の doc）。
+   * 起点ごとの分け方は uuid を小文字にそろえたキーで行う。uuid の形でない id は、型変換エラーで
+   * バッチ全体が落ちるので DB へ投げず、その位置は空配列にする。
    */
   async listRelatedMany(
     ctx: Ctx,
@@ -156,7 +145,7 @@ export class PostgresRelationStore implements RelationStore {
   async listRelated(ctx: Ctx, memoryId: MemoryId, kind?: RelationKind): Promise<Relation[]> {
     assertWellFormedCtx(ctx);
     const id = normalizeUuidCase(memoryId);
-    // uuid の形でない id は、存在しない id と同じ（関係は無い）ので、DB へ投げず空を返す。
+    // uuid の形でない id は、関係が無いので DB へ投げず空を返す。
     if (!isUuidLike(id)) {
       return [];
     }

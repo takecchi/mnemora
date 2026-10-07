@@ -7,20 +7,6 @@ import type { RecallStageName } from "../recall.js";
 import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores, withoutGetVectors } from "./runtime-fakes.js";
 
-/**
- * 段3.5（連想枠）は `explain.stages` に記録される（Issue #865、2026-09-29。`RecallStageName`
- * の TSDoc・`docs/recall.md` §1・§2・§9）。
- *
- * この歯は、以前（PR #1346）「記録しない」ことを縛っていた
- * `recall-explain-stages-omit-association.test.ts` を、新しい振る舞いに合わせて置き換えたもの
- * （ファイル名も改名した）。旧テストが確認していた「代わりの印」（`usage.byTier.association`・
- * `retrievedVia`/`associationOf`・`omitted` の `stage: "association"`）は今も変わらず出る——
- * ここが確認するのは、それに加えて `explain.stages` にも `stage: "association"` の trace が
- * 積まれるようになったことである。
- *
- * `RecallStageName` への値の追加は破壊的変更に数えない（オーナー回答 ask_human d9364c91）。
- */
-
 const ctx: Ctx = { tenantId: "tenant-1" };
 const NOW = new Date("2026-06-01T00:00:00.000Z");
 
@@ -143,8 +129,6 @@ describe("段3.5（連想枠）は explain.stages に記録される（Issue #86
       executed: true,
       detail: { anchors: 1, hits: 1, selected: 1 },
     });
-    // 段の並びは段3(contradiction_resolution)の直後・段4(budget_truncation)の直前
-    // (docs/recall.md §2・§9、番号を3.5にしてあるのはこの位置を表すため)。
     expect(names.indexOf("association")).toBe(names.indexOf("contradiction_resolution") + 1);
     expect(names.indexOf("association")).toBe(names.indexOf("budget_truncation") - 1);
   });
@@ -167,8 +151,6 @@ describe("段3.5（連想枠）は explain.stages に記録される（Issue #86
     expect("association" in withoutAssociation.usage.byTier).toBe(false);
 
     expect(stageNames(withoutAssociation).includes("association")).toBe(false);
-    // off の stages は、on の stages から association の trace を除いたものと一致する
-    // ——`null` で明示的に off にしたときは、他のどの段の並びも変わらない。
     expect(stageNames(withoutAssociation)).toEqual(
       stageNames(withAssociation).filter((name) => name !== "association"),
     );
@@ -195,7 +177,6 @@ describe("段3.5（連想枠）は explain.stages に記録される（Issue #86
 
   it("アンカーは在ったが連想の検索結果が0件の run は、association(executed:true) のまま（探して0件と、探さなかったを混ぜない）", async () => {
     const { runtime, stores } = buildRuntime();
-    // 記憶はアンカー1件だけ。アンカー自身は連想の候補にならないので、検索は走るが0件になる。
     await createEmbeddedMemory(stores, [1, 0], { digest: "アンカー本文" });
 
     const result = await runtime.recall(ctx, {
@@ -204,7 +185,6 @@ describe("段3.5（連想枠）は explain.stages に記録される（Issue #86
     });
 
     expect(result.memories.some((m) => m.retrievedVia === "association")).toBe(false);
-    // 探さなかった（no_anchor）の印は出ない
     expect(result.omitted).not.toContainEqual({
       kind: "stage_skipped",
       stage: "association",
@@ -220,7 +200,6 @@ describe("段3.5（連想枠）は explain.stages に記録される（Issue #86
   it("detail は件数の書き写し: 連想の候補が席（maxCount）より多いとき、hits は見つけた件数、selected は席に着いた件数", async () => {
     const { runtime, stores } = buildRuntime();
     await createEmbeddedMemory(stores, [0.70710678, 0.70710678], { digest: "アンカー本文" });
-    // クエリ [1, 0] には当たらず（ann の閾値の下）、アンカーには近い候補を3件。
     await createEmbeddedMemory(stores, [0, 1], { digest: "連想本文1" });
     await createEmbeddedMemory(stores, [-0.1, 0.995], { digest: "連想本文2" });
     await createEmbeddedMemory(stores, [-0.2, 0.98], { digest: "連想本文3" });

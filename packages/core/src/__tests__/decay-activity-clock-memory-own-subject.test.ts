@@ -7,23 +7,7 @@ import type { Memory, NewMemory } from "../memory.js";
 import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * [ADR 0394](../../../docs/decisions/0394-activity-clock-writes-use-memorys-own-subject.md)
- * （ADR 0353 の負債1の解消）: 書く側の活動時計の「いま」は、**対象の Memory 自身の
- * `subjectId`** の `T + S_x` で解く（`ctx.subjectId` ではなく）。
- *
- * 読む側（段1 SQL・段2・掃引）は行ごとに Memory 自身の `S_x` を足す。書く側が
- * `ctx.subjectId` の `S_x` を足すと、`ctx` と Memory の subject がずれる入力で、読む側の式と
- * 食い違う起点（`decayBaseSeq`/`decayFloorSeq`）が書かれる。ここではその「ずれ」を作る:
- *
- * - tick のように `subjectId` の無い ctx から、subject の記憶を作る・強化する。
- * - ctx=alice で bob の記憶を作る・強化する。
- * - subjectless の記憶を ctx=alice で作る・強化する。
- * - 制御: ctx と subject が一致する形。
- *
- * 数値は T=10・S_alice=7・S_bob=20 に固定する（有効ないま: alice=17, bob=30, subjectless=10。
- * どの組も違う値なので、取り違えた subject の値はそのまま assertion に現れる）。
- */
+/** 数値は T=10・S_alice=7・S_bob=20 に固定する（有効ないま: alice=17, bob=30, subjectless=10）。どの組も違う値なので、取り違えた subject の値はそのまま assertion に現れる。 */
 
 const TENANT = "tenant-1";
 const tenantCtx: Ctx = { tenantId: TENANT };
@@ -69,7 +53,6 @@ function newMemory(overrides: Partial<NewMemory> = {}): NewMemory {
       halfLifeHours: 24 * 365 * 10,
     }),
     embeddingStatus: "pending",
-    // 活動時計を持つ記憶（強化が活動時計側に触れる条件）。起点は 0 の古い値。
     halfLifeRecalls: HALF_LIFE_RECALLS,
     decayBaseSeq: 0,
     decayFloorSeq: floorFrom(0),
@@ -144,7 +127,7 @@ async function setup(llmProvider: LLMProvider) {
     embeddingProvider: stores.embeddingProvider,
     hashContent: (content: string) => `sha256(${content})`,
     clock: { now: () => new Date(nowMs) },
-    // 問15: このファイルは LLM が返す subjectId（記憶自身の subject）の活動時計を縛るので、opt-in で受ける。
+    // このファイルは LLM が返す subjectId（記憶自身の subject）の活動時計を縛るので、opt-in で受ける。
     config: { acceptLlmSubjectIdWithoutCandidates: true },
   });
   await stores.tenantSettingsStore.setDecayClock(tenantCtx, "activity");
@@ -204,13 +187,11 @@ describe("作成（抽出）— 起点は記憶自身の subject の T + S_x（A
     const { runtime, stores } = await setup(
       llmReturning([{ content: "aliceの事実", provenanceKind: "stated" }]),
     );
-    // 観測は alice の ctx で受け付け、抽出は subjectId の無い ctx の tick が行う。
     const { observationId } = await runtime.observe(aliceCtx, {
       kind: "utterance",
       text: "発話",
       extract: "deferred",
     });
-    // 以前の Fake は outbox 行の availableAt を実時刻で付けたため、tick の時計を後にしている（今の Fake は `opts.now` に従う。ADR 0555。組み替えは「残り」）。
     nowMs = Date.now() + 60_000;
     const tick = await runtime.tick(tenantCtx, { kinds: ["extract"], leaseMs: 60_000 });
     expect(tick.processed).toBe(1);
@@ -287,7 +268,6 @@ describe("作成（抽出）— 起点は記憶自身の subject の T + S_x（A
         req.schema.parse({ memories: [{ content, provenanceKind: "stated" }] }) as U,
     });
     const first = await runtime.observe(aliceCtx, { kind: "utterance", text: "発話" });
-    // 中身が違えば新しい行になる（同じ content_hash は冪等に既存の行を返すだけ）。
     content = "aliceの別の事実";
     const re = await runtime.reextract(tenantCtx, first.observationId);
     expect(re.memoryIds).toHaveLength(1);

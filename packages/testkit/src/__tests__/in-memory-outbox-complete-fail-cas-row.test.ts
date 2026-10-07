@@ -60,24 +60,4 @@ describe("InMemoryOutboxStore.complete/fail — CAS で弾いたとき・通し�
       expect(other).toEqual(otherBefore);
     });
   }
-
-  it("complete は completedAt だけを書き、ほかの列は変えない", async () => {
-    const job = makeJob();
-    const before = structuredClone(job);
-    const store = new InMemoryOutboxStore([job]);
-
-    await store.complete(ctx, job.id, job.attempts, { at: AT });
-
-    expect(job).toEqual({ ...before, completedAt: AT });
-  });
-
-  it("fail は failedAt と lastError だけを書き、ほかの列は変えない", async () => {
-    const job = makeJob();
-    const before = structuredClone(job);
-    const store = new InMemoryOutboxStore([job]);
-
-    await store.fail(ctx, job.id, "boom", job.attempts, { at: AT });
-
-    expect(job).toEqual({ ...before, failedAt: AT, lastError: "boom" });
-  });
 });

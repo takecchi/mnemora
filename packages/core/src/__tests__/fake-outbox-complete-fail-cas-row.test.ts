@@ -113,4 +113,28 @@ describe("FakeOutboxStore.complete/fail — CAS で弾いたとき・通した�
       expect(outboxStore.listJobs(ctx)).toEqual(before);
     }
   });
+
+  it.each([
+    ["complete → complete", 0, 0],
+    ["fail → fail", 1, 1],
+    ["complete → fail", 0, 1],
+    ["fail → complete", 1, 0],
+  ] as const)(
+    "%s: 同じ attempts で終端済みの行に2回目を呼んでも、1回目の終端を保ち、例外も投げない（先勝ち）",
+    async (_label, firstIndex, secondIndex) => {
+      const { outboxStore, jobs } = await seedClaimedJobs(1);
+      const job = jobs[0]!;
+      await TERMINATES[firstIndex]![1](outboxStore, ctx, job.id, job.attempts);
+      const before = outboxStore.listJobs(ctx);
+
+      const later = new Date(AT.getTime() + 60_000);
+      await expect(
+        secondIndex === 0
+          ? outboxStore.complete(ctx, job.id, job.attempts, { at: later })
+          : outboxStore.fail(ctx, job.id, "second", job.attempts, { at: later }),
+      ).resolves.toBeUndefined();
+
+      expect(outboxStore.listJobs(ctx)).toEqual(before);
+    },
+  );
 });

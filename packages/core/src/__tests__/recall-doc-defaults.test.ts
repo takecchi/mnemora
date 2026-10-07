@@ -206,7 +206,6 @@ describe("docs/recall.md の既定値・上限・式は recall() の振る舞い
       association: null,
       scoreThreshold: 0,
     });
-    // Issue #548 方向2 / ADR 0352: association: null・ann 経由のみなので affinityMeasured: true。
     const totals = new Map(
       all.memories.map((r) => {
         assertAffinityMeasured(r.score);

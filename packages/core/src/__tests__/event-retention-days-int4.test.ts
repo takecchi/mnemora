@@ -4,11 +4,6 @@ import {
   EVENT_RETENTION_DAYS_INVALID_MESSAGE,
 } from "../interfaces/tenant-settings-store.js";
 
-/**
- * ADR 0499（ADR 0479 の材料）: `assertValidEventRetentionDays` は、正の整数であることに加えて、
- * `tenant_settings.event_retention_days`（Postgres の int4）に収まること（`2^31 - 1` 以下）を検査する。
- * 2実装（`@mnemora/postgres`・`@mnemora/testkit` の InMemory）はこの関数だけで日数を検査する。
- */
 describe("assertValidEventRetentionDays（ADR 0499）", () => {
   it.each([1, 2, 365, 2 ** 31 - 2, 2 ** 31 - 1])("%d は通る", (days) => {
     expect(() => assertValidEventRetentionDays(days)).not.toThrow();

@@ -7,15 +7,7 @@ import type { NewMemory } from "../memory.js";
 import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * 保守の操作（`findCorrectionCandidates`・`consolidate`・`reflect`）は内部で `recall()` を1回呼ぶ。
- * その `recall()` へ、呼び手が渡した `activityCounting` が届くこと（`'subject'` なら、`ctx.subjectId` の
- * 活動カウンタ `S` だけが進み、テナントのカウンタ `T` は進まない。省略は `'tenant'` で、`T` が進む）。
- * 届かないと、前進するカウンタが黙って違う側になるだけで、返る記憶は変わらないので、
- * `recall()` を直接呼ぶ歯だけでは気づけない。
- *
- * `RecallQuery.activityCounting` の値は `'tenant'` と `'subject'` だけで、知らない値は断る。
- */
+/** 返る記憶は変わらないので、`recall()` を直接呼ぶ歯だけでは `activityCounting` が届かないことに気づけない。 */
 
 const TENANT = "tenant-maintenance-wiring";
 const aliceCtx: Ctx = { tenantId: TENANT, subjectId: "alice" };

@@ -4,23 +4,11 @@ import ts from "typescript";
 import { describe, expect, it } from "vitest";
 
 /**
- * docs/architecture.md §3.6: 「core が実行時に依存してよいのは zod だけである」
- * 「これは方針ではなく機械的に担保する」——このテストがその機械的な担保にあたる。
- * 歯は2本ある:
- *
- * 1. package.json の `dependencies` のキーが ['zod'] だけであること。
- * 2. `src`（テストを除く）が **実行時に** import するものが、`zod`・相対パス・`node:` 組み込みだけであること。
- *    1 だけでは、devDependency（vitest や typescript）を src から import しても全検査が緑のまま
- *    dist に出る（型検査・lint・build は通る）。
- *
- * 2 は各 src を `ts.transpileModule` で JS にしてから見る。`import type` や、型としてしか使わない
- * import は tsc の出力から消える（verbatimModuleSyntax: false）ため、**dist に実際に残る import** と
- * 同じ集合を、build より前（CI では test が build より先に走る）に得られる。文字列の正規表現ではなく
- * AST で見るので、`export ... from`・動的 `import()`・`require()` も拾う。
- *
- * node script でもよいと指示されているが、CI の `test` ステップで必ず走らせるため
- * vitest のテストとして書く。パッケージは CommonJS 出力のため `import.meta.url` ではなく
- * `__dirname` を使う。
+ * 歯は2本: (1) package.json の `dependencies` のキーが ['zod'] だけ。(2) `src`（テストを除く）が実行時に import するものが、`zod`・相対パス・`node:` 組み込みだけ。
+ * 1 だけでは、devDependency（vitest や typescript）を src から import しても全検査が緑のまま dist に出る。
+ * 2 は各 src を `ts.transpileModule` で JS にしてから見る: `import type` や型としてしか使わない import は tsc の出力から消えるので、dist に実際に残る import と同じ集合を build より前に得られる。
+ * 文字列の正規表現ではなく AST で見るので、`export ... from`・動的 `import()`・`require()` も拾う。
+ * node script ではなく vitest のテストにするのは、CI の `test` ステップで必ず走らせるため。パッケージは CommonJS 出力のため `import.meta.url` ではなく `__dirname` を使う。
  */
 const packageRoot = join(__dirname, "../..");
 const packageJsonPath = join(packageRoot, "package.json");

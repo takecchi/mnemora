@@ -6,17 +6,7 @@ import type { RecallQuery } from "../recall.js";
 import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * recall の段1（後置の再検査）と段3.5（連想枠）が、`status ∈ {active, contested}` を
- * 再検査する歯（ADR 0432 AL-1）。
- *
- * 窓: `vectorStore.search` が候補を返したあと、`memoryStore.getMany` が今の状態を読むまでの間に
- * `sweepArchive`（archived へ）や `forget`（forgotten へ）が入ると、`VectorFilter.status` は
- * 検索の時点でしか効いていないので、その記憶が `memories` に混ざっていた。
- * 「割り込ませない recall では返らない」ことを陽性対照として同じ配置で見る。
- *
- * `@mnemora/testkit` には依存しない（`runtime-fakes.ts` 冒頭のコメントと同じ理由）。
- */
+/** 窓: `vectorStore.search` が候補を返してから `memoryStore.getMany` が状態を読むまでの間に `sweepArchive` や `forget` が入ると、`VectorFilter.status` は検索の時点でしか効かない。割り込ませない recall では返らないことを陽性対照として同じ配置で見る。`@mnemora/testkit` には依存しない。 */
 
 const ctx: Ctx = { tenantId: "tenant-1" };
 const NOW = new Date("2026-06-01T00:00:00.000Z");
@@ -92,7 +82,6 @@ async function embedded(
   return memory;
 }
 
-/** `search` の n 回目（1 始まり）が返った直後に `hook` を1度だけ走らせる。 */
 function interposeAfterSearch(
   stores: ReturnType<typeof createFakeRuntimeStores>,
   n: number,

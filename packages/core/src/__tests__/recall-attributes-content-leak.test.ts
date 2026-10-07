@@ -7,21 +7,7 @@ import type { RecallScope } from "../recall.js";
 import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * レビュー指摘（マネージャー経由、2026-09-25）: `attributes` による絞り込み（Issue #152/#153、
- * ADR 0312）は、段1（ANN・語彙の候補生成）と段3.5（連想枠）の後置フィルタ
- * （`survivesAttributesFilter`）でしか検査していなかった。**Memory の中身（`digest`）が
- * `RecallResult` に乗る経路は他に2つあり、どちらも検査を素通りしていた**:
- *
- * 1. **段3（必須の同伴取得、mandatory companion retrieval）**——`contested` の相手を
- *    `MemoryStore.getMany` で直接取りに行くだけで、後置フィルタを一度も経由しない。
- * 2. **段5（目次帯、digest band）**——`MemoryStore.aggregateScope` の `digests` を
- *    そのまま `packDigestBand` に渡すだけで、`scope.attributes` を無視する自作
- *    `MemoryStore` だと絞り込みの外の `digest` がそのまま紛れ込む。
- *
- * このファイルは、その2つの穴を**赤→緑**で固定する。`packages/core` 自身のテストなので
- * `@mnemora/testkit` には依存しない。
- */
+/** `@mnemora/testkit` には依存しない。 */
 
 const ctx: Ctx = { tenantId: "tenant-1" };
 const NOW = new Date("2026-06-01T00:00:00.000Z");
@@ -84,12 +70,6 @@ function buildRuntime(memoryStoreOverride?: (fms: MemoryStore) => MemoryStore) {
   return { runtime, stores };
 }
 
-// ---------------------------------------------------------------------------
-// 1. 必須の同伴取得（段3）: 対向の attributes が絞り込みに一致しなければ、
-//    ペアごと落ちる（争われている主張を、争われていない顔で単独で出さない、という
-//    既存原則と同じ落ち方——unit_assembly_dropped、ADR 0043）。
-// ---------------------------------------------------------------------------
-
 describe("recall() — 必須の同伴取得（段3）にも attributes が掛かる（レビュー指摘、ADR 0312 追記）", () => {
   it("対向（companion）の attributes が絞り込みに一致しなければ、争っている側ごと結果から落ちる", async () => {
     const { runtime, stores } = buildRuntime();
@@ -102,8 +82,7 @@ describe("recall() — 必須の同伴取得（段3）にも attributes が掛�
       }),
     );
     await stores.vectorStore.upsert(ctx, stores.embeddingProvider.space, strong.id, [1, 0]);
-    // わざとクエリベクトルから離す——スコアだけなら選ばれない側（`mark-contested.test.ts`
-    // 「recall() の段3が実際に発火する」歯と同じ道具立て）。
+    // わざとクエリベクトルから離す: スコアだけなら選ばれない側にする。
     const weak = await stores.memoryStore.createMemory(
       ctx,
       newMemory({
@@ -124,19 +103,12 @@ describe("recall() — 必須の同伴取得（段3）にも attributes が掛�
     });
 
     const ids = result.memories.map((m) => m.memoryId);
-    // 🔴 本命: `weak`（visibility: public）の digest が、絞り込みの外から紛れ込んでは
-    // ならない。
     expect(ids).not.toContain(weak.id);
-    // ⭐ 争われている主張を、争われていない顔で単独で出すくらいなら、両方とも出さない
-    // （docs/recall.md §8 と同じ判断——同伴が絞り込みで落ちたら、本体も一緒に落ちる）。
     expect(ids).not.toContain(strong.id);
 
-    // 段3自体は発火した（同伴を取りに行った）が、attributes で落ちたので companions
-    // には積まれない。
     const stage = result.explain.stages.find((s) => s.stage === "contradiction_resolution");
     expect(stage?.detail).toEqual({ companionsAdded: 0 });
 
-    // 落ちたことが黙って消えない——既存の unit_assembly_dropped（ADR 0043）に乗る。
     expect(result.omitted).toContainEqual({
       kind: "unit_assembly_dropped",
       count: 1,
@@ -181,18 +153,7 @@ describe("recall() — 必須の同伴取得（段3）にも attributes が掛�
   });
 });
 
-// ---------------------------------------------------------------------------
-// 2. 目次帯（段5）: `scope.attributes` を無視する自作 MemoryStore でも、
-//    絞り込みの外の digest が紛れ込まない。
-// ---------------------------------------------------------------------------
-
-/**
- * `attributes を無視する自作 MemoryStore`。`aggregateScope` の `scope.attributes` を
- * 呼ぶ前に剥がしてから委譲する——「filter を実際に検査できる fake」と「検査できない
- * （＝知らない）fake」の違いを、他のフィールド（tenantId/subjectId 等）は一切変えずに
- * 再現する（`recall-attributes-filter.test.ts` の
- * `AttributesFilterStrippingVectorStore` と同型）。
- */
+/** `scope.attributes` を剥がしてから委譲する MemoryStore。他のフィールドは変えない。 */
 function withAttributesIgnoringAggregateScope(inner: MemoryStore): MemoryStore {
   return new Proxy(inner, {
     get(target, prop, receiver) {
@@ -229,7 +190,6 @@ describe("recall() — 目次帯（段5）にも attributes が掛かる（レ�
     });
 
     const bandIds = (result.index.digestBand ?? []).map((d) => d.memoryId);
-    // 🔴 本命: 絞り込みの外（`mismatching`）の digest が紛れ込んではならない。
     expect(bandIds).not.toContain(mismatching.id);
     expect(bandIds).toContain(matching.id);
   });

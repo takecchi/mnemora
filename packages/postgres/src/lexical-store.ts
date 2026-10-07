@@ -9,153 +9,69 @@ import { capLexicalQueryWords } from "./lexical-query-cap.js";
 import { toPgTimestampClamped } from "./mapping.js";
 
 /**
- * `ts_rank_cd` の normalization 引数。PostgreSQL のドキュメント（textsearch-controls）の
- * ビットの組み合わせのうち `32`（rank を `rank / (rank + 1)` で割って (0, 1) の範囲へ
- * 押し込める。読みやすさのためだけであり比較可能性を作るためではない）と `1`
- * （rank を `1 + ln(文書の長さ)` で割る）を足した `33`。
+ * `ts_rank_cd` の normalization 引数。`32`（rank を (0, 1) へ押し込める）と `1`（rank を `1 + ln(文書の長さ)` で割る）の和。
  *
- * **`1` を足した理由（[Issue #394](../../../docs/decisions/0308-lexical-rank-length-normalization.md)、
- * ADR 0308）**: `32` だけだと `rank` に**内容由来の分解能が無い**——クエリ語が本文中の
- * 同じ相対位置（隣接）で一致する限り、周囲にどれだけ無関係な語が続いても cover density
- * は変わらない。【実測】`"obsidian shards"`（15字）と、同じ2語を含むが292字ある散漫な
- * 英文とで、`32` だけでは `rank` が完全に同点（`0.16666667`）だった。`1` を足すと
- * 文書の長さ（lexeme 数）で割るため、短く焦点の合った文のほうが高い `rank` を持つ
- * ようになる（ADR 0308「測定」節）。
+ * `1` を足す（ADR 0308）: `32` だけだと、クエリ語が隣接して一致する限り、周囲に無関係な語が続いても cover density が
+ * 変わらず、`rank` に内容由来の分解能が無い。`2`（文書長そのもので割る）にしない: 長い文書を線形に近い強さで罰し、
+ * タイブレークにしか使わない `rank` に極端な傾斜を持ち込むため。内容が真に同一な行は文書長も同一なので、同点は残る
+ * （ADR 0175 の tie-break が拾う）。
  *
- * **`2`（文書長そのもので割る）ではなく `1`（対数）を選んだ理由**: `2` は長い文書を
- * 線形に近い強さで罰する（実測で短文と292字の文の比が約22倍に開いた）。`1` は対数
- * なので同じ対比較で約3.5倍に収まる——`rank` は依然として「同一クエリ・同一 adapter
- * 内でのタイブレークにしか使わない値」（`LexicalHit.rank` の doc）であり、極端な傾斜を
- * 持ち込む理由が無い。ADR 0308「測定」節に、この2案を含む実測値を残してある。
- *
- * **⚠ これでも割れない同点が残る**——内容が真に同一な行（`content` が一致する行）は
- * 文書長も同一なので今も同点のままである（ADR 0175 の tie-break がその残余を拾う）。
- * `packages/postgres/src/__tests__/lexical-store-index.test.ts` の20,000行 seed（末尾の
- * 整数だけが違うテンプレート文）も、`to_tsvector` が末尾の整数を桁数に関わらず1語彙と
- * 数えるため文書長（lexeme 数）が変わらず、同点のまま残る——これは「直っていない」
- * ことを歯（`lexical-rank-resolution.test.ts`）で明示的に確認しており、退化ではない。
- *
- * `LexicalHit.rank` は「adapter ごとに尺度が違い、同一クエリ・同一 adapter 内でしか
- * 比較できない値」（`@mnemora/core` の `LexicalHit.rank` の doc、ADR 0084 §5）であり、
- * `recall` の段2 スコアには一切入らない——この定数は SQL の `ORDER BY`/`LIMIT`
- * （`opts.limit` による切り詰め）でのみ効く。
+ * `LexicalHit.rank` は `recall` の段2 スコアに入らず、この定数は `ORDER BY`/`LIMIT` でのみ効く。
  */
 const TS_RANK_CD_NORMALIZATION = 32 | 1;
 
 /**
  * `PostgresLexicalStore.search` が実際に打つ `SELECT` を組み立てる。
  *
- * **本体と `EXPLAIN` の歯が、同じものを使うために切り出してある。**
- * `packages/postgres/src/__tests__/lexical-store-index.test.ts` がこの関数の
- * 返り値をそのまま `EXPLAIN` する——テスト側に述語を書き写すと、本体の述語を
- * 直したときに歯だけが古い述語を測り続ける（`memory-store.ts` の
- * `buildRequeueEmbedTargetSelect` と同じ理由・同じ形）。
+ * **本体と `EXPLAIN` の歯が、同じものを使うために切り出してある。**テスト側に述語を書き写すと、本体の述語を直したとき
+ * に歯だけが古い述語を測り続ける。
  *
- * `WHERE` の各条件は `PostgresVectorStore.search`（`vector-store.ts`）と同じ形・同じ
- * 意味に揃えてある（`LexicalFilter` の doc「`VectorFilter` と同じ絞りを、同じ意味で
- * 持つ」）。**`decayFloorAtAfter` は無い**——`LexicalFilter` がそもそも持っていない
- * フィールドである（`interfaces/lexical-store.ts` の doc、ADR 0011）。
+ * `WHERE` の各条件は `PostgresVectorStore.search` と同じ形・同じ意味に揃える。`decayFloorAtAfter` は
+ * `LexicalFilter` がそもそも持たない（ADR 0011）。
  *
- * **🔴 本文側と query 側で、通す関数が違う。**
+ * **本文側と query 側で、通す関数が違う（ADR 0084）。**
  *
  * | 側 | 関数 | 何をするか |
  * |---|---|---|
- * | 本文（索引式） | `mnemora_lexical_tsvector`（`migrations/0025_*.sql`、Issue #1222） | `to_tsvector('simple', mnemora_lexical_normalize(content))` を試し、tsvector が1MBを超える本文だけ先頭150,000文字（`SQL_ASCII` の DB ではバイト）で作り直す |
+ * | 本文（索引式） | `mnemora_lexical_tsvector`（`migrations/0025_*.sql`） | `to_tsvector('simple', mnemora_lexical_normalize(content))`。tsvector が1MBを超える本文だけ先頭150,000文字で作り直す |
  * | クエリ | `mnemora_lexical_query_terms`（`migrations/0008_*.sql`） | **非 ASCII の連なりを空白に落とす** |
  *
- * `mnemora_lexical_normalize`（ASCII の連なりの前後に空白を入れる）は
- * `migrations/0008_*.sql` に在り、実測の根拠もそこに書いてある。
+ * **非対称なのは意図である。**両方に同じ関数を通すと、日本語の残りが1つの語彙になって `websearch_to_tsquery` の
+ * 既定（AND）で結ばれ、`'PROJ-1234について前に何か言ってたっけ？'` が1件も引けない。日本語の語は本文側でも
+ * 文ごと1トークンなので、クエリに残しても真陽性を生まない。
  *
- * **非対称なのは意図である。**両方に同じ関数を通すと、日本語の残りが1つの語彙になって
- * `websearch_to_tsquery` の既定（AND）で結ばれ、
- * `'PROJ-1234について前に何か言ってたっけ？'` が**1件も引けない**
- * （ADR 0084 §2.1 の実測。**変異試験で見つけた欠陥である**）。日本語の語は本文側でも
- * 文ごと1トークンになるので、**クエリに残しても真陽性を1件も生まない**——落として失うものが無い。
+ * **正規表現をこのファイルに書き写さないこと。**片方だけ直してずれると、式索引が選ばれなくなる（結果は変わらず、
+ * 静かに遅くなるだけ）。
  *
- * **⚠ 正規表現をこのファイルに書き写さないこと。**片方だけ直してずれると、
- * 式索引が選ばれなくなる（静かに遅くなるだけで結果は変わらないため、
- * テストで検出しない限り気づけない）。
+ * クエリ語彙は OR で結ばれ、`coverage` を返す（ADR 0092）。`mnemora_lexical_query_or` が語ごとの tsquery を `|` で
+ * 結び、`mnemora_lexical_coverage` が一致した語彙数 ÷ クエリ語彙の総数を返す（`LexicalHit.coverage`）。
+ * `WHERE` の左辺（索引式）が変わらなければ、OR で結んだ tsquery も同じ GIN 式索引で引ける。
  *
- * **🔴 クエリ語彙は OR で結ばれ、`coverage` を返す**
- * （[ADR 0092](../../../docs/decisions/0092-lexical-or-coverage.md)、
- * `migrations/0009_memories_lexical_or_coverage.sql`）。ADR 0084 はクエリ全体を
- * 1つの `websearch_to_tsquery` に渡していた（既定は AND）——英語の自然文
- * （`what did we say about PROJ-1234`）のような複数語クエリは全語を含む記憶しか
- * 返らなかった。`mnemora_lexical_query_or` はクエリを語ごとに分解し、
- * 語ごとの tsquery を `|`（OR）で結ぶ。`mnemora_lexical_coverage` は
- * 一致した語彙数 ÷ クエリ語彙の総数を返す——これが `LexicalHit.coverage` になる。
- * **`WHERE` の左辺（索引式）は0009 の時点から1バイトも変えていない**（0025 で
- * `mnemora_lexical_normalize` 直書きから `mnemora_lexical_tsvector` へ差し替えたのは
- * 索引の定義側であり、この式の組み立て方自体は変えていない）——OR で結んだ
- * tsquery も同じ GIN 式索引で引ける（`@@` の右辺が変わるだけで、左辺の式が
- * 変わらなければ式索引は選ばれ続ける）。
+ * `websearch_to_tsquery` が `query` から語彙を1つも作れない場合（日本語だけ・空白だけ）は空の tsquery になり、
+ * `@@` は常に `false`（0件）。`LexicalStore.search` の契約に反しない。
  *
- * `websearch_to_tsquery` が `query` から語彙を1つも作れない場合（例:
- * **日本語だけ**・空白だけの `query`）、`mnemora_lexical_query_or` は空の tsquery を
- * 返し、`@@` は常に `false` を返す——`tenant_id`/`status` 等がどれだけ一致しても
- * 0件になる。これは `LexicalStore.search` の契約に反しない
- * （「引けなかった」であって「壊れた」ではない）。
+ * **`plainto_tsquery` に落とさないこと。**隣接を要求しない AND 意味論になり、本文に `PROJ-1234 and TASK-5678` が
+ * 在ると `PROJ-5678` が偽陽性で一致する。`mnemora_lexical_query_tsqueries` が各語を `"..."` で囲むのも、
+ * この隣接要求を語ごとに保つため。
  *
- * **⚠ `plainto_tsquery` に落とさないこと。**隣接を要求しない AND 意味論になるため、
- * 本文に `PROJ-1234 and TASK-5678` の2つが在ると `PROJ-5678` が偽陽性で一致する
- * （migrations/0008 のコメントに実測が在る）。歯: `lexical-store-identifier.test.ts`。
- * `mnemora_lexical_query_tsqueries` が各語を `"..."` で囲んで
- * `websearch_to_tsquery` へ渡すのは、この隣接要求を語ごとに保つためでもある
- * （`migrations/0009_*.sql` の doc 参照）。
+ * **`coverage` は、行ごとにではなく1回だけ分解した語配列を使い回す。**`mnemora_lexical_coverage(content, query)` を
+ * 行ごとに呼ぶと、`query` の分解（正規表現・`websearch_to_tsquery`・`DISTINCT`）を候補行の数だけやり直す
+ * （相関サブクエリの `FROM` に置いた集合を返す式は、行に依存しない部分でも行ごとに再実行されるため）。
+ * `WITH qc AS MATERIALIZED (...)` で1回だけ計算し、`FROM memories, qc` で全行に配る。`coverage` の式は
+ * `mnemora_lexical_coverage` の本体と同じで、`query` の分解結果を `qc.terms` から受け取るだけが違う。
  *
- * **🔴 `coverage` の計算は、行ごとにではなく1回だけ分解した語配列を使い回す
- * （Issue #878）。**以前は `mnemora_lexical_coverage(content, query)` を `SELECT` の
- * 行ごとに呼んでおり、この関数は内部で `mnemora_lexical_query_tsqueries(query)`
- * （`query` を語に割り、語ごとに `websearch_to_tsquery` を呼ぶ処理）を**候補行の数だけ
- * 繰り返し**やり直していた——`query` 自体は行に依存しない値（`content` のような
- * 行ごとの列ではない）なのに、候補行の数ぶん重複して計算していた（相関サブクエリの
- * `FROM` に置いた集合を返す式は、行に依存しない部分でも PostgreSQL によって行ごとに
- * 再実行される——`content` を参照する集約と同じサブプランに包まれているため）。
+ * **`WHERE`/`ORDER BY` 側の `mnemora_lexical_query_or(query)`（`tsQueryOr`）は `qc` に寄せない。**
+ * 名前を付けない一回限りの実行では、PostgreSQL は束縛パラメータの実際の値で計画を立てる（custom plan）ので、
+ * この式は IMMUTABLE な定数式として折り畳まれ、`idx_memories_lexical`（GIN）の選択・行数見積りに具体的な語彙の頻度統計が
+ * 使える。`qc` の列参照にすると右辺が「他リレーションの列」になり、プランナは具体的な tsquery を見られず、
+ * 既定の選択率しか使えずに `Seq Scan on memories` を選びうる。索引選択に効く式は触らず、効かない式（`coverage` の中身）だけを触る。
  *
- * ⟹ **`WITH qc AS MATERIALIZED (SELECT mnemora_lexical_query_tsqueries(query) AS terms)`
- * で1回だけ計算し、`FROM memories, qc` で全行に配る。**候補行ごとに残る仕事は
- * 「配列 `qc.terms` を舐めて一致数を数える」（`unnest` + `count(*) FILTER`）という
- * 軽い比較だけになる——`mnemora_lexical_coverage` が候補行ごとにやり直していた
- * 「`query` を割り直す」重い処理（正規表現・`websearch_to_tsquery` の呼び出し・
- * `DISTINCT` の並べ替え）を、もうやらない。
+ * `query` は `capLexicalQueryWords`（`./lexical-query-cap.ts`）を通してから使う。上限に触れたときも新しい例外には
+ * しない（呼び出し側を壊さない）。
  *
- * **`WHERE`/`ORDER BY` 側の `mnemora_lexical_query_or(query)`（`tsQueryOr`、下記）は
- * 書き換えていない。**あえて `qc` に寄せなかった——`query` は定数ではなく束縛パラメータ
- * だが、PostgreSQL は名前を付けない一回限りの実行では実際の値を使って計画を立てる
- * （custom plan）ため、`mnemora_lexical_query_or(query)` は IMMUTABLE な定数式として
- * 折り畳まれ、`idx_memories_lexical`（GIN）の選択・行数見積りにその**具体的な語彙の
- * 頻度統計**が使える。試しにこの式も `qc` の列参照に置き換えたところ、
- * `lexical-store-index.test.ts` が（環境依存ではなく確実に）赤くなった——右辺が
- * 「他リレーションの列」になった時点で、プランナは具体的な tsquery を見られなくなり、
- * 既定の（不正確な）選択率しか使えず、`idx_memories_lexical` を避けて
- * `Seq Scan on memories` を選ぶことがある。**⟹ 索引選択に効く式は触らず、
- * 効かない式（`coverage` の中身）だけを触る、という線引きにした。**
- *
- * **この書き換えは `mnemora_lexical_coverage`/`mnemora_lexical_query_or`
- * （`migrations/0009_*.sql`）を1バイトも変えていない**——呼ぶ回数と呼び方だけを変えた。
- * 下の `coverage` の式は `migrations/0009_memories_lexical_or_coverage.sql` の
- * `mnemora_lexical_coverage` の本体を、行ごとに使い回せる形（`query` の分解結果を
- * 引数ではなく `qc.terms` から受け取る形）に書き直したものであり、**同じ式**である
- * （変えたのは「`query` をどこで割るか」だけで、「割った後どう数えるか」の式自体は
- * 一致させてある）。**⟹ 出力（`coverage`/`rank`/候補集合/順序）は書き換え前と
- * 完全に同じでなければならない**——`lexical-store-index.test.ts` の
- * `EXPLAIN` の歯に加え、既存の全 `lexical-store-*.test.ts` / `lexical-search-tiebreak.test.ts` /
- * `lexical-rank-resolution.test.ts` がこの一致を検査する（新しい歯ではなく、
- * 既存の歯がそのまま通ることが根拠——値を変える意図は無い）。
- *
- * **🔴 Issue #878（2026-09-26、クローン miku の判断）: `query` 全体の文字数・異なる語数・
- * 語ごとの文字数に上限を置く。**`capLexicalQueryWords`（`./lexical-query-cap.ts`）を
- * 通してから使う——上限（`LEXICAL_QUERY_MAX_TOTAL_CHARS`/
- * `LEXICAL_QUERY_MAX_DISTINCT_WORDS`/`LEXICAL_QUERY_MAX_WORD_CHARS`）に
- * 触れない大多数のクエリでは1バイトも変わらない。触れた場合は先頭からその範囲だけが
- * `mnemora_lexical_query_or`/`mnemora_lexical_query_tsqueries` に渡る——新しい例外には
- * しない（呼び出し側を壊さない）。理由・採らなかった案は `capLexicalQueryWords` の doc と
- * ADR 0092 追記節を見ること。
- *
- * **Issue #1050: `opts.ctxTenantId` を渡すと、`filter.tenantId` に加えてそのテナントでも
- * 絞る（AND）。**`PostgresLexicalStore.search` は常に `ctx.tenantId` を渡す——隔離の境界は
- * `ctx.tenantId` である（ADR 0007）。2つが食い違えば0件になり、例外は投げない。
- * 公開 API に足す欄なので省略可能にしてあり、省略すれば従来どおり `filter.tenantId` だけで絞る。
+ * `opts.ctxTenantId` を渡すと、`filter.tenantId` に加えてそのテナントでも絞る（AND）。`PostgresLexicalStore.search` は
+ * 常に `ctx.tenantId` を渡す（隔離の境界は `ctx.tenantId`。ADR 0007）。食い違えば0件で、例外は投げない。
+ * 省略すれば `filter.tenantId` だけで絞る。
  */
 export function buildLexicalSearchSelect(
   query: string,
@@ -169,8 +85,6 @@ export function buildLexicalSearchSelect(
   if (opts.filter.status !== undefined) {
     conditions.push(sql`status = ANY(${sql.param(opts.filter.status)}::text[])`);
   }
-  // Issue #608 項目③(b) / ADR 0286: `PostgresVectorStore.search`（vector-store.ts）と
-  // 同じ形・同じ意味（`LexicalFilter` の doc「`VectorFilter` と同じ絞りを、同じ意味で持つ」）。
   if (opts.filter.subjectId !== undefined) {
     conditions.push(
       opts.filter.includeSubjectless === true
@@ -178,18 +92,13 @@ export function buildLexicalSearchSelect(
         : sql`subject_id = ${opts.filter.subjectId}`,
     );
   }
-  // Issue #152/#153（ADR 0312）: `PostgresVectorStore.search`（vector-store.ts）と
-  // 同じ述語・同じ意味。
   if (opts.filter.attributes !== undefined) {
     conditions.push(sql`attributes @> ${JSON.stringify(opts.filter.attributes)}::jsonb`);
   }
-  // Issue #201 PR-B（ADR 0323）: `PostgresVectorStore.search`（vector-store.ts）と
-  // 同じ述語・同じ意味（配列の重なり演算子）。
   if (opts.filter.labels !== undefined) {
     conditions.push(sql`tags && ${sql.param(opts.filter.labels)}::text[]`);
   }
-  // ADR 0039: 実効時刻は COALESCE(occurred_at, recorded_at)。両端とも包含（>=/<=）
-  // ——`PostgresVectorStore.search`（vector-store.ts）の period 絞りと同じ境界。
+  // 実効時刻は COALESCE(occurred_at, recorded_at)。両端とも包含（>=/<=）（ADR 0039）。
   if (opts.filter.occurredAfter !== undefined) {
     conditions.push(
       sql`COALESCE(occurred_at, recorded_at) >= ${toPgTimestampClamped(opts.filter.occurredAfter)}`,
@@ -200,16 +109,13 @@ export function buildLexicalSearchSelect(
       sql`COALESCE(occurred_at, recorded_at) <= ${toPgTimestampClamped(opts.filter.occurredBefore)}`,
     );
   }
-  // Issue #280（Issue #202 第2弾）: `validAt` ゲート。`PostgresVectorStore.search`
-  // （vector-store.ts）と同じ述語・同じ境界（`valid_until` は狭義の `>`）。
+  // `valid_until` は狭義の `>`。
   if (opts.filter.validAt !== undefined) {
     conditions.push(
       sql`(valid_from IS NULL OR valid_from <= ${toPgTimestampClamped(opts.filter.validAt)}) AND (valid_until IS NULL OR valid_until > ${toPgTimestampClamped(opts.filter.validAt)})`,
     );
   }
-  // ADR 0056: 空配列は no-op。`length > 0` で番わないと `<> ALL('{}')` という常に真の
-  // 条件が出るだけで実害は無いが、EXPLAIN を読みにくくするので出さない
-  // （`vector-store.ts` と同じ判断）。
+  // 空配列は no-op。`length > 0` で番わないと、常に真の `<> ALL('{}')` が出て EXPLAIN を読みにくくする（ADR 0056）。
   if (
     opts.filter.excludeProvenanceKinds !== undefined &&
     opts.filter.excludeProvenanceKinds.length > 0
@@ -219,23 +125,8 @@ export function buildLexicalSearchSelect(
     );
   }
 
-  // 🔴 本文側と query 側で、通す関数が違う（migrations/0008_*.sql に実測の根拠が在る）。
-  // 本文側は mnemora_lexical_tsvector（migrations/0025、Issue #1222）——
-  // `to_tsvector('simple', mnemora_lexical_normalize(content))` を試し、tsvector が
-  // 1MB を超える本文だけ本文の先頭150,000文字で作り直す（`server_encoding` が `SQL_ASCII` の DB では `left` がバイトで切る——ADR 0364 の 2026-09-30 の追記）。1MB に収まる本文では
-  // 今までと1バイトも違わない tsvector を返す（ADR 0364「歯」節、実測で完全一致を
-  // 縛っている）。query 側は mnemora_lexical_query_terms（非 ASCII の連なりを空白に
-  // 落とす。mnemora_lexical_query_or の内部で呼ばれる）。日本語を残すと、その全体が
-  // 1語彙になって AND で結ばれ、「PROJ-1234について前に何か言ってたっけ？」が
-  // 1件も引けなくなる（ADR 0084 §2.1）。
-  //
-  // 🔴 ADR 0092: クエリ全体を1つの tsquery にするのではなく、語ごとに OR で結ぶ
-  // （mnemora_lexical_query_or）。`WHERE` の左辺（索引式）は 0025 と同じ式のまま——
-  // 変えているのは `@@` の右辺（tsquery そのものの組み立て方）だけである。
-  //
-  // Issue #878: ここ（WHERE・rank）は書き換えていない——`query` の具体的な値が
-  // プランナから見える形を保つため（このファイル冒頭の buildLexicalSearchSelect doc
-  // 「WHERE/ORDER BY 側の mnemora_lexical_query_or(query) は書き換えていない」参照）。
+  // 索引式（本文側）と同じ式のまま、`@@` の右辺（tsquery の組み立て）だけを OR にしている。ここ（WHERE・rank）を
+  // `qc` に寄せないのは、`query` の具体的な値をプランナから見える形に保つため（`buildLexicalSearchSelect` の doc 参照）。
   const tsQueryOr = sql`mnemora_lexical_query_or(${cappedQuery})`;
   conditions.push(sql`mnemora_lexical_tsvector(content) @@ ${tsQueryOr}`);
   const whereClause = sql.join(conditions, sql` AND `);
@@ -272,49 +163,22 @@ export function buildLexicalSearchSelect(
 }
 
 /**
- * `LexicalStore` の Postgres 実装（`@mnemora/core` の `interfaces/lexical-store.ts`、
- * ADR 0084、[ADR 0092](../../../docs/decisions/0092-lexical-or-coverage.md)、Issue #106）。
+ * `LexicalStore` の Postgres 実装（ADR 0084、ADR 0092）。
  *
- * `MemoryStore` が真実の源であり、この語彙索引（`migrations/0008_memories_lexical_index.sql`
- * が作り、`migrations/0025_lexical_tsvector_fallback.sql`（Issue #1222）が式を
- * `mnemora_lexical_tsvector(content)` へ作り直した式索引）は `memories.content` の
- * 上に張った再構築可能な派生索引に過ぎない
- * （`VectorStore` と同じ非対称。`interfaces/lexical-store.ts` の doc）。
- * **書き込み口を持たない**——索引は `memories` への書き込みに自動で追随するため、
- * 同期の口が要らない（同 doc）。
+ * `MemoryStore` が真実の源で、語彙索引（`memories.content` 上の式索引）は再構築可能な派生索引に過ぎない。
+ * **書き込み口を持たない**（索引は `memories` への書き込みに自動で追随する）。
  *
- * `search` の `ORDER BY` は `coverage DESC, rank DESC, recorded_at DESC, id`
- * （前半2段は ADR 0092。後半2段は
- * [ADR 0175](../../../docs/decisions/0175-lexical-search-tiebreak-nondeterminism.md)
- * （Issue #345）——`vector-store.ts` の `search()` が
- * [ADR 0170](../../../docs/decisions/0170-association-search-tiebreak-nondeterminism.md)
- * （Issue #339）で採った「距離 → `recorded_at` DESC → `memory_id`」の3段と同じ形の、
- * 語彙チャンネル版）。`LexicalHit.coverage`/`rank` の doc: どちらも大きいほど上位。
- * `coverage` はそのまま `ScoreBreakdown.lexicalMatch` に入る値であり、`rank` は同値のときの
- * タイブレークにしか使わない。`rank` の尺度は `ts_rank_cd` 固有であり、`VectorHit.distance`
- * （コサイン距離）とは比較できない（ADR 0084 §5）。
+ * `search` の `ORDER BY` は `coverage DESC, rank DESC, recorded_at DESC, id`（ADR 0092、ADR 0175）。
+ * `coverage` はそのまま `ScoreBreakdown.lexicalMatch` に入る値で、`rank` は同値のときのタイブレークにしか使わない。
+ * `rank` の尺度は `ts_rank_cd` 固有で、`VectorHit.distance` とは比較できない（ADR 0084）。
  *
- * **なぜ `id` だけでなく `recorded_at` を挟むのか**: `id` は `gen_random_uuid()` が
- * ingest のたびに新しく振るランダムな UUID であり、**同一 DB 内では決定的でも、
- * DB を作り直す（fresh ingest）と大小関係が変わる**——ADR 0170 が Issue #339 で
- * 突き止めた根本原因と同じ構造の欠陥が、語彙チャンネル側にもコードとして存在していた
- * （実害を実測したわけではない。ADR 0175「確かめていないこと」参照）。`recorded_at` は
- * テナント内の ingest 処理順に紐づく値であり、**fresh ingest をまたいでも相対順序が
- * 再現する。**`id` は最終フォールバック——`recorded_at` まで完全一致したときだけ効く。
- * **`recorded_at` が衝突した行どうしの間でだけ、非決定に戻る**（ADR 0170「引き受けた
- * 負債」1番をそのまま引き継ぐ残余。ADR 0175 決めたこと参照）。
+ * `id` だけでなく `recorded_at` を挟む理由: `id` は `gen_random_uuid()` のランダムな UUID で、DB を作り直す
+ * （fresh ingest）と大小関係が変わる。`recorded_at` は ingest の処理順に紐づき、fresh ingest をまたいでも相対順序が
+ * 再現する。`id` は最終フォールバックで、`recorded_at` が衝突した行どうしの間でだけ非決定に戻る。
  *
- * **⚠ `mnemora_lexical_coverage`/`ts_rank_cd` はどちらも `float8`/`real` を返す。**
- * `pg`（node-postgres）は float4/float8 を JS の `number` として返す型パーサを
- * 標準搭載しているため（`numeric` とは違い文字列に落とさない）、`row.coverage`/
- * `row.rank` は追加の変換なしに `number` として届く——`vector-store.ts` の
- * `row.distance`（同じく `pg` 経由の `float8`）と同じ扱い。
- *
- * **`coverage` の尺度**: クエリを語に分け（重複は1語）、本文の tsvector に当たった語の数 ÷
- * 語の総数。1/n 刻みで、日本語（非 ASCII）の語は引かない。testkit の `InMemoryLexicalStore`
- * と同じ式で、`PostgresTrigramLexicalStore` の日本語側（閾値で 0/1 の二値）とは違う。
- * 3つの store の対応と測った値は
- * [ADR 0553](../../../docs/decisions/0553-lexical-coverage-scale-across-stores.md)。
+ * **`coverage` の尺度**: クエリを語に分け（重複は1語）、本文の tsvector に当たった語の数 ÷ 語の総数。1/n 刻みで、
+ * 日本語（非 ASCII）の語は引かない。testkit の `InMemoryLexicalStore` と同じ式で、`PostgresTrigramLexicalStore` の
+ * 日本語側（閾値で 0/1 の二値）とは違う（ADR 0553）。
  */
 export class PostgresLexicalStore implements LexicalStore {
   constructor(private readonly db: Db) {}
@@ -326,11 +190,10 @@ export class PostgresLexicalStore implements LexicalStore {
   ): Promise<LexicalHit[]> {
     assertWellFormedCtx(ctx);
     assertWellFormedFilter(opts.filter, "opts.filter");
-    // 穴 O-6-1（ADR 0424）: 検索語の NUL は、DB に触れる前に明示の例外で断る。
     assertNoNul("PostgresLexicalStore.search", "query", query);
     assertNoNulInScopeFilter("PostgresLexicalStore.search", opts.filter, "opts.filter");
     const select = buildLexicalSearchSelect(query, { ...opts, ctxTenantId: ctx.tenantId });
-    // ADR 0505: 例外の message（`cause` の連鎖を含む）から、SQL に付けた値（params。検索語・`filter.attributes` など）を落とす。
+    // 例外の message（`cause` の連鎖を含む）から、SQL に付けた値（params）を落とす（ADR 0505）。
     const result = await omittingParams(() => this.db.execute(select));
     return result.rows.map((row) => {
       const r = row as unknown as { memory_id: string; coverage: number; rank: number };

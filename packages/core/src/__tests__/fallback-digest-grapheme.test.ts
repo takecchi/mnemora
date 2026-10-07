@@ -1,16 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { truncateForFallbackDigest } from "../extraction.js";
 
-/**
- * ADR 0467（穴探し38巡目、面B）: フォールバック digest の切り詰めを書記素の境界にする
- * （ADR 0424 O-5 が `packDigestBand` だけに適用し、これを残した続き）。
- * 長さが書記素の途中に落ちたら、その書記素の手前で止める。NaN・0・負・小数・Infinity の結果は変えない。
- */
 describe("truncateForFallbackDigest: 書記素の途中で切らない", () => {
   it("NFD の「が」（か + 結合濁点）を割って「か」にしない", () => {
     const nfd = "が"; // が
     expect(truncateForFallbackDigest(`あい${nfd}う`, 3)).toBe("あい…");
-    // ちょうど収まるなら残す（1文字も余計に削らない）。
     expect(truncateForFallbackDigest(`あい${nfd}う`, 4)).toBe(`あい${nfd}…`);
     expect(truncateForFallbackDigest(`あい${nfd}う`, 5)).toBe(`あい${nfd}う`);
   });

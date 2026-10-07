@@ -6,14 +6,6 @@ import type { RecallResult } from "../recall.js";
 import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * Issue #1020: 段3.5（連想枠）で席（`maxCount`）を競り負けて `over_limit(stage:"association")` に
- * 数えた候補が、同じ段3.5 の必須の同伴取得（Issue #959）で対向として取られると、
- * `memories`（または段4の `budget_dropped`）と `over_limit(stage:"association")` の両方に
- * 数えられていた。ADR 0203「決めたこと」1 と追記3〜6 の「最後に落とした段で1回だけ数える」を当て、
- * 段3.5 の Unit に入った分は `over_limit(stage:"association")` から差し引く。
- */
-
 const ctx: Ctx = { tenantId: "tenant-1" };
 const NOW = new Date("2026-06-01T00:00:00.000Z");
 
@@ -97,9 +89,7 @@ function budgetDroppedCount(result: RecallResult): number | undefined {
 describe("recall() — 段3.5 で席に着けなかった候補が同伴として返ったときの排他性（Issue #1020）", () => {
   async function setup() {
     const { runtime, stores } = buildRuntime();
-    // X だけが limit=1 の内側に入り、連想のアンカーになる。
     const x = await createEmbeddedMemory(stores, [0.8, 0.6, 0], { digest: "X" });
-    // A・B は X の近くにある contested の組。A が席に着き、B は席を競り負ける。
     const a = await createEmbeddedMemory(stores, [0.6, 0.8, 0], { digest: "AAAA" });
     const b = await createEmbeddedMemory(stores, [0.55, 0.835, 0], { digest: "BBBB" });
     expect((await runtime.markContested(ctx, a.id, b.id)).outcome.kind).toBe("contested");
@@ -147,14 +137,12 @@ describe("recall() — 段3.5 で席に着けなかった候補が同伴とし�
   it("(d) 席を競り負けた候補が2件同時に同伴として返ったときは、2件ぶん差し引き、残りの1件と countKind（exact）はそのまま残る", async () => {
     const { runtime, stores } = buildRuntime();
     const x = await createEmbeddedMemory(stores, [0.8, 0.6, 0], { digest: "X" });
-    // A1・A2 が席に着き、それぞれの対向 B1・B2 は席を競り負けて、同伴として取られる。
     const a1 = await createEmbeddedMemory(stores, [0.6, 0.8, 0], { digest: "A1" });
     const a2 = await createEmbeddedMemory(stores, [0.62, 0.78, 0.05], { digest: "A2" });
     const b1 = await createEmbeddedMemory(stores, [0.5, 0.86, 0], { digest: "B1" });
     const b2 = await createEmbeddedMemory(stores, [0.45, 0.87, 0.1], { digest: "B2" });
     expect((await runtime.markContested(ctx, a1.id, b1.id)).outcome.kind).toBe("contested");
     expect((await runtime.markContested(ctx, a2.id, b2.id)).outcome.kind).toBe("contested");
-    // C は同伴として取られない、席を競り負けただけの候補。
     await createEmbeddedMemory(stores, [0.4, 0.9, 0], { digest: "C" });
 
     const result = await runtime.recall(ctx, {

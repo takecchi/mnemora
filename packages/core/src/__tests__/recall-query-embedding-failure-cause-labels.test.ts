@@ -5,14 +5,6 @@ import type { StageSkippedOmission } from "../recall.js";
 import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * Issue #1734（2026-09-30 マージ分の確かめ直し）の #1504 のすり抜け C4・C7・C8
- * （`StageSkippedCause` の TSDoc・`docs/recall.md`）。provider が投げた値から作る `cause` の2つのラベルの約束:
- *
- * - `providerErrorKind`: 投げられた値（`Error` でなくてもよい）が文字列の `kind` を持つとき。先頭64文字まで（C4・C8）。
- * - `errorName`: 投げられた値が `Error` のときの `name`。先頭64文字まで。`Error` でない値の `name` は載せない（C4・C7）。
- * - error の message は載せない（既存の歯）。
- */
 const ctx: Ctx = { tenantId: "tenant-1" };
 const SECRET = "SECRET-user-data-12345";
 const LABEL_MAX = 64;

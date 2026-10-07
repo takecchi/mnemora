@@ -8,11 +8,6 @@ import {
 } from "./contested-group-event-growth.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * ADR 0431: 群の監査イベントの件数と `note` の大きさが、群の大きさ N に対して線形であること
- * （core の Fake 版。testkit の InMemory・Postgres の同じ歯は同じ部品を使う）。
- */
-
 async function measure(n: number): Promise<GrowthMeasurement> {
   const stores = createFakeRuntimeStores();
   const runtime = createRuntime({

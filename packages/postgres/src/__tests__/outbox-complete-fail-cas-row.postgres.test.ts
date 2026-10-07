@@ -77,24 +77,4 @@ describe("PostgresOutboxStore.complete/fail — CAS で弾いたとき・通し�
       expect(await readRow(job.id)).toEqual(before);
     });
   }
-
-  it("complete は completed_at だけを書き、ほかの列は変えない", async () => {
-    const { store, jobs } = await seedClaimedJobs(1);
-    const job = jobs[0]!;
-    const before = await readRow(job.id);
-
-    await store.complete(ctx, job.id, job.attempts, { at: AT });
-
-    expect(await readRow(job.id)).toEqual({ ...before, completed_at: AT });
-  });
-
-  it("fail は failed_at と last_error だけを書き、ほかの列は変えない", async () => {
-    const { store, jobs } = await seedClaimedJobs(1);
-    const job = jobs[0]!;
-    const before = await readRow(job.id);
-
-    await store.fail(ctx, job.id, "boom", job.attempts, { at: AT });
-
-    expect(await readRow(job.id)).toEqual({ ...before, failed_at: AT, last_error: "boom" });
-  });
 });

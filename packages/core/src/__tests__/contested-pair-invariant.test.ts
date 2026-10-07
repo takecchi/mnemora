@@ -6,18 +6,7 @@ import type { Memory, MemoryStatus, NewMemory } from "../memory.js";
 import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * `contested` の対向関係（`docs/memory-model.md` §5 機構2・機構3）が**一対一**である、
- * という前提を測る。ADR 0046。
- *
- * ⚠ **ここで固定するのは「破れた入力が来たときの振る舞い」ではない。**
- * 「破れているかどうか」を測れる形にするだけである——`recall()` が壊れた鎖に対して
- * 何を返すべきかは `contested` を作る主体が入る Phase 2 の判断であり、ここでは決めない。
- *
- * ⚠ **この検査器は本番コードではない。**`packages/core/src` の公開 API には足していない。
- * 本番の呼び出し元が無い関数を輸出することは、ADR 0024 の「実装の無いものを『予約』と書き残さない」に
- * 反する。測るための道具は測る場所に置く。
- */
+/** この検査器は本番コードではない。公開 API に足さないのは、本番の呼び出し元が無い関数を輸出することが ADR 0024 の「実装の無いものを『予約』と書き残さない」に反するため。測るための道具は測る場所に置く。 */
 type ContestedInvariantViolation =
   /** `status = 'contested'` なのに対向を指していない。⟹ 単独で返され、機構2 が破れる。 */
   | { kind: "contested_without_opposite"; memoryId: MemoryId }
@@ -176,10 +165,6 @@ describe("contested の一対一（ADR 0046）— 不変条件そのものを測
   });
 
   it("🔴 contested なのに対向を指していない Memory を捕まえる", () => {
-    // ⚠ これは**現に repo 内の fixture が持っている形**である
-    // （`recall-pipeline.test.ts` の `setupContestedPair` の b 側）。
-    // 段3は「候補として見つかった側」から対向を辿るので、b 単独で候補になると
-    // 対向が取られないまま返る——機構2（単独で返してはならない）が破れる。
     const memories = [
       memoryFixture({ id: "mem-a", status: "contested", contestedWithId: "mem-b" }),
       memoryFixture({ id: "mem-b", status: "contested" }),
@@ -291,17 +276,8 @@ function llmReturning(contents: string[]): LLMProvider {
 
 describe("contested の一対一（ADR 0046）— Runtime を一巡させても破れない", () => {
   it("🔴 observe → tick → reextract で作られた Memory は、一対一を破らない", async () => {
-    // ⚠ **この歯が Phase 1 で見ているのは「破れていないこと」だけであり、**
-    // **「`contested` が作られること」は見ていない。**`observe`/`tick`/`reextract` は
-    // 今日も `contested` を一切書かないので、対向関係の枝は通らない
-    // （Issue #197 / ADR 0134 で `Runtime.markContested` が追加された後も、この3つの
-    // 経路自体は変わっていない——下の describe を参照）。
-    //
-    // **⟹ それを「Runtime は contested を書かない」という歯にはしない。**
-    // その前提が変わるのは事故ではなく**予定**（矛盾検出。Issue #197 で実際に変わった）
-    // であり、予定で赤くなる歯は、実装してはいけないという意味になってしまう。
-    // ここで固定するのは「`contested` を作る主体が入っても、作られた対向関係は一対一である」
-    // という契約のほうである。
+    // この歯が見ているのは「破れていないこと」だけで、「contested が作られること」は見ていない。
+    // それを「Runtime は contested を書かない」という歯にはしない: その前提が変わるのは事故ではなく予定であり、予定で赤くなる歯は実装してはいけないという意味になってしまう。
     const stores = createFakeRuntimeStores();
     const runtime = createRuntime({
       memoryStore: stores.memoryStore,
@@ -332,11 +308,6 @@ describe("contested の一対一（ADR 0046）— Runtime を一巡させても�
 
 describe("contested の一対一（ADR 0046）— Issue #197 / ADR 0134: markContested が作る対向は一対一を破らない", () => {
   it("🔴 runtime.markContested で作った相互ペアは、検査器が『破れていない』側として認める形と一致する", async () => {
-    // ⚠ ADR 0046 の「出たこと2」——「相互ペア A↔B は、公開 interface の組み合わせでは
-    // 構成できない」——を、本 PR がここで初めて覆す。この歯は、`mutualPair()`（この
-    // ファイル冒頭、手作りの fixture）と**同じ形**を、`Runtime` を実際に一巡させて
-    // 作れることを確かめる。手作りの fixture との違いは、これは店を経由した本物の
-    // 書き込みであるという点だけである。
     const stores = createFakeRuntimeStores();
     const runtime = createRuntime({
       memoryStore: stores.memoryStore,
@@ -363,7 +334,6 @@ describe("contested の一対一（ADR 0046）— Issue #197 / ADR 0134: markCon
     expect(memories.every((m) => m.status === "contested")).toBe(true);
     expect(memories.find((m) => m.id === a.id)?.contestedWithId).toBe(b.id);
     expect(memories.find((m) => m.id === b.id)?.contestedWithId).toBe(a.id);
-    // ⟹ 検査器そのもの（この PR は変更していない）が、これを「破れていない」と認める。
     expect(findContestedPairViolations(memories)).toEqual([]);
   });
 });
