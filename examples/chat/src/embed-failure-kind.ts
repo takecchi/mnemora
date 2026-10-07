@@ -1,41 +1,21 @@
 import type { PostgresClient } from "@mnemora/postgres";
 
-/** `examples/chat` は `pg` を直接の依存に持たない——`PostgresClient["pool"]` を型として
- *  借りることで、`pg` への phantom dependency を作らずに `Pool` の型を得る。 */
+/** `examples/chat` は `pg` を直接の依存に持たない。`PostgresClient["pool"]` を型として借り、phantom dependency を作らずに `Pool` の型を得る。 */
 type Pool = PostgresClient["pool"];
 
 /**
- * `consolidation-cost` サブコマンド(Issue #136)が、`embeddingStatus: "failed"` に着地した
- * 新しい Memory について、ADR 0090 の `LocalEmbeddingProviderError.kind`
- * (`"input_too_long"` / `"unknown_input_limit"`)を読むための薄いヘルパ。
+ * `consolidation-cost` サブコマンドが、`embeddingStatus: "failed"` に着地した Memory について `LocalEmbeddingProviderError.kind` を読むための薄いヘルパ。
  *
- * **⚠ `Memory`/`MemoryStore` は `kind` を保存しない。**`packages/core` の
- * `processEmbedJob` は例外を捕まえて `setEmbeddingStatus(ctx, memory.id, "failed")` を
- * 書いてから再送出するだけで、`kind` は `Memory` の列に残らない
- * (`packages/core/src/runtime.ts`、確認済み)。`tick()` はその例外を
- * `outboxStore.fail(ctx, job.id, err.message)` で `outbox.last_error` に**文字列として**
- * 残す(`err.kind` は保存されない)。
- *
- * ⟹ `kind` を知る手段は、`outbox.last_error` に残った**メッセージ文字列**を、
- * `packages/local-embedding/src/pipeline.ts` が実際に投げる文言で判別する以外に無い。
- * ⛔ **`packages/core`/`packages/postgres` を変更しない**という制約の中でこれ以上の
- * 精度は買えない——このヘルパは「文字列一致による推定」であることを名乗る
- * (`"unknown"` を返す経路を持つ)。
- *
- * `packages/postgres`/`packages/core` は変更していない——`pool.query` は
- * `@mnemora/postgres` の `createPostgresClient` が返す公開の `Pool`(node-postgres）に
- * 対する素の SQL であり、他の examples/chat コード(`test-db.ts` の `TRUNCATE` 等)と
- * 同じ使い方である。
+ * `Memory`/`MemoryStore` は `kind` を保存しない。`tick()` は例外を `outbox.last_error` に文字列として残すだけなので、
+ * `kind` を知る手段は、その文字列を `packages/local-embedding/src/pipeline.ts` が投げる文言で判別する以外に無い。
+ * `packages/core`/`packages/postgres` は変更しない制約の下でこれ以上の精度は買えないため、
+ * このヘルパは文字列一致による推定であることを名乗る（`"unknown"` を返す経路を持つ）。
  */
 
-/** `packages/local-embedding/src/pipeline.ts` が実際に投げる文言の部分一致で判別する。 */
 const INPUT_TOO_LONG_MARKER = "上限を超えている";
 const UNKNOWN_INPUT_LIMIT_MARKER = "上限を宣言していない";
 
-/**
- * エラーメッセージ文字列から `LocalEmbeddingProviderErrorKind` を推定する(純関数)。
- * 判別できなければ `"unknown"`。
- */
+/** エラーメッセージ文字列から `LocalEmbeddingProviderErrorKind` を推定する純関数。判別できなければ `"unknown"`。 */
 export function classifyEmbedFailureMessage(
   message: string,
 ): "input_too_long" | "unknown_input_limit" | "unknown" {
@@ -49,11 +29,8 @@ export function classifyEmbedFailureMessage(
 }
 
 /**
- * その `memoryId` に対する `embed` ジョブのうち、最後に失敗したものの `last_error` を読み、
- * 判別した `kind` を返す。失敗したジョブが1件も無ければ `null`。
- *
- * ⚠ **DB を要求する。**`consolidation-cost.postgres.test.ts` 側で検査する
- * (`consolidation-cost.test.ts` の純関数層は `classifyEmbedFailureMessage` だけを見る)。
+ * その `memoryId` に対する `embed` ジョブのうち、最後に失敗したものの `last_error` から `kind` を返す。
+ * 失敗したジョブが無ければ `null`。DB を要求するので、`consolidation-cost.postgres.test.ts` 側で検査する。
  */
 export async function lookupLatestEmbedFailureKind(
   pool: Pool,
