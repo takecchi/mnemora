@@ -938,7 +938,8 @@ export interface MemoryStore {
    * ⚠ **`ready` は `opts.statuses` に指定できない**（型が `NotIndexedReason` であり `ready` を含まない）。
    * `ready` は「ベクトル行が在る」という主張であり（ADR 0053）、`pending` へ戻すと索引済みの Memory が `notIndexed.pending` に数えられる。
    *
-   * 対象が `opts.limit` より多いときは **`updatedAt` の古い順、同着は `id` の昇順**で選ぶ。
+   * 対象が `opts.limit` より多いときは **`updatedAt` の古い順、同着は `id` の昇順**で選ぶ。積み直した行は `updatedAt` が動くので、
+   * 繰り返し呼ぶと対象が一巡する（同じ行だけを取り続けて他が飢えることがない）。
    *
    * ⭐ **`writeOpts` は省略可能な第3引数である**（[Issue #1237](https://github.com/takecchi/mnemora/issues/1237)）。
    * **`writeOpts.now` を渡すと、積み直す embed ジョブの `availableAt`/`createdAt` にその値を使う。省略時は実装が壁時計を使う。**
