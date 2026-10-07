@@ -6,62 +6,16 @@ import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
 /**
- * ⭐ **段3.5（連想枠）の"席の取り合い"が、使用報告の有無で順位として分かれることの歯。**
- *
- * 正典 `docs/north-star.md`「目指す姿」項目4「使われない記憶が、静かに遠ざかる」の
- * **順位軸**を測る（Issue #402）。
- *
- * ## この歯が測るもの・測らないもの
- *
- * `recall-usage-selection.test.ts` が測るのは**ゲート軸**（`decayFloorAt` を割ったら
- * `recall()` から丸ごと落ちる）だけであり、その歯の doc コメント自身が「段3.5（連想枠）は
- * 閾値分割より後に走り、閾値を迂回する」「この歯はその穴に触れない」と明記している——
- * ⟹ 連想枠の**席（`maxCount`）の中の順位**が使用報告で動くかどうかは、
- * どちらの既存の歯（`recall-usage-selection.test.ts` / `recall-association.test.ts` /
- * `recall-association-gates.test.ts`）も測っていなかった。
- *
- * **この歯が測るのは、連想枠の席が「アンカー類似度だけ」ではなく
- * 「アンカー類似度 × decay（使用報告で押し上がる）」で埋まることだけである。**
- *
- * ⛔ **測らないもの**:
- * - 忘却ゲート（`decayFloorAt` を割って `recall()` 全体から落ちること）——
- *   それは `recall-usage-selection.test.ts` の射程であり、この歯では
- *   **両方とも生き残ったうえで順位だけが動く**ことを明示的に検算する（下）。
- * - スコア閾値（段2の `below_threshold`）——A・B はどちらもクエリには当たらない
- *   （below_threshold 相当）が、連想枠はそこを迂回する経路であり、この歯もその迂回の
- *   上に乗っている（`recall-association.test.ts` が既に固めている挙動）。
- * - `strength` / `tagMatch` / `freshness` が順位に効くこと——この歯は decay
- *   （＝使用報告で `lastReinforcedAt` が進む効果）だけを動かす。他の3項は
- *   A・B で完全に同条件にする。
- *
- * ## 形
- *
- * `recall-usage-selection.test.ts` と同型: `packages/core` 自身のテストなので
- * `@mnemora/testkit` には依存せず（`runtime-fakes.ts` 冒頭のコメントと同じ理由）、
- * DB を要さない。`Clock` を可変にし、「報告した時刻」と「読み直す時刻」を分ける。
- *
- * 3次元ベクトルを使う（連想枠の錨とその近傍を、クエリ方向とは別の軸に置くため）。
- * クエリ Q_vec = `[1, 0, 0]`。
- * - **アンカー**: `[0.8, 0.6, 0]`。クエリとの類似度 0.8 ⟹ 段2の閾値を超えて
- *   `withinLimit` に入り、連想の起点になる。
- * - **A・B**: どちらも `[0, 1, 0]`。クエリとの類似度は 0 ⟹ 段2の閾値で落ちる
- *   （`withinLimit` には入らない）。アンカーとの類似度は 0.6 ⟹ 既定 `minSimilarity`
- *   （0.5）を超えるので連想候補になる。**A と B は同一の vector**——アンカー類似度が
- *   完全に同値になることを、tie-break の土台として使う（decay 以外の差を残さない）。
+ * A・B は同一の vector にする: アンカー類似度を同値にして、decay 以外の差を残さない。
+ * `strength` / `tagMatch` / `freshness` も A・B で完全に同条件にする。
  */
 
 const T0 = new Date("2026-06-01T00:00:00.000Z");
-/** 使用報告を撃つ時刻（＝最初の recall() で recallId を取る時刻でもある）。 */
 const T1 = new Date("2026-06-05T00:00:00.000Z");
-/** 読み直す時刻。順位を検算するのはここ。 */
 const T2 = new Date("2026-06-20T00:00:00.000Z");
 
 const ctx: Ctx = { tenantId: "tenant-1" };
 
-/**
- * `recall-usage-selection.test.ts` の `buildRuntime` と同じ配線。違いは `clock` が
- * 可変であることだけ（`setNow` で進める）。
- */
 function buildRuntime() {
   const stores = createFakeRuntimeStores();
   let now = T0;
@@ -93,20 +47,10 @@ function buildRuntime() {
   };
 }
 
-/**
- * アンカー用の半減期（10年）。連想の起点はクエリに直接当たる候補なので、`total`
- * （= similarity × decay × tagMatch × freshness × strength）が段2の閾値を割らないよう、
- * `recall-usage-selection.test.ts` と同じ理由で長くする。
- */
+/** アンカーの半減期は長くする: 連想の起点の `total` が段2の閾値を割らないようにするため。 */
 const ANCHOR_HALF_LIFE_HOURS = 24 * 365 * 10;
 
-/**
- * A・B 用の半減期。**意図して短くする**——ここは `recall-usage-selection.test.ts` とは
- * 逆で、見たいのは「T2 で decay がはっきり差を持つこと」であって忘却ゲートではない
- * （A・B の忘却の床は下で T2 より十分先に置かれていることを歯の中で検算する）。
- * 150時間（6.25日）: T1→T2 の経過（15日=360時間）とT0→T2の経過（19日=456時間）の
- * 差が、decay = 0.5^(elapsed/halfLife) の比としてはっきり出る長さとして選んだ。
- */
+/** A・B の半減期は意図して短くする: T2 で decay にはっきり差を持たせるため（忘却ゲートを見る配置ではない）。 */
 const USAGE_HALF_LIFE_HOURS = 150;
 
 function newMemory(overrides: Partial<NewMemory> = {}): NewMemory {
@@ -129,8 +73,6 @@ function newMemory(overrides: Partial<NewMemory> = {}): NewMemory {
     lastReinforcedAt: null,
     strength,
     halfLifeHours,
-    // 既定は「一度も強化されていない」ときの床（recordedAt 起点）。使用報告される側は
-    // `runtime.observe` 経由の `reinforce` が後で上書きする。
     decayFloorAt: defaultDecayStrategy.floorAt({
       recordedAt,
       lastReinforcedAt: null,
@@ -152,7 +94,6 @@ async function createEmbeddedMemory(
   return memory;
 }
 
-/** クエリ・アンカー・A/B の3次元ベクトル。冒頭 doc コメントと対応する。 */
 const QUERY_VECTOR = [1, 0, 0];
 const ANCHOR_VECTOR = [0.8, 0.6, 0];
 const CANDIDATE_VECTOR = [0, 1, 0];
@@ -184,9 +125,6 @@ describe("recall() — 連想枠の席は、使用報告で decay が動くと�
 
     setNow(T2);
 
-    // 🔴 検算: この歯で分かれてほしいのは順位であって忘却ゲートではない。
-    // A（報告済み）・B（未報告）とも、T2 の時点で忘却の床（decayFloorAt）を
-    // まだ割っていないことを、ゲート判定に頼らず直接確かめる。
     const aAfter = await stores.memoryStore.get(ctx, a.id);
     const bAfter = await stores.memoryStore.get(ctx, b.id);
     expect(aAfter!.decayFloorAt.getTime()).toBeGreaterThan(T2.getTime());
@@ -228,7 +166,6 @@ describe("recall() — 連想枠の席は、使用報告で decay が動くと�
 
     setNow(T1);
     const baseline = await runtime.recall(ctx, { vector: QUERY_VECTOR, limit: 10 });
-    // ⛔ ここが it 1 との唯一の違い——報告する側を B に入れ替える。
     const report = await runtime.observe(ctx, {
       kind: "memory_usage",
       recallId: baseline.recallId,
@@ -286,8 +223,6 @@ describe("recall() — 連想枠の席は、使用報告で decay が動くと�
     });
 
     const memoryIds = result.memories.map((m) => m.memoryId);
-    // 報告が無ければ decay は同値のまま——tie-break は前置き（アンカー類似度が同点の
-    // ときの adapter 順序、ここでは insert 順）に委ねられ、先に作った A が席を取る。
     expect(memoryIds).toContain(a.id);
     expect(memoryIds).not.toContain(b.id);
   });
@@ -307,10 +242,8 @@ describe("recall() — 連想枠の席は、使用報告で decay が動くと�
 
     setNow(T1);
     const baseline = await runtime.recall(ctx, { vector: QUERY_VECTOR, limit: 10 });
-    // ⭐ **報告するのは後から作った B のほうである。**A を報告すると、順位キーが
-    // 「アンカー類似度だけ」に退化していても A が先に並んでしまい（挿入順と一致する）、
-    // この it は変異を素通しする——実際に一度そうなっていた【実測】。⟹ 報告先を B に
-    // 倒すことで、「並びが作成順ではなく順位キーで決まっている」ことまで測る。
+    // 報告するのは後から作った B にする。A を報告すると、順位キーがアンカー類似度だけに退化していても
+    // A が先に並んでしまい（挿入順と一致する）、変異を素通しする。
     await runtime.observe(ctx, {
       kind: "memory_usage",
       recallId: baseline.recallId,
@@ -338,35 +271,13 @@ describe("recall() — 連想枠の席は、使用報告で decay が動くと�
   });
 });
 
-// ---------------------------------------------------------------------------
-// Issue #1793（09/19 マージ分の確かめ直し、#549）が足した歯。
-//
-// 上の4本は decay だけを動かし、A と B は同一の vector だった。⟹ 順位キーが
-// 「アンカー類似度 × decay」の**積**であること、decay 以外の3項（strength・freshness・
-// tagMatch）が席に効くこと、席の数え方・並びの規律（ADR 0246 決定3・4・5）は、変異
-// （下の表）を当てても赤にならなかった。
-//
-//   - 順位キーから類似度を外す（`rankKey = score.total`）
-//   - 順位キーから strength / freshness / tagMatch のどれか1つを外す
-//   - 過取得の幅の下限（`Math.max(maxCount, …)`）を外す（`overFetchFactor < 1` で返る件数が減る）
-//   - `over_limit(association)` を旧式（`max(0, 候補総数 − maxCount)`）へ戻す
-//     （多層防御が落とした分を二重に数える。決定5）
-//   - rankKey が同点のとき、adapter の順序でなく memoryId で並べる（決定4 / ADR 0170）
-// ---------------------------------------------------------------------------
-
-/** アンカー `[0.8, 0.6, 0]` との類似度 0.6、クエリ `[1, 0, 0]` との類似度 0。 */
 const NEAR_VECTOR = [0, 1, 0];
-/** アンカーとの類似度 0.3、クエリとの類似度 0（`NEAR_VECTOR` より遠い）。 */
 const FAR_VECTOR = [0, 0.5, Math.sqrt(0.75)];
 /** 類似度の差を使う歯は、既定の `minSimilarity`（0.5）より低い候補を使うので、下げて渡す。 */
 const LOW_MIN_SIMILARITY = 0.1;
 
 type Spec = { digest: string; vector: number[]; overrides?: Partial<NewMemory> };
 
-/**
- * アンカーと候補 2 件を作り、`T2` で連想枠を `maxCount` で引いて、連想枠から返った記憶の
- * digest を返る順に並べる。候補は先に渡したほうが先に作られる（同点なら先に渡したほうが席を取る）。
- */
 async function associationDigests(
   specs: [Spec, Spec],
   association: { maxCount: number; minSimilarity?: number },
@@ -478,7 +389,6 @@ describe("recall() — 連想枠の過取得の幅・同点の並び（ADR 0246 
       await createEmbeddedMemory(stores, NEAR_VECTOR, { digest: "A" });
       await createEmbeddedMemory(stores, NEAR_VECTOR, { digest: "B" });
       // 連想用の search()（2本目以降）だけ、返す順を差し替える。類似度は同値のまま。
-      // 先頭に来た記憶（＝adapter の順で最初）の id を控え、席がそれに座ることを見る。
       const originalSearch = stores.vectorStore.search.bind(stores.vectorStore);
       let calls = 0;
       let firstId: string | undefined;

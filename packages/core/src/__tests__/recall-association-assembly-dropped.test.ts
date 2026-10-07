@@ -6,14 +6,6 @@ import type { RecallResult } from "../recall.js";
 import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * Issue #1026: 段2で `over_limit(stage:"rescore")`（または `below_threshold`）に数えた contested の
- * 候補を段3.5（連想枠）が席に着け、その後の必須の同伴取得（Issue #959）で対向が取れずに Unit ごと
- * 落ちると、同じ記憶が段2の札と `unit_assembly_dropped` の両方に数えられていた。
- * ADR 0203「決めたこと」1 と追記3〜8 の「最後に落とした段で1回だけ数える」を当て、段3.5 の
- * 組み立てで落ちた分は段2の札から差し引く。
- */
-
 const ctx: Ctx = { tenantId: "tenant-1" };
 const NOW = new Date("2026-06-01T00:00:00.000Z");
 
@@ -95,7 +87,6 @@ describe("recall() — 段3.5 で席に着いた後に対向が取れず落ち�
   it("(a) over_limit(rescore) の候補が段3.5 の組み立てで落ちると、unit_assembly_dropped にだけ数える", async () => {
     const { runtime, stores } = buildRuntime();
     const x = await createEmbeddedMemory(stores, [0.8, 0.6, 0], { digest: "X" });
-    // A はクエリとの類似度 0.6 で段2を通るが limit=1 の外（over_limit(rescore)）。X には近い。
     const a = await createEmbeddedMemory(stores, [0.6, 0.8, 0], { digest: "A" });
     const b = await createEmbeddedMemory(stores, [0, 0, 1], { digest: "B" });
     expect((await runtime.markContested(ctx, a.id, b.id)).outcome.kind).toBe("contested");
@@ -115,7 +106,6 @@ describe("recall() — 段3.5 で席に着いた後に対向が取れず落ち�
   it("(b) below_threshold の候補が段3.5 の組み立てで落ちると、unit_assembly_dropped にだけ数える", async () => {
     const { runtime, stores } = buildRuntime();
     const x = await createEmbeddedMemory(stores, [0.8, 0.6, 0], { digest: "X" });
-    // A はクエリとの類似度 0.05 で below_threshold。X との類似度は約 0.64 で連想に拾われる。
     const a = await createEmbeddedMemory(stores, [0.05, 0.9987, 0], { digest: "A" });
     const b = await createEmbeddedMemory(stores, [0, 0, 1], { digest: "B" });
     expect((await runtime.markContested(ctx, a.id, b.id)).outcome.kind).toBe("contested");
@@ -155,7 +145,6 @@ describe("recall() — 段3.5 で席に着いた後に対向が取れず落ち�
   it("(d) 段2の札が違う2件（over_limit(rescore) と below_threshold）が同時に組み立てで落ちると、2件とも unit_assembly_dropped にだけ数え、拾われなかった1件は残る", async () => {
     const { runtime, stores } = buildRuntime();
     const x = await createEmbeddedMemory(stores, [0.8, 0.6, 0], { digest: "X" });
-    // A1 はクエリとの類似度 0.6 で over_limit(rescore)、A2 は 0.05 で below_threshold。どちらも X に近い。
     const a1 = await createEmbeddedMemory(stores, [0.6, 0.8, 0], { digest: "A1" });
     const a2 = await createEmbeddedMemory(stores, [0.05, 0.9987, 0], { digest: "A2" });
     const b1 = await createEmbeddedMemory(stores, [0, 0, 1], { digest: "B1" });

@@ -7,32 +7,15 @@ import type { Memory, NewMemory } from "../memory.js";
 import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * 連想枠（段3.5、ADR 0151）にも忘却ゲート（ADR 0153 / ADR 0165）と `validAt` ゲート
- * （Issue #280 / ADR 0164）が掛かることの歯（Issue #347 / ADR 0172）。
- *
- * 🔴 **この歯が測るのは、段3.5 だけが両ゲートをすり抜けていた穴そのものである。**
- * 段1（`recall-decay-gate.test.ts` / `recall-validity.test.ts`）は同じ境界を既に測っているが、
- * **そこは段1の候補（`candidates`）だけを回る**——連想候補は一度も通らなかった。
- *
- * ⭕ `status`（`superseded` を返さない）は Issue #347 の時点でも壊れていなかった。
- * 下の「回帰」節がそれを固定する——**直したことではなく、壊していないこと**の歯である。
- *
- * `@mnemora/testkit` には依存しない（`runtime-fakes.ts` 冒頭のコメントと同じ理由）。DB も要らない。
- */
+/** `@mnemora/testkit` には依存しない（`runtime-fakes.ts` 冒頭と同じ理由）。 */
 
 const ctx: Ctx = { tenantId: "tenant-1" };
 const NOW = new Date("2026-06-01T00:00:00.000Z");
 /** +100年。壁時計では絶対に沈まない（`recall-decay-gate.test.ts` と同じ道具立て）。 */
 const FAR_FUTURE = new Date(NOW.getTime() + 1_000 * 60 * 60 * 24 * 365 * 100);
 
-/** Q=[1,0] に対して類似度 0.7071——段1で拾われ、連想のアンカーになる。 */
 const ANCHOR_VECTOR = [0.70710678, 0.70710678];
-/**
- * Q=[1,0] との類似度は 0 ちょうど（段1では below_threshold）だが、アンカーとの類似度は
- * 0.7071（既定 minSimilarity 0.5 以上）——**連想枠でしか返ってこない**位置。
- * ⟹ この記憶が結果に現れたら、それは段3.5 を通ったということである。
- */
+/** 段1では below_threshold だが、アンカーとの類似度で連想枠でだけ届く位置。結果に現れたら段3.5 を通った証拠になる。 */
 const ASSOCIATED_VECTOR = [0, 1];
 
 function newMemory(overrides: Partial<NewMemory> = {}): NewMemory {
@@ -106,7 +89,6 @@ async function createEmbeddedMemory(
   return memory;
 }
 
-/** 段1のアンカーと、連想でしか届かない相方を1組置く。 */
 async function seedAnchorAndAssociated(
   stores: ReturnType<typeof createFakeRuntimeStores>,
   associatedOverrides: Partial<NewMemory>,
@@ -135,10 +117,6 @@ function captureFilters(stores: ReturnType<typeof createFakeRuntimeStores>): Vec
 
 const ASSOCIATION = { maxCount: 5, anchorCount: 1 } as const;
 
-// ---------------------------------------------------------------------------
-// 配線の歯: 連想用 search() の filter が、段1の ANN と同じゲートの欄を持つ。
-// ---------------------------------------------------------------------------
-
 describe("recall() — 連想用 search() の filter が段1の ANN と同じゲート欄を持つ（配線の歯、Issue #347）", () => {
   it("段1と段3.5の filter の decayFloorAtAfter / decayFloorSeqAfter / decayFloorAnyAxis / validAt が一致する", async () => {
     const { runtime, stores } = buildRuntime();
@@ -147,7 +125,6 @@ describe("recall() — 連想用 search() の filter が段1の ANN と同じゲ
 
     await runtime.recall(ctx, { vector: [1, 0], limit: 10, association: ASSOCIATION });
 
-    // 1本目が段1の ANN、2本目が段3.5（アンカー1つぶん）。
     expect(filters).toHaveLength(2);
     const [stage1, association] = filters;
     expect(association?.decayFloorAtAfter).toEqual(stage1?.decayFloorAtAfter);
@@ -179,10 +156,6 @@ describe("recall() — 連想用 search() の filter が段1の ANN と同じゲ
     expect(filters[1]?.validAt).toBeUndefined();
   });
 });
-
-// ---------------------------------------------------------------------------
-// 忘却ゲート（ADR 0153）。
-// ---------------------------------------------------------------------------
 
 describe("recall() — 連想枠に忘却ゲートが掛かる（Issue #347）", () => {
   it("完全に減衰しきった記憶は、連想枠からも返らない", async () => {
@@ -237,10 +210,6 @@ describe("recall() — 連想枠に忘却ゲートが掛かる（Issue #347）",
   });
 });
 
-// ---------------------------------------------------------------------------
-// 活動時計（ADR 0165）。⚠ 忘れやすい非対称——壁時計だけを見る述語を書くと、ここが赤くなる。
-// ---------------------------------------------------------------------------
-
 describe("recall() — 連想枠の忘却ゲートが活動時計の軸も見る（ADR 0165 決めたこと12、Issue #347）", () => {
   it("'activity' のテナントでは、壁時計が遠い未来でも decayFloorSeq を割った記憶は連想枠から返らない", async () => {
     const { runtime, stores } = buildRuntime();
@@ -266,7 +235,6 @@ describe("recall() — 連想枠の忘却ゲートが活動時計の軸も見る
 
   it("対照: 同じ記憶を 'wall' のテナントで引くと、活動時計の床は無視され連想枠から返る", async () => {
     const { runtime, stores } = buildRuntime();
-    // decay_clock を設定しない = 既定 'wall'。
     const { associated } = await seedAnchorAndAssociated(
       stores,
       {
@@ -313,10 +281,6 @@ describe("recall() — 連想枠の忘却ゲートが活動時計の軸も見る
   });
 });
 
-// ---------------------------------------------------------------------------
-// validAt ゲート（Issue #280 / ADR 0164）。
-// ---------------------------------------------------------------------------
-
 describe("recall() — 連想枠に validAt ゲートが掛かる（Issue #347）", () => {
   it("期限切れ（validUntil が過去）の記憶は、連想枠からも返らない", async () => {
     const { runtime, stores } = buildRuntime();
@@ -331,8 +295,6 @@ describe("recall() — 連想枠に validAt ゲートが掛かる（Issue #347�
     });
 
     expect(result.memories.map((m) => m.memoryId)).not.toContain(associated.id);
-    // `expired` の件数は `aggregateScope` が出す（段3.5 で数え直さない。Issue #347 では
-    // omitted の数え方を1バイトも変えていない）。
     expect(result.omitted).toContainEqual(
       expect.objectContaining({ kind: "filtered", condition: "expired", count: 1 }),
     );
@@ -392,10 +354,6 @@ describe("recall() — 連想枠に validAt ゲートが掛かる（Issue #347�
   });
 });
 
-// ---------------------------------------------------------------------------
-// ⭕ 回帰: status ゲートは Issue #347 の時点でも効いていた。壊していないことの検算。
-// ---------------------------------------------------------------------------
-
 describe("recall() — 連想枠から superseded は引き続き返らない（回帰、Issue #347 で壊していないこと）", () => {
   it("status='superseded' の記憶は、連想の近傍に居ても返らない", async () => {
     const { runtime, stores } = buildRuntime();
@@ -429,14 +387,7 @@ describe("recall() — 連想枠から superseded は引き続き返らない（
   });
 });
 
-// ---------------------------------------------------------------------------
-// ⭐⭐ 多層防御: 押し下げと後置が同じ述語であることの検算（ADR 0153 決めたこと3 と同型）。
-//
-// `AssociationGateStrippingVectorStore` は **2本目以降の search()**（= 連想用の呼び出し）
-// からだけゲートの欄を剥がす——段1（1本目）の押し下げはそのまま効かせる。⟹ 段1の候補集合には
-// 何も混ざらず、**連想用 search() だけが契約を破った**状況を歯の中だけで再現できる。
-// 本番コードは1文字も変えない（`DecayFloorAtAfterStrippingVectorStore` と同じ手口）。
-// ---------------------------------------------------------------------------
+// 連想用 search()（2本目以降）からだけゲートの欄を剥がす。段1の押し下げは効かせたまま、連想用 search() だけが契約を破った状況を作るため。
 
 class AssociationGateStrippingVectorStore implements VectorStore {
   private searchCount = 0;
@@ -515,24 +466,8 @@ describe("recall() — 連想用 adapter がゲートを無視しても、後置
     });
 
     expect(result.memories.map((m) => m.memoryId)).not.toContain(associated.id);
-    // 🔴 **二重計上しないことの歯**（Issue #347 / ADR 0172 決めたこと3 を、Issue #329 /
-    // ADR 0173 の後の形に読み替えたもの）。
-    //
-    // ⚠ **この行は 2026-09-16 に反転している。**ADR 0172 当時は
-    // `not.toContainEqual({condition:"decayed"})` だった——「連想枠の後置で落ちた分は
-    // `filtered(decayed)` に載らない」を固定していた。その根拠として当時のコメントが
-    // 挙げていたのは「段1の押し下げで落ちた分を数えないのと同じ扱いであり、**Issue #329 の
-    // 対応と数え方を混ぜないため**」であり、**#329 を名指しで待っている歯だった。**
-    // ⟹ ADR 0173 が段5の `aggregateScope` で厳密に数えるようにした以上、
-    // 「載らない」はもう実態ではない。**ADR 0172 の主張（連想枠の後置は件数を足さない）は
-    // 1ミリも変わっていない**——変わったのは、別の場所（段5）が数え始めたことである。
-    //
-    // ⛔ **弱めていない。**`not.toContainEqual` を消したのではなく、
-    // **`count` がちょうど 1 であること**を固定した。この scope に減衰しきった Memory は
-    // `associated` の1件しか無いので、もし連想枠の後置（または段1の後置）が
-    // 集約とは別に足し込んでいたら **2 になる。**⟹ この行は
-    // **「数えるのは段5の1箇所だけ」の検算**であり、ADR 0172 が守りたかったものを
-    // より強く守る。
+    // count がちょうど 1 であることを固定する（`not.toContainEqual` ではない）。連想枠の後置や段1の後置が
+    // 段5の集約とは別に足し込むと 2 になり、二重計上を検出できる。
     expect(result.omitted).toContainEqual({
       kind: "filtered",
       condition: "decayed",
@@ -542,13 +477,7 @@ describe("recall() — 連想用 adapter がゲートを無視しても、後置
     });
   });
 
-  /**
-   * ⚠ **この歯だけが、連想枠の後置で活動時計の軸を忘れる変異を捕まえる。**
-   * 【実測】`survivesDecayGate` の代わりに `wallAxisAlive` を呼ぶ変異を入れると、
-   * 押し下げが効いている通常の配線では **16本すべてが緑のまま**だった——連想用 `search()` の
-   * 押し下げが先に候補を落としてしまうためである。ゲートを剥がしたこの配置でだけ、
-   * 後置の述語そのものが露出する（`recall-decay-gate.test.ts` の語彙チャンネルの歯と同型の理屈）。
-   */
+  /** 押し下げが効く通常の配線では連想用 search() が先に候補を落とし、後置の述語（活動時計の軸）が露出しない。ゲートを剥がしたこの配置でだけ後置が検査される。 */
   it("'activity' のテナントで、連想用 search() がゲートを剥がしても活動時計で沈んだ記憶は返らない", async () => {
     const { runtime, stores } = buildRuntime(
       (s) => new AssociationGateStrippingVectorStore(s.vectorStore),
@@ -591,16 +520,6 @@ describe("recall() — 連想用 adapter がゲートを無視しても、後置
   });
 });
 
-// ---------------------------------------------------------------------------
-// over_limit（Issue #375 / ADR 0188）: `maxCount` で切り捨てた分が omitted に名乗る。
-//
-// これは忘却/validAt ゲートとは別の欠落である——`associationHits.slice(0, maxCount)`
-// （`recall-runtime.ts`）自体が、両ゲートを既に通過し類似度降順に並び終えた集合から
-// 単に上位 maxCount 件だけを残す処理であり、この slice に omitted.push が無かった。
-// ⟹ 呼び手は「候補が無かった」のか「候補はあったが maxCount で切られた」のかを
-// 区別できなかった（北極星「目指す姿」項目6）。
-// ---------------------------------------------------------------------------
-
 describe("recall() — 連想枠の maxCount 切り捨てが omitted.over_limit として名乗る（Issue #375 / ADR 0188）", () => {
   it("連想候補が maxCount を超えると、超過分だけ over_limit(stage: 'association') として報告される", async () => {
     const { runtime, stores } = buildRuntime();
@@ -639,8 +558,6 @@ describe("recall() — 連想枠の maxCount 切り捨てが omitted.over_limit 
     expect(result.omitted.some((o) => o.kind === "over_limit" && o.stage === "association")).toBe(
       false,
     );
-    // 段2側の over_limit（stage: 'rescore'）も、この配置では鳴らない——
-    // この歯が「over_limit が一切無い」ことの検算になっていることを明示する。
     expect(result.omitted.some((o) => o.kind === "over_limit")).toBe(false);
   });
 });
