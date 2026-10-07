@@ -1,9 +1,3 @@
-/**
- * 歯: markdown リンクを表示文字だけにする置換の、唯一の定義（Issue #646）。
- * 3つの呼び手（`delink` / `stripMarkdownDecoration` / `normalizeForAdrDecisionReferences`）が
- * すべてこの定義を使う。⟹ ここで固定した振る舞いが、3つともに効く。
- */
-
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -39,8 +33,7 @@ describe("delinkMarkdown", () => {
     });
 
     it("⭐ 陽性対照: JS の配列リテラルの `[` から、数行先の本物のリンクまでを1つの偽リンクにしない", () => {
-      // 改行を許すと、配列の `[` から `[ADR 0078]` の `](` までが表示文字の顔をして丸ごと当たる
-      // （Issue #646 の決め手。改行を許した形では、実在のコードでこの偽リンクが11件出た）。
+      // 改行を許すと、配列の `[` から `[ADR 0078]` の `](` までが丸ごと当たる。
       const code = [
         "expect(hits).toEqual([",
         "  {",
@@ -100,8 +93,6 @@ describe("matchMarkdownLinkAt", () => {
 
 describe("⛔ 定義を1つに保つ —— リンクを外す正規表現を、ほかのファイルに書き戻さない", () => {
   it("3つの呼び手のファイルに、リンクを外す形の正規表現が無い", () => {
-    // リンクを「外す」形（表示文字をグループで取る `\[([^\]`）だけを見る。
-    // `MD_LINK_COLON_RE` のように、リンクを「拾う」ための形（`\[ADR…\]\(`）は対象外。
     for (const file of ["adr-citation-lib.mjs", "agents-md-quote-attribution-lib.mjs"]) {
       const text = readFileSync(path.join(SCRIPTS, file), "utf8");
       expect(text.includes(String.raw`\[([^\]`), file).toBe(false);
