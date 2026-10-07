@@ -10,67 +10,21 @@ import {
 } from "./query-check.js";
 
 /**
- * `'simple'` dictionary の代わりに使う、素朴な語彙正規化。
+ * `'simple'` dictionary の代わりに使う、素朴な語彙正規化。postgres 実装の `to_tsvector('simple', …)` と `websearch_to_tsquery` を
+ * 再発明せず、「語幹処理をしない完全一致」だけを借りる。
  *
- * postgres 実装（Issue #106、[ADR 0084](../../../../docs/decisions/0084-lexical-recall-channel.md)）は
- * `to_tsvector('simple', regexp_replace(text, '([[:ascii:]]+)', ' \1 ', 'g'))` の上に
- * `websearch_to_tsquery` を重ねる。**ここではそれを自前で再発明しない**——
- * `'simple'` dictionary は語幹処理（stemming）をしない、というその1点だけを借りて、
- * 「ASCII の連なりの前後に空白を入れてから小文字化し、Unicode の英数字境界で分割し、
- * トークンの完全一致を見る」という最小の実装にしてある（`'simple'` が語幹処理を
- * しないからこそ、完全一致がその近似になる。`'english'` 等の語幹処理をする config
- * だったら、この近似は成り立たない）。
+ * 揃えた点: 語幹処理をしない・大文字小文字を区別しない・クエリの語のいずれか1つでも含むか（OR）で絞り、一致した語の割合（`coverage`）を返す（ADR 0092）。
+ * 本文側は、ASCII の連なりの前後に空白を入れてから小文字化する。順序を逆にすると、小文字化で ASCII 化する非 ASCII 文字（ケルビン記号 U+212A → `k`）が
+ * 隣の ASCII と癒着し、Postgres と結果が割れる。クエリ側は、非 ASCII の連なりを空白に落としてから分割する（非 ASCII だけのクエリは語彙が0個で0件。Postgres も同じ）。
+ * クエリの単位は空白区切りの語で、語の中の token は隣接して並ぶことを要る（`PROJ-12` は1語、`'proj' <-> '-12'` のフレーズ。ADR 0513）。
  *
- * **⚠ 正直に書く: 何が同じで何が違うか。**
+ * 揃えていない点:
+ * - `websearch_to_tsquery` の `OR` / `-`（NOT）は解釈しない。
+ * - Postgres の text search parser は `-12`・`a.b`・`user@example.com` を1 token にし、`abc-def` を結合形と部品の両方にする。ここは英数字境界で割るだけ。
+ * - CJK の分かち書きはしない（`\p{L}\p{N}` の連なりを1 token にする粗い規則）。
+ * - `toLowerCase()` と Postgres の `lower()` が全ロケール・全文字で一致する保証は無い。
  *
- * 同じだと確認したこと（このファイルの意図として揃えた点）:
- * - 語幹処理をしない（完全一致）。
- * - 大文字・小文字を区別しない。
- * - クエリの語のいずれか1つでも含むか（OR）で絞り、一致した語の割合（`coverage`）を返す
- *   （[ADR 0092](../../../../docs/decisions/0092-lexical-or-coverage.md)。
- *   postgres 実装の `mnemora_lexical_query_or` / `mnemora_lexical_coverage` と同じ向き）。
- * - **本文側は、ASCII の連なりの前後に空白を入れてから小文字化する**
- *   （`mnemora_lexical_normalize` と同じ順序。**順序が大事**——先に小文字化すると、
- *   小文字化で ASCII 化する非 ASCII 文字（例: ケルビン記号 U+212A → `k`）が隣の
- *   ASCII 文字と癒着してしまう。Issue #951 の実測: 本文 `"100" + U+212A` は、この順序
- *   なら `["100", "k"]` に割れ、クエリ `"100k"` とは一致しない——`PostgresLexicalStore`
- *   を本物の Postgres（UTF8/`en_US.UTF-8` 系・SQL_ASCII/`C` 系の両 regime）に対して
- *   実測し、同じく0件であることを確認した上で揃えた）。
- * - **クエリ側は、非 ASCII の連なりを空白に落としてから分割する**
- *   （`mnemora_lexical_query_terms` と同じ向き。Issue #951 の実測: 非 ASCII だけの
- *   クエリ（ギリシャ文字・日本語等）は、本物の Postgres でも語彙が1つも残らず0件になる
- *   ——`websearch_to_tsquery` が空の tsquery を返し `@@` が常に false になるため。
- *   ここでも同じ形で語彙を0個にし、0件を返す）。
- *
- * **違う・確認していないこと**:
- * - `websearch_to_tsquery` の `OR` / `-`（NOT）はここでは一切解釈しない（ADR 0092 で postgres 側も
- *   各語を `"..."` で囲み、生クエリ中の websearch 演算子を解釈しなくなった）。
- * - **クエリの単位は空白区切りの語で、語の中の token は隣接して並ぶことを要る**（ADR 0513）。
- *   postgres は `PROJ-12` を 1 語（分母 1）として数え、`'proj' <-> '-12'` のフレーズにする。
- *   以前はここで `proj`・`12` の 2 語に割っていて、coverage の分母が postgres とずれた（ADR 0509 の割れ 2）。
- *   **それでも違うところ**（ADR 0513 の実測。再現していない）: postgres の text search parser は
- *   `-12`・`+12`・`-1.5` を符号付きの 1 token にし（`PROJ-12` は `proj`・`-12`）、`a.b`・`user@example.com`・
- *   `x.com/a-b` を 1 token にし、ハイフンで結んだ語（`abc-def`）を結合形と部品の両方の token にする。
- *   ここは英数字境界で割るだけなので、content `proj 12` がクエリ `PROJ-12` に当たる（postgres は当たらない）、
- *   クエリ `12` が content `PROJ-12` に当たる（postgres は当たらない）、content `a.b` がクエリ `a` に当たる
- *   （postgres は当たらない）。
- * - CJK（分かち書きの無い日本語・中国語等）自体の分かち書きはしない
- *   （`'simple'` dictionary・既定の text search parser に形態素解析が無いのと同じ
- *   立場）。ASCII/非ASCII の境界で割ることで CJK に埋め込まれた ASCII の語
- *   （例: 日本語文中の英数字識別子）が別トークンとして切れることは確認したが、
- *   CJK 自体を語単位に割ることは意図していない——Unicode の「文字」境界（`\p{L}\p{N}`
- *   の連なり）で1トークンになる、より粗い規則のままである。
- * - `String.prototype.toLowerCase()` と postgres の `lower()` が全ロケール・全文字で
- *   一致する保証は無い（確認していない）。ギリシャ語の語末シグマ（`Σ` の位置依存の
- *   小文字化）はその一例——ただし Issue #951 で実際に測った3つの食い違いのうち、
- *   これが単独で表面化するケースは見つかっていない（本文・クエリの両方が全て非 ASCII
- *   の語では、上の「クエリ側は非 ASCII を落とす」が先に効き、常に0件になるため）。
- * - 数字・ハイフン・アポストロフィ等の細かいトークン化規則（postgres の text search parser の
- *   `word`/`numword`/`hword` 等の分類）は再現していない——ここでは
- *   Unicode の letter/number をひとまとめのトークンとして扱う、より粗い規則を使う。
- *
- * **適合テスト（`lexical-store-conformance.ts`）が両方の実装に対して通ることだけが、
- * 「同じである」の唯一の根拠である。**このコメントの主張ではない。
+ * 「同じである」の根拠は、適合テスト（`lexical-store-conformance.ts`）が両方の実装に通ることだけ。
  */
 function tokenize(text: string): string[] {
   return text
@@ -80,69 +34,26 @@ function tokenize(text: string): string[] {
     .filter((token) => token.length > 0);
 }
 
-/**
- * `mnemora_lexical_normalize`（`regexp_replace($1, '([[:ascii:]]+)', ' \1 ', 'g')`、
- * `packages/postgres/migrations/0008_memories_lexical_index.sql`）が使う POSIX の
- * `[[:ascii:]]` クラス（0x00–0x7F）を、JS の正規表現でそのまま再現したもの。
- * 制御文字も含む——`[[:ascii:]]` は「印字可能」ではなく「7bit 全域」を指す。
- */
+/** `mnemora_lexical_normalize` が使う POSIX の `[[:ascii:]]`（0x00–0x7F。制御文字を含む）を、JS の正規表現で再現したもの。 */
 // eslint-disable-next-line no-control-regex
 const ASCII_RUN_PATTERN = /([\x00-\x7f]+)/g;
 
-/**
- * `mnemora_lexical_query_terms`（`regexp_replace($1, '[^[:ascii:]]+', ' ', 'g')`、
- * `packages/postgres/migrations/0008_memories_lexical_index.sql`）と同じ向き:
- * クエリ側の非 ASCII の連なりを空白1つに落とす。`tokenize()`（本文側）へ渡す**前**に
- * 呼ぶこと——本文側は ASCII の連なりの前後に空白を入れるだけ（非 ASCII は残す）で
- * 意味が違う（このファイル冒頭の doc 参照、Issue #951）。
- */
+/** `mnemora_lexical_query_terms` と同じ向きで、クエリ側の非 ASCII の連なりを空白1つに落とす。`tokenize()`（本文側）へ渡す前に呼ぶ（本文側は非 ASCII を残すので意味が違う）。 */
 function dropNonAsciiRuns(text: string): string {
   // eslint-disable-next-line no-control-regex
   return text.replace(/[^\x00-\x7f]+/g, " ");
 }
 
 /**
- * クエリ全体の文字数・異なる語数・語ごとの文字数の上限（Issue #878、2026-09-26、
- * クローン miku の判断）。
- *
- * `packages/postgres` の `LEXICAL_QUERY_MAX_TOTAL_CHARS`/`LEXICAL_QUERY_MAX_DISTINCT_WORDS`
- * （`packages/postgres/src/lexical-query-cap.ts`）、`packages/core` の
- * `FakeLexicalStore` が持つ同名の定数（`packages/core/src/__tests__/runtime-fakes.ts`）と
- * **同じ値**（3箇所とも手で揃える——`InMemoryLexicalStore`/`FakeLexicalStore` は
- * `@mnemora/core` の外・`@mnemora/postgres` の外に居るため、import で共有できない。
- * 値がずれていないことは `packages/postgres` 側の歯
- * `lexical-query-cap-values-match.test.ts` が、3ファイルのソースを読んで突き合わせる）。
- *
- * **`tokenize()` は非文字・非数字の連なりをすでに区切り文字として分割する**
- * （`\p{L}\p{N}` の否定クラス）ため、postgres 側と同じ理由がそのまま当てはまる
- * わけではない。**それでも語ごとの文字数・クエリ全体の文字数の上限を同じ形で
- * 入れる**のは、3実装の挙動をできるだけ揃えるためである。
+ * クエリ全体の文字数・異なる語数・語ごとの文字数の上限。`packages/postgres` の `lexical-query-cap.ts` と `packages/core` の `FakeLexicalStore` の同名の定数と同じ値。
+ * import で共有できないので手で揃え、ずれていないことは `lexical-query-cap-values-match.test.ts` がソースを読んで突き合わせる。
+ * export しない: `pnpm api:check` が `dist/*.d.ts` を丸ごと読むので、export すると公開面に漏れる。
  */
-// ⚠ export しない——`packages/testkit` には2つ公開入口があり（`index.ts` と
-// `fixtures.ts`）、`fixtures.ts` は `export { InMemoryLexicalStore } from "..."` という
-// 名前指定の再 export だが、`pnpm api:check` はこのファイルの `dist/*.d.ts` を丸ごと
-// 読むため、ここで export すると名前指定の再 export の対象でなくても公開面に漏れる
-// （実測: 一度 export してみたところ `pnpm api:check` の `@mnemora/testkit` 差分に
-// `dist/__fixtures__/in-memory-lexical-store.d.ts` 経由で現れた）。⟹ 値を参照したい
-// テスト（`in-memory-lexical-store-query-word-cap.test.ts`/
-// `in-memory-lexical-store-query-char-cap.test.ts`）は、値を書き写す（コメントで
-// この定義を指す）。値が `packages/postgres`/`packages/core` の定数とずれていないかは
-// `packages/postgres` 側の歯 `lexical-query-cap-values-match.test.ts` が、
-// このファイルのソースを読んで検査する。
 const LEXICAL_QUERY_MAX_DISTINCT_WORDS = 32;
 const LEXICAL_QUERY_MAX_WORD_CHARS = 64;
-// `packages/postgres` の LEXICAL_QUERY_MAX_TOTAL_CHARS と同じ値・同じ理由
-// （lexical-query-cap.ts の doc 参照——語数・1語の文字数を両方とも上限まで使った
-// 入力は、この2つの上限だけでは十分に小さくならない場合があるため、クエリ全体の
-// 文字数にも独立した上限を置く）。
 const LEXICAL_QUERY_MAX_TOTAL_CHARS = 600;
 
-/**
- * `query` が {@link LEXICAL_QUERY_MAX_TOTAL_CHARS} を超える場合、先頭からその文字数に
- * 切り詰める。超えなければ `query` をそのまま返す（1バイトも変えない）。他のどの上限
- * （語数・1語の文字数）よりも先に適用する（`packages/postgres` の
- * `capLexicalQueryTotalChars` と同じ位置づけ）。
- */
+/** `query` が {@link LEXICAL_QUERY_MAX_TOTAL_CHARS} を超えるとき、先頭からその文字数に切り詰める。他のどの上限よりも先に適用する。 */
 function capQueryTotalChars(query: string): string {
   return query.length > LEXICAL_QUERY_MAX_TOTAL_CHARS
     ? query.slice(0, LEXICAL_QUERY_MAX_TOTAL_CHARS)
@@ -150,19 +61,9 @@ function capQueryTotalChars(query: string): string {
 }
 
 /**
- * クエリを **空白区切りの語**（Postgres の `mnemora_lexical_query_tsqueries` と同じ単位）に割り、
- * 語ごとに `tokenize()` した token の列（= その語のフレーズ）の配列を返す（ADR 0513）。
- *
- * - 1 語が {@link LEXICAL_QUERY_MAX_WORD_CHARS} を超えたら先頭からその文字数に切り詰め、
- *   大文字小文字を区別せず異なる語を先頭からの出現順に {@link LEXICAL_QUERY_MAX_DISTINCT_WORDS} 個まで残す
- *   （`capLexicalQueryWords` と同じ。上限は **語** に当たる。token ではない）。
- * - token が 1 つも取れない語（`---` など）は捨てる（Postgres は空の tsquery を捨てる。分母に数えない）。
- * - 同じ token 列になる語（`PROJ-12` と `proj-12`）は 1 つにまとめる（Postgres は tsquery の `DISTINCT`）。
- *
- * **`PROJ-12` は 1 語（= 分母 1）で、中の `proj`・`12` は隣接して並ぶことを要る**——Postgres の
- * `websearch_to_tsquery('simple', '"PROJ-12"')` は `'proj' <-> '-12'`（フレーズ）になる（ADR 0513 の実測）。
- * 以前は `proj`・`12` の 2 語に割っていて、分母が Postgres とずれた（ADR 0509 の割れ 2）。
- * **呼び出し側が、`dropNonAsciiRuns(capQueryTotalChars(query))` を渡すこと**（`search` 参照）。
+ * クエリを空白区切りの語に割り、語ごとに `tokenize()` した token の列（その語のフレーズ）の配列を返す。
+ * 上限は語に当たる（token ではない）。token が取れない語は捨て（分母に数えない）、同じ token 列の語は1つにまとめる（Postgres の `DISTINCT`）。
+ * 呼び出し側が `dropNonAsciiRuns(capQueryTotalChars(query))` を渡すこと。
  */
 function queryPhrases(asciiOnlyQuery: string): string[][] {
   const rawWords = asciiOnlyQuery.split(/\s+/).filter((w) => w.length > 0);
@@ -200,15 +101,7 @@ function countPhrase(tokens: string[], phrase: string[]): number {
   return count;
 }
 
-/**
- * クエリ語の集合に対する `content` の一致度を、頻度の和として素朴に数える。
- *
- * **🔴 `ts_rank_cd` の近似ではない。**`LexicalHit.rank` の契約
- * （`interfaces/lexical-store.ts`）が明記する通り、`rank` の尺度は adapter ごとに違ってよく
- * 比較可能なのは同一 adapter の結果同士だけ——ここでの式（頻度の和）は、
- * 「頻度が高いほど大きい値になる」という向きだけを postgres 実装と共有する、
- * この in-memory 実装だけのローカルな規則である。
- */
+/** クエリ語の集合に対する `content` の一致度を、頻度の和として素朴に数える。`ts_rank_cd` の近似ではない（`rank` の尺度は adapter ごとに違ってよい）。 */
 function computeRank(contentTokens: string[], phrases: string[][]): number {
   let rank = 0;
   for (const phrase of phrases) {
@@ -218,37 +111,16 @@ function computeRank(contentTokens: string[], phrases: string[][]): number {
 }
 
 /**
- * `LexicalStore` のインメモリ・プレースホルダ実装（[ADR 0084](../../../../docs/decisions/0084-lexical-recall-channel.md)、
- * [ADR 0092](../../../../docs/decisions/0092-lexical-or-coverage.md)、Issue #106）。
- * 索引・pg の text search 機構を模さない最小実装であり、
- * `packages/testkit` の適合テストを実行できることを示すためだけのもの。
+ * `LexicalStore` のインメモリ・プレースホルダ実装。索引・pg の text search 機構を模さない最小実装。
  *
- * **`memoryStore` を必須のコンストラクタ引数にしている（省略不可）。** `LexicalStore` は
- * `upsert`/`delete` を持たない（`interfaces/lexical-store.ts` のクラス doc）——postgres 実装は
- * `memories.content` そのものの上に式索引を張るので、索引は本体の書き込みに自動で追随し、
- * 同期の口が要らない。この in-memory 実装も同じ非対称を再現する: 自前の Map を持たず、
- * `memoryStore.listByTenant` を通じて `InMemoryMemoryStore` が保持する Memory を直接読む
- * （`InMemoryVectorStore` が `status`/`subjectId`/`decayFloorAt` のためだけに `memoryStore` を
- * 参照するのとは違い、こちらは `content` 自体の読み取りにも `memoryStore` を使う）。
+ * `memoryStore` は必須: `LexicalStore` は `upsert`/`delete` を持たず（Postgres は `memories.content` の上に式索引を張る）、
+ * この実装も自前の Map を持たず `memoryStore.listByTenant` で Memory を直接読む。省略できると、filter/content を検査できる adapter と
+ * 検査できない adapter が同じ緑の出力になる（ADR 0034）。
  *
- * **省略可能にしなかった理由（ADR 0034 と同じ規律）**: 省略できると「filter/content を
- * 実際に検査できる adapter」と「検査できない adapter」が同じ緑色の出力になる。
- * `InMemoryVectorStore` のクラス doc が引いている ADR 0011/0025/0027/0028 の族の失敗を、
- * ここでも繰り返さない。
+ * `search` が返す `LexicalHit` は毎回新しく組み立てる: 内部表現（`Memory` 行やトークン配列）を返り値に混ぜない。
  *
- * **🔴 `search` が返す `LexicalHit` は毎回新しく組み立てる（`{ memoryId, coverage, rank }` の
- * オブジェクトリテラル）。**いずれもプリミティブなので Map の行を
- * そのまま返しても書き換えの経路自体は無いが、**内部表現（`Memory` 行やトークン配列）を
- * 返り値に混ぜないことを明示するためにここへ書いておく**——この repo では
- * 「Map の行の参照をそのまま返し、呼び出し側の書き換えが store の中身まで変えてしまい、
- * 歯が無力化された」前例があるため（`in-memory-vector-store.ts` の `cosineDistance` の doc、
- * ADR 0040 の周辺で踏まれた同族の穴）。
- *
- * **`coverage` の尺度**: 空白で区切ったクエリの語（重複は1語）のうち、本文の token の列に
- * フレーズとして現れた数 ÷ 語の総数。1/n 刻みで、日本語（非 ASCII）の語は引かない。
- * `PostgresLexicalStore`（tsvector）と同じ式で、`PostgresTrigramLexicalStore` の日本語側
- * （閾値で 0/1 の二値）とは違う。3つの store の対応は
- * [ADR 0553](../../../../docs/decisions/0553-lexical-coverage-scale-across-stores.md)。
+ * `coverage` は、空白で区切ったクエリの語（重複は1語）のうち本文にフレーズとして現れた数 ÷ 語の総数。
+ * 1/n 刻みで、`PostgresLexicalStore`（tsvector）と同じ式。`PostgresTrigramLexicalStore` の日本語側（閾値で 0/1 の二値）とは違う（ADR 0553）。
  */
 export class InMemoryLexicalStore implements LexicalStore {
   constructor(private readonly memoryStore: InMemoryMemoryStore) {}
@@ -260,17 +132,15 @@ export class InMemoryLexicalStore implements LexicalStore {
   ): Promise<LexicalHit[]> {
     assertWellFormedCtx(ctx);
     assertWellFormedFilter(opts.filter, "opts.filter");
-    // 穴 O-6-1（ADR 0424）: 検索語の NUL は Postgres の `text` に渡せない。
+    // 検索語の NUL は Postgres の `text` に渡せない。
     assertQueryTextWithoutNul("InMemoryLexicalStore.search", "query", query);
-    // 条件の日時は Postgres の timestamptz へ変換できなければならない（query-check.ts）。
-    // ADR 0547: 読みの口の条件は、下限（4714-11-24 BC）より前でも断らない。Postgres は下限へ寄せてから比べる。列の値は下限以後しか無いので、
-    // 寄せずにそのまま比べても同じ答えになる（`since` 系は全件、`until` 系は0件）。寄せない。Invalid Date だけ断る（`22007`）。
+    // 読みの口の日時は下限（4714-11-24 BC）より前でも断らず、そのまま比べる（Postgres は下限へ寄せるが答えは同じ）。Invalid Date だけ断る。
     assertQueryDate("search", "filter.occurredAfter", opts.filter.occurredAfter);
     assertQueryDate("search", "filter.occurredBefore", opts.filter.occurredBefore);
     assertQueryDate("search", "filter.validAt", opts.filter.validAt);
-    // ADR 0456 H3・ADR 0500: `labels` は `text[]` の引数。要素の NUL は Postgres ではクエリの時点で拒まれる。
+    // `labels`・`attributes` の NUL は、Postgres ではクエリの時点で拒まれる。
     assertQueryLabelsWithoutNul("search", "filter.labels", opts.filter.labels);
-    // ADR 0543: `filter.labels`（`text[]` の引数）の孤立サロゲートは、Postgres では U+FFFD に置き換わって比べられる（保存側の `tags` も置き換わっている）。
+    // `filter.labels` の孤立サロゲートは、Postgres では U+FFFD に置き換わって比べられる。
     opts = {
       ...opts,
       filter: {
@@ -280,44 +150,26 @@ export class InMemoryLexicalStore implements LexicalStore {
           : { labels: opts.filter.labels.map((label) => replaceLoneSurrogates(label)) }),
       },
     };
-    // ADR 0434: `attributes` は `jsonb` の包含判定の引数。NUL は Postgres ではクエリの時点で `22P05` になる。
     assertQueryJsonWithoutNul("search", "filter.attributes", opts.filter.attributes);
-    // `PostgresLexicalStore.search`（`buildLexicalSearchSelect`）は `opts.limit` を
-    // 生 SQL の `LIMIT` にそのまま渡すため、負数を渡すと Postgres 自身が
-    // `LIMIT must not be negative` で例外を投げる（実測済み。in-memory-vector-store.ts の
-    // 同種の注記参照）。ここで検査せず `hits.slice(0, opts.limit)` へ渡すと、
-    // `Array.prototype.slice` の負数引数は「末尾から数えた除外」という別の意味になり、
-    // ほぼ全件を静かに返してしまう——クエリを投げる前に弾く Postgres 側に揃える。
-    //
-    // ⚠ 負数だけでは足りない——`LIMIT` の SQL パラメータは bigint 型であり、`NaN`/
-    // `Infinity`/非整数を渡すと Postgres は `invalid input syntax for type bigint: "NaN"`
-    // の形で例外を投げる（実測済み。in-memory-vector-store.ts の同種の注記参照）。
-    // 既存の「負数」ガード（上の段落）とは別の例外メッセージにして、PR #811 が固定した
-    // 「負数は例外」の回帰テストの文言を変えずに済ませる。
+    // 整数でない・負の `limit` は先に断る: `slice` は `NaN`→空、`Infinity`→全件、負数→「末尾から数えた除外」と黙って別の値に丸め、limit が効かない結果を返す。
     if (!Number.isInteger(opts.limit)) {
       throw new Error(`search: limit must be an integer (got ${opts.limit})`);
     }
     if (opts.limit < 0) {
       throw new Error(`search: limit must not be negative (got ${opts.limit})`);
     }
-    // `LIMIT` の bigint に収まらない値（2^63 以上）も Postgres は拒む（実測: `value
-    // "9223372036854776000" is out of range for type bigint`）。
+    // `LIMIT` の bigint に収まらない値も Postgres は拒む。
     if (opts.limit >= 2 ** 63) {
       throw new Error(`search: limit must fit in a Postgres bigint (got ${opts.limit})`);
     }
-    // Issue #878: クエリ全体の文字数・異なる語数・1語の文字数に上限を置く
-    // （capQueryTotalChars/queryPhrases の doc 参照）。全体の文字数を最初に適用する。
-    // Issue #951: `mnemora_lexical_query_terms` と同じ向きで、非 ASCII の連なりを
-    // 空白に落としてから分割する（このファイル冒頭の `tokenize()` doc 参照）。
+    // 文字数の上限は全体を最初に適用する。非 ASCII の連なりは空白に落としてから分割する（`tokenize()` 参照）。
     const phrases = queryPhrases(dropNonAsciiRuns(capQueryTotalChars(query)));
     if (phrases.length === 0) {
-      // 契約: 語彙が1つも取れないクエリは0件（`lexical-store-conformance.ts` の歯）。
+      // 語彙が1つも取れないクエリは0件。
       return [];
     }
 
-    // テナント分離は `opts.filter.tenantId` と `ctx.tenantId` の**両方**の一致で行う（AND）。
-    // 以前は `filter.tenantId` だけで絞っていた——理由と、Issue #1050 で決め直した経緯は
-    // `InMemoryVectorStore.search` の同じ箇所のコメントを見ること。食い違えば0件（例外は投げない）。
+    // テナント分離は `opts.filter.tenantId` と `ctx.tenantId` の両方の一致で行う（AND）。食い違えば0件（例外は投げない）。
     const memories =
       ctx.tenantId === opts.filter.tenantId
         ? this.memoryStore.listByTenant({ tenantId: opts.filter.tenantId })
@@ -328,8 +180,7 @@ export class InMemoryLexicalStore implements LexicalStore {
       if (opts.filter.status !== undefined && !opts.filter.status.includes(memory.status)) {
         continue;
       }
-      // Issue #608 項目③(b) / ADR 0286: `includeSubjectless: true` のときだけ、
-      // `subject_id IS NULL`（主題なし）も通す（`InMemoryVectorStore` と同じ意味論）。
+      // `includeSubjectless: true` のときだけ、`subject_id IS NULL`（主題なし）も通す。
       const subjectMatches =
         opts.filter.subjectId === undefined ||
         memory.subjectId === opts.filter.subjectId ||
@@ -337,7 +188,7 @@ export class InMemoryLexicalStore implements LexicalStore {
       if (!subjectMatches) {
         continue;
       }
-      // Issue #152/#153（ADR 0312）: AND 等値の絞り込み（`InMemoryVectorStore` と同じ意味論）。
+      // AND 等値の絞り込み。
       if (opts.filter.attributes !== undefined) {
         const memoryAttributes = memory.attributes ?? {};
         const attributesMatch = Object.entries(opts.filter.attributes).every(
@@ -347,21 +198,21 @@ export class InMemoryLexicalStore implements LexicalStore {
           continue;
         }
       }
-      // Issue #201 PR-B（ADR 0323）: OR の集合絞り込み（`InMemoryVectorStore` と同じ意味論）。
+      // OR の集合絞り込み。
       if (opts.filter.labels !== undefined) {
         const labels = opts.filter.labels;
         if (!memory.tags.some((tag) => labels.includes(tag))) {
           continue;
         }
       }
-      // ADR 0056: 除外の列挙（status とは向きが逆）。`undefined`/空配列は no-op。
+      // 除外の列挙（status とは向きが逆）。`undefined`/空配列は no-op。
       if (
         opts.filter.excludeProvenanceKinds !== undefined &&
         opts.filter.excludeProvenanceKinds.includes(memory.provenance.kind)
       ) {
         continue;
       }
-      // ADR 0039: period（両端とも包含、`>=`/`<=`）。比較対象は `occurredAt ?? recordedAt`。
+      // period（両端とも包含）。比較対象は `occurredAt ?? recordedAt`。
       const effectiveTime = memory.occurredAt ?? memory.recordedAt;
       if (
         opts.filter.occurredAfter !== undefined &&
@@ -375,8 +226,7 @@ export class InMemoryLexicalStore implements LexicalStore {
       ) {
         continue;
       }
-      // Issue #280（Issue #202 第2弾）: `validAt` ゲート。`in-memory-vector-store.ts` と
-      // 同じ述語・同じ境界。
+      // `validAt` ゲート。
       if (opts.filter.validAt !== undefined) {
         if (memory.validFrom != null && memory.validFrom > opts.filter.validAt) {
           continue;
@@ -387,8 +237,7 @@ export class InMemoryLexicalStore implements LexicalStore {
       }
 
       const contentTokens = tokenize(memory.content);
-      // OR 意味論（ADR 0092）: クエリの語（空白区切り）のうち、content にフレーズとして現れるものを数える。
-      // 1つも一致しなければ返さない——`matched === 0` は「一致した候補」ではない。
+      // OR 意味論: 1つも一致しなければ返さない。
       let matched = 0;
       for (const phrase of phrases) {
         if (countPhrase(contentTokens, phrase) > 0) {
@@ -408,12 +257,7 @@ export class InMemoryLexicalStore implements LexicalStore {
       });
     }
 
-    // `PostgresLexicalStore.search`（`interfaces/lexical-store.ts` の `LexicalStore.search`
-    // doc、Issue #345 / ADR 0175）と同じ4段 tie-break: coverage → rank → recordedAt DESC →
-    // memoryId 昇順。以前は coverage/rank の2段止まりで、同点の中身が
-    // `Array.prototype.sort` の安定性により挿入順（通常の呼び出し順では recordedAt が
-    // 古いほうが先）に落ちており、Postgres の「新しい方が先」と逆向きだった
-    // （`in-memory-lexical-store-tiebreak.test.ts` が歯）。
+    // coverage → rank → recordedAt DESC → memoryId 昇順の4段 tie-break（`PostgresLexicalStore` と同じ）。同点が挿入順になると、Postgres の「新しい方が先」と逆になる。
     hits.sort(
       (a, b) =>
         b.coverage - a.coverage ||

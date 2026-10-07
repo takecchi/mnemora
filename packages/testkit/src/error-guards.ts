@@ -1,14 +1,9 @@
 import { expect } from "vitest";
 
-/**
- * 適合テストが core の公開エラーを見分けるための道具（ADR 0418 の追記）。
- *
- * 🔴 **`toBeInstanceOf(クラス)` / `toThrow(クラス)` を使わない理由。** 中身は `instanceof` である。
- * 利用者の手元で `@mnemora/core` が2つの版に分かれると、adapter が投げる例外のクラスは適合テストが
- * import したクラスとは別物になり、正しい adapter でも false になる（誤って赤になる）。
- * core が公開する判定関数（`isMemoryStatusConflictError` など。「`kind`、無ければ `name`」）で見る。
- *
- * ⚠ 公開しない（`index.ts` から export しない）。適合テストの内部の道具である。
+/*
+ * `toBeInstanceOf(クラス)` / `toThrow(クラス)` を使わない: `@mnemora/core` が2つの版に分かれると
+ * 例外のクラスが別物になり、正しい adapter でも誤って赤になる。core の判定関数（`kind`、無ければ `name`）で見る。
+ * 公開しない（適合テストの内部の道具）。
  */
 
 function describeThrown(value: unknown): string {
