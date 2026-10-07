@@ -19,22 +19,10 @@ import {
 } from "../publish-pack-checks.mjs";
 import { spawnSyncWithDeadline } from "./spawn-with-deadline.mjs";
 
-/**
- * `scripts/check-publish-pack.mjs`（publish 梱包の門）の歯。
- *
- * publish 対象パッケージは固定である（`docs/roadmap.md` 等で機械的に判別できる
- * 目印は無く、上位で決定済みのリストを直書きしている——`check-publish-pack.mjs`
- * 冒頭のコメント参照）。この歯もその全件を直書きで持つ（`scripts/__tests__/publish-targets.test.mjs`
- * が `scripts/publish-targets.mjs` の `PUBLISH_TARGETS` と集合として一致することを検査する）。
- *
- * ⚠ 下の version 関連の2つの it は、`NEVER_PUBLISHED_TARGETS`（`publish-pack-checks.mjs`）に
- * 載っている名前だけ向きを変えて検査する。いまその一覧は空である——`@mnemora/bullmq`
- * （Issue #205）は 1.1.0 で publish 済みになり、2026-09-30 に git 上の version を揃えて外した。
- */
-
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
 const gate = fileURLToPath(new URL("../check-publish-pack.mjs", import.meta.url));
 
+/** publish 対象の全件を直書きで持つ（`publish-targets.test.mjs` が `PUBLISH_TARGETS` との一致を検査する）。 */
 const PUBLISH_TARGETS = [
   { name: "@mnemora/core", dir: "packages/core" },
   { name: "@mnemora/testkit", dir: "packages/testkit" },
@@ -57,13 +45,7 @@ describe("publish 対象パッケージの package.json（静的）", () => {
       const manifest = readManifest(target.dir);
 
       if (NEVER_PUBLISHED_TARGETS.has(target.name)) {
-        // git 上の version が 0.0.0 のままでよい名前（ADR 0070。version 揃い検査からも外れる）。
-        // ⚠ publish.yml は、この門を走らせる前に apply-release-version.mjs で全対象の version を
-        // tag の版へ書き換える。⟹ そのときは core と同じ版になっているのが正しい。
-        // 0.0.0 だけを許していた間は、Release のたびに publish ジョブがここで落ち、1本も上がらなかった
-        // （【実測】2026-09-30、Release v1.1.0 の publish run 36612548998）。
-        // ⚠ 一覧の名前（NEVER_PUBLISHED）と意味がずれている——bullmq は 1.1.0 で publish 済み
-        // （2026-09-29、オーナーの手元での初回）。publish-pack-checks.mjs の doc コメント参照。
+        // publish.yml は門の前に全対象の version を tag の版へ書き換える。0.0.0 だけを許すと、Release のたびに publish ジョブがここで落ちる。
         it("git 上の version は 0.0.0 のままでよい（publish 時は tag の版＝core と同じ版）", () => {
           const coreVersion = readManifest("packages/core").version;
           expect(["0.0.0", coreVersion]).toContain(manifest.version);
@@ -83,14 +65,6 @@ describe("publish 対象パッケージの package.json（静的）", () => {
         expect(manifest.publishConfig?.access).toBe("public");
       });
 
-      /**
-       * ⚠ これは作業ツリーの package.json を読むだけの静的な歯であり、
-       * 「使う人が受け取る tarball に MIT の LICENSE が実際に入っているか」までは
-       * 測っていない。それは下の「本物どおり起動すると EXIT=0 になる」歯
-       * （`findLicenseViolations` を tarball 展開後の manifest に対して呼ぶ経路）が測る。
-       * この歯はその代わりではなく、作業ツリー側の設定漏れを早く落とすための補助である
-       * （ADR 0061）。
-       */
       it("license が MIT である（UNLICENSED 等の他の値ではない）", () => {
         expect(manifest.license).toBe("MIT");
       });
@@ -114,32 +88,10 @@ describe("publish 対象パッケージの package.json（静的）", () => {
         expect(manifest.bugs?.url).toBe("https://github.com/takecchi/mnemora/issues");
       });
 
-      /**
-       * ⭐ この歯は ADR 0060 の時点で `expect(manifest.private).toBe(true)` だった
-       * ——publish を止める唯一のラッチが `private: true` であり、それを外すのは
-       * 別の判断（オーナーの判断）だったためである。**その判断が下った**（ADR 0066）。
-       * ADR 0060 が予告した通り、この歯は目的通りに壊れ、向きを逆にして直された。
-       *
-       * 向きが逆になっても、この歯が押さえているものは同じである——
-       * **`private` フィールドの状態が、publish の可否についての明示的な決定と
-       * 一致していること。**`private: true` が誰かの手で戻されたら（あるいは
-       * 新しい publish 対象を `private` 付きで足したら）、publish は
-       * `npm ERR! This package has been marked as private` で黙って止まる。
-       * この歯はそれを CI の側で先に見つける。
-       */
       it("private が立っていない（ADR 0066 で publish を始める判断が下った）", () => {
         expect(manifest.private).toBeUndefined();
       });
 
-      /**
-       * `exports` は ADR 0066 で足した。**初回 publish の前に入れる必要があった**
-       * ——`exports` を後から足すと、それまで解決できていた deep import
-       * （`@mnemora/core/dist/...`）が塞がるため、使う側から見れば破壊的変更になる。
-       *
-       * `main` / `types` は消さずに残してある（`exports` を見ない古い道具向けの後退路）。
-       * `exports` の指す先が tarball に実在するかどうかは、この静的な歯ではなく
-       * `findMissingEntryPoints` が tarball の側から測る。
-       */
       it("exports の . が types と default を持ち、main / types と同じ先を指す", () => {
         expect(manifest.exports?.["."]?.types).toBe(manifest.types);
         expect(manifest.exports?.["."]?.default).toBe(manifest.main);
@@ -149,11 +101,6 @@ describe("publish 対象パッケージの package.json（静的）", () => {
         expect(manifest.exports?.["./package.json"]).toBe("./package.json");
       });
 
-      /**
-       * Issue #166 / ADR 0112: 公開パッケージの `dependencies`（実行時依存）は
-       * 完全固定ではなく範囲指定であること。`EXACT_PINNED_DEPENDENCY_EXEMPTIONS` に
-       * 載っている依存（既存の負債・この PR の対象外）だけは除外する。
-       */
       it("dependencies が完全固定でない（除外分を除く）", () => {
         const violations = findExactPinnedDependencyViolations(
           manifest,
@@ -173,21 +120,13 @@ describe("publish 対象パッケージの package.json（静的）", () => {
     expect(versions.size).toBe(1);
   });
 
-  // 一覧が空であること自体を縛る。bullmq は publish 済みで、他の対象と同じ version 検査を受ける
-  // （2026-09-30。一覧に戻しても上の2つの it は緑のままなので、ここで直に見る）。
-  // 次に初回 publish 前の対象が増えるときは、この it を意図して書き換えること。
+  // 一覧に戻しても上の2つの it は緑のままなので、一覧が空であることを直に見る。
   it("NEVER_PUBLISHED_TARGETS は空である（@mnemora/bullmq を含め、全対象が version 検査を受ける）", () => {
     expect([...NEVER_PUBLISHED_TARGETS]).toEqual([]);
   });
 });
 
 describe("publish-pack-checks.mjs の判定関数（合成フィクスチャに対する変異の歯）", () => {
-  /**
-   * ここで測りたいのは「違反が無いから緑」なのか「検出できていないから緑」なのかの
-   * 区別。だから各歯は必ず対（壊した入力・直した入力）で書く——壊した側が実際に
-   * 落ちる（＝検出する）ことを確認しないかぎり、直した側が通ることに意味は無い。
-   */
-
   describe("findWorkspaceProtocolViolations", () => {
     it("dependencies の workspace: を検出する", () => {
       const violations = findWorkspaceProtocolViolations({
@@ -338,14 +277,6 @@ describe("publish-pack-checks.mjs の判定関数（合成フィクスチャに�
       expect(missing[0]).toContain("./missing-cli.js");
     });
 
-    /**
-     * ⭐ ここから下は ADR 0066 で足した `exports` の歯。
-     *
-     * **なぜ `main` の歯では足りないか**: Node と TypeScript は `exports` が在れば
-     * `main` / `types` を見ない。`main` だけが実在して `exports` の指す先が欠けている
-     * tarball は、`main` を見る歯だけでは緑のまま通り、使う側で
-     * `ERR_MODULE_NOT_FOUND` になる。**今の入口を測る歯が別に必要である。**
-     */
     it("exports の条件付き形（types / default）が実在すれば0件、片方を消せばその1件だけ検出する", () => {
       fixtureDir = mkdtempSync(join(tmpdir(), "publish-pack-checks-exports-cond-"));
       mkdirSync(join(fixtureDir, "dist"));
@@ -361,7 +292,6 @@ describe("publish-pack-checks.mjs の判定関数（合成フィクスチャに�
       writeFileSync(join(fixtureDir, "package.json"), "{}\n");
       expect(findMissingEntryPoints(manifest, fixtureDir)).toEqual([]);
 
-      // default だけを欠けさせる——types 側は実在したままである
       const brokenDefault = findMissingEntryPoints(
         {
           exports: {
@@ -456,7 +386,6 @@ describe("publish-pack-checks.mjs の判定関数（合成フィクスチャに�
 
     it("README.md が無ければ検出する", () => {
       fixtureDir = mkdtempSync(join(tmpdir(), "publish-pack-checks-readme-missing-"));
-      // README.md を意図して作らない。
 
       const violations = findMissingReadme(fixtureDir);
       expect(violations).toHaveLength(1);
@@ -485,11 +414,6 @@ describe("publish-pack-checks.mjs の判定関数（合成フィクスチャに�
       expect(findVersionViolations({ version: "0.1.0" })).toEqual([]);
     });
 
-    /**
-     * ⭐ 隣の値を通すことを固定する歯——`0.0.0` だけを弾くのであって、
-     * 小さい版そのものを弾くのではない（ADR 0070: 版の権威は tag 側に在り、
-     * ここは「まだ tag の値を受け取っていない」ことの目印だけを見ている）。
-     */
     it("version が 0.0.1 なら検出しない（隣の値を通す）", () => {
       expect(findVersionViolations({ version: "0.0.1" })).toEqual([]);
     });
@@ -527,13 +451,7 @@ describe("publish-pack-checks.mjs の判定関数（合成フィクスチャに�
       expect(violations[0]).toContain("@mnemora/core@0.1.1");
     });
 
-    /**
-     * ⚠ これは見落としではなく意図である（`publish-pack-checks.mjs` の
-     * `findVersionSkewViolations` の JSDoc 参照）。欠けた1件はすでに
-     * `findVersionViolations` 側で「version が未設定か 0.0.0 のままです」として
-     * 別に報告済みなので、集まった5件がバラバラでも、ここでは二重に
-     * （しかも不正確な文言で）報告しない。
-     */
+    /** 欠けた1件は `findVersionViolations` が別に報告済みなので、ここでは二重に報告しない（意図）。 */
     it("5件しか集まっておらず版がバラバラでも検出しない（欠けた1件は別の違反として既に報告済み）", () => {
       const versions = [
         { name: "@mnemora/core", version: "0.1.1" },
@@ -569,7 +487,6 @@ describe("publish-pack-checks.mjs の判定関数（合成フィクスチャに�
       expect(violations).toHaveLength(1);
     });
 
-    /** 大文字違いを通さない——"public" との厳密な等値検査であることの歯。 */
     it("publishConfig.access が Public（大文字違い）なら検出する", () => {
       const violations = findPublishAccessViolations({
         publishConfig: { access: "Public" },
@@ -584,12 +501,6 @@ describe("publish-pack-checks.mjs の判定関数（合成フィクスチャに�
   });
 
   describe("findPrivateViolations（ADR 0066）", () => {
-    /**
-     * ⚠ この対の歯が押さえているのは publish の失敗ではない——`private: true` のままなら
-     * publish は `This package has been marked as private` で**止まる**（事故にはならない）。
-     * 押さえているのは、**`private` の状態と「publish してよい」という明示的な決定が
-     * 一致していること**である（ADR 0060 がラッチとして置き、ADR 0066 が外した）。
-     */
     it("private: true を検出する", () => {
       const violations = findPrivateViolations({ private: true });
       expect(violations).toHaveLength(1);
@@ -628,13 +539,6 @@ describe("publish-pack-checks.mjs の判定関数（合成フィクスチャに�
       expect(findOrphanedSourceMaps(fixtureDir)).toEqual([]);
     });
 
-    /**
-     * これは publish 前の現物で実際に起きていた形そのものである: 修正前の
-     * `packages/core` の `dist/index.d.ts.map` は `sources: ["../src/index.ts"]` を
-     * 持っていたが、`files: ["dist"]` は `src/` を tarball に含めないため、
-     * その実体は tarball の中に無かった（実測して確認した。段6のADR相当の記録は
-     * `docs/decisions/` 側に別途ある）。
-     */
     it("sources が tarball 内に無ければ検出する（publish 前の現物で実際に起きていた形）", () => {
       fixtureDir = mkdtempSync(join(tmpdir(), "publish-pack-checks-map-orphan-"));
       mkdirSync(join(fixtureDir, "dist"));
@@ -642,7 +546,6 @@ describe("publish-pack-checks.mjs の判定関数（合成フィクスチャに�
         join(fixtureDir, "dist", "index.d.ts.map"),
         JSON.stringify({ version: 3, sources: ["../src/index.ts"] }),
       );
-      // src/ は意図して作らない — files: ["dist"] が tarball に含めない部分の再現。
 
       const orphans = findOrphanedSourceMaps(fixtureDir);
       expect(orphans).toHaveLength(1);
@@ -679,11 +582,7 @@ describe("publish-pack-checks.mjs の判定関数（合成フィクスチャに�
       expect(violations[0]).toContain("UNLICENSED");
     });
 
-    /**
-     * 「`UNLICENSED` でないこと」だけを見る弱い歯だと、隣の値（`Apache-2.0` 等）を
-     * 通してしまう。オーナーが選んだのは MIT そのものである（ADR 0061）ため、
-     * `MIT` との等値で検査する——この歯はその等値検査が実際に隣の値を落とすことを測る。
-     */
+    /** `UNLICENSED` でないことだけを見ると `Apache-2.0` 等を通すので、`MIT` との等値で検査する（ADR 0061）。 */
     it("license が Apache-2.0 なら検出する（隣の値を通さない）", () => {
       fixtureDir = mkdtempSync(join(tmpdir(), "publish-pack-checks-license-apache-"));
       writeFileSync(join(fixtureDir, "LICENSE"), "Apache License\n");
@@ -695,7 +594,6 @@ describe("publish-pack-checks.mjs の判定関数（合成フィクスチャに�
 
     it("LICENSE ファイルが無ければ検出する（license フィールドが MIT でも）", () => {
       fixtureDir = mkdtempSync(join(tmpdir(), "publish-pack-checks-license-missing-file-"));
-      // LICENSE を意図して作らない。
 
       const violations = findLicenseViolations({ license: "MIT" }, fixtureDir);
       expect(violations).toHaveLength(1);
@@ -711,16 +609,10 @@ describe("publish-pack-checks.mjs の判定関数（合成フィクスチャに�
   });
 });
 
-/**
- * ⚠ **失敗（EXIT=1）側の実行時出力を測る歯は、このファイルではなく
- * `scripts/__tests__/check-publish-pack-failure-output.test.mjs` に在る**
- * ——理由はそちらのファイル冒頭に書いた（このファイルは
- * `scripts/__tests__/publish-targets.test.mjs` にソースを走査されており、
- * publish 対象の形をしたリテラルを増やせない）。
- */
+/** 失敗側の実行時出力の歯は `check-publish-pack-failure-output.test.mjs` に置く。このファイルは `publish-targets.test.mjs` に走査されるので、publish 対象の形のリテラルを増やせない。 */
 describe("scripts/check-publish-pack.mjs（動的・本物の pnpm pack を起動する）", () => {
   it("本物どおり起動すると EXIT=0 になる", () => {
-    // 本物の `pnpm pack` を起動する（CI で 27.6 秒）。既定の 60 秒ではなく個別に 120 秒を置く。
+    // 本物の `pnpm pack` を起動する。既定の 60 秒ではなく個別に 120 秒を置く。
     const result = spawnSyncWithDeadline(process.execPath, [gate], {
       cwd: repoRoot,
       encoding: "utf8",
@@ -732,13 +624,8 @@ describe("scripts/check-publish-pack.mjs（動的・本物の pnpm pack を起�
     expect(output).toContain("publish 梱包の門を通りました");
   }, 120_000);
 
-  /**
-   * ⚠ この門が見ていない範囲（ADR 0255 が反例として名指しし、ADR 0259 が実行時出力へ
-   * 焼いた断り）。**成功（EXIT=0）のときにも出ることを、実行時出力そのもので測る**
-   * ——ADR 0255「決定A」（成功側が本体。「通った＝安全」と読ませないため）。
-   */
   it("成功時の実行時出力に「⚠ この門が見ていない範囲」の断りが焼かれている（固定リストの取りこぼしを名乗る）", () => {
-    // 本物の `pnpm pack` を起動する（CI で 27.6 秒）。既定の 60 秒ではなく個別に 120 秒を置く。
+    // 本物の `pnpm pack` を起動する。既定の 60 秒ではなく個別に 120 秒を置く。
     const result = spawnSyncWithDeadline(process.execPath, [gate], {
       cwd: repoRoot,
       encoding: "utf8",
@@ -750,7 +637,6 @@ describe("scripts/check-publish-pack.mjs（動的・本物の pnpm pack を起�
     expect(output).toContain("⚠ この門が見ていない範囲:");
     expect(output).toContain("scripts/publish-targets.mjs の PUBLISH_TARGETS");
     expect(output).toContain("固定リスト");
-    // ⭐ 数を直書きしない（ADR 0223 決定9（ADR 0234 で着地））——PUBLISH_TARGETS の実件数から動的に出る。
     expect(output).toContain(`いま見たのは ${PUBLISH_TARGETS.length} パッケージ`);
     for (const target of PUBLISH_TARGETS) {
       expect(output).toContain(target.name);
