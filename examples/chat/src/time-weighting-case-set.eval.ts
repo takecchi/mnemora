@@ -1,23 +1,10 @@
 import type { TimeWeightingCase } from "./time-weighting-case.js";
 import { daysBefore, hoursBefore } from "./time-weighting-dates.js";
 
-/**
- * `answer-time-weighting` ベンチの評価用ケース集合（`tuningUse: "held-out"`）。
- *
- * 🔴 **この集合は、実装・スコア式の数値を見て調整しない。** 自然な利用場面として
- * 書き、単独の commit で凍結する。以後この集合を変えたくなったら、まず手を止めて
- * マネージャーへ相談する（`answer-case-set.eval.ts` と同じ規律、Issue #506 §2.2 決定5）。
- *
- * 共通の基準時刻。dev 側（`time-weighting-case-set.dev.ts`）とは独立の値を使う——
- * 「基準時刻の選び方そのものが結果に効く」余地を dev 側の調整から切り離すため。
- */
+/** 実装・スコア式の数値を見て調整しない（凍結）。基準時刻は dev 側と独立の値にする（基準時刻の選び方が結果に効く余地を dev 側の調整から切り離すため）。 */
 const T0 = new Date("2026-07-15T09:00:00.000Z");
 
 export const TIME_WEIGHTING_CASE_SET_EVAL: TimeWeightingCase[] = [
-  // ---------------------------------------------------------------------
-  // 類型A: 古く記録され最近 reinforce された恒常的な事実 vs 新しく記録されたが
-  // 一度も reinforce されていない弱い競合記憶。
-  // ---------------------------------------------------------------------
   {
     id: "eval-a1-window-seat",
     kind: "reinforced-fact-vs-fresh-weak",
@@ -67,9 +54,6 @@ export const TIME_WEIGHTING_CASE_SET_EVAL: TimeWeightingCase[] = [
     tuningUse: "held-out",
   },
 
-  // ---------------------------------------------------------------------
-  // 類型B: 両方とも occurredAt を持つ。古い出来事が新しい出来事より上位に来てはいけない。
-  // ---------------------------------------------------------------------
   {
     id: "eval-b1-pet",
     kind: "old-event-not-outrank-new",
@@ -124,9 +108,6 @@ export const TIME_WEIGHTING_CASE_SET_EVAL: TimeWeightingCase[] = [
     tuningUse: "held-out",
   },
 
-  // ---------------------------------------------------------------------
-  // 類型C: 期限切れの予定が、現行の予定より優先されてはいけない。
-  // ---------------------------------------------------------------------
   {
     id: "eval-c1-internet-plan",
     kind: "expired-schedule-not-outrank-current",

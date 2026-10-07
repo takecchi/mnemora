@@ -1,27 +1,10 @@
 import type { TimeWeightingCase } from "./time-weighting-case.js";
 import { daysBefore, hoursBefore } from "./time-weighting-dates.js";
 
-/**
- * `answer-time-weighting` ベンチの開発用ケース集合（`tuningUse: "development"`）。
- *
- * ⛔ **抽出 LLM を通さない。** 各ケースは記憶を直接（`recordedAt`/`occurredAt`/
- * `validFrom`/`validUntil`/`reinforceAt` を明示して）書く——`answer-case-set.dev.ts` の
- * ような「会話」は無い。3類型（`TimeWeightingCaseKind`）を最低2件ずつ含む
- * （`__tests__/time-weighting-case.test.ts` が検査する）。
- *
- * ここは**調整に使ってよい**側である（`time-weighting-case-set.eval.ts` の
- * 冒頭コメントと対になる）。
- *
- * 共通の基準時刻。すべてのケースの `recallAt`・記憶の時刻はこの1点からの
- * 相対オフセットで組み立てる（`time-weighting-dates.ts` の docstring参照）。
- */
+/** 開発用ケース集合。調整に使ってよい側（`time-weighting-case-set.eval.ts` と対）。抽出 LLM を通さず記憶を直接書く。 */
 const T0 = new Date("2026-06-01T09:00:00.000Z");
 
 export const TIME_WEIGHTING_CASE_SET_DEV: TimeWeightingCase[] = [
-  // ---------------------------------------------------------------------
-  // 類型A: 古く記録され最近 reinforce された恒常的な事実 vs 新しく記録されたが
-  // 一度も reinforce されていない弱い競合記憶。legacy はここで失敗しうる。
-  // ---------------------------------------------------------------------
   {
     id: "dev-a1-tea-over-coffee",
     kind: "reinforced-fact-vs-fresh-weak",
@@ -75,11 +58,6 @@ export const TIME_WEIGHTING_CASE_SET_DEV: TimeWeightingCase[] = [
     tuningUse: "development",
   },
 
-  // ---------------------------------------------------------------------
-  // 類型B: 両方とも occurredAt を持つ。古い出来事が新しい出来事より上位に来てはいけない。
-  // ADR 0300 により occurredAt が在るとき freshness は legacy/eventAwareFreshness で
-  // 同じ式——regression guard（どちらの方針でも同じく正しく答えられるはず）。
-  // ---------------------------------------------------------------------
   {
     id: "dev-b1-phone-model",
     kind: "old-event-not-outrank-new",
@@ -135,10 +113,6 @@ export const TIME_WEIGHTING_CASE_SET_DEV: TimeWeightingCase[] = [
     tuningUse: "development",
   },
 
-  // ---------------------------------------------------------------------
-  // 類型C: 期限切れの予定（validUntil が過去）が、現行の予定より優先されてはいけない。
-  // validAt ゲートは timeWeighting を一切参照しない——regression guard。
-  // ---------------------------------------------------------------------
   {
     id: "dev-c1-meeting-schedule",
     kind: "expired-schedule-not-outrank-current",
