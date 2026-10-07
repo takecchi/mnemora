@@ -133,10 +133,15 @@ async function invalidateRelcacheInitFile(client: Client): Promise<void> {
 /**
  * `pg_extension` を排他で握る接続を返す。`CREATE EXTENSION IF NOT EXISTS`（存在の確認）は、これが
  * ROLLBACK されるまでそこで待つ。`prepare` は、握る前に holder 自身の接続で流す。
+ *
+ * 握る前に `pool` の接続を1本借りて返す。握った後に新しく開く接続は、起動の途中で `pg_extension` を
+ * 開いて止まり（relcache の init file が無いとき）、`pg_stat_activity` に `query` を持つ行として現れない。
  */
 async function holdPgExtensionExclusively(
+  pool: Pool,
   prepare?: (holder: Client) => Promise<void>,
 ): Promise<Client> {
+  (await pool.connect()).release();
   const holder = new Client({ connectionString: connectionStringFor() });
   await holder.connect();
   try {
@@ -287,7 +292,7 @@ describe("runMigrations: 共有の拡張ロック（EXTENSION_LOCK_KEY）", () =
 
   it("拡張を作っている最中にロックの接続が切れると、その元の失敗で reject する", async () => {
     const dir = dirWith("9505_ext_lock_connloss_create.sql", "SELECT 1;");
-    const holder = await holdPgExtensionExclusively();
+    const holder = await holdPgExtensionExclusively(pool);
     try {
       const run = runMigrations(pool, dir, { schema: "ext_lock_connloss_create" });
       const outcome = run.then(
@@ -312,7 +317,7 @@ describe("runMigrations: 共有の拡張ロック（EXTENSION_LOCK_KEY）", () =
   it("pool が冷えていて relcache の init file も無いとき、拡張を作る段の Lock 待ちに着き、その元の失敗で reject する", async () => {
     const dir = dirWith("9506_ext_lock_cold_pool.sql", "SELECT 1;");
     const coldPool = new Pool({ connectionString: connectionStringFor(), max: 4 });
-    const holder = await holdPgExtensionExclusively(async (client) => {
+    const holder = await holdPgExtensionExclusively(coldPool, async (client) => {
       await invalidateRelcacheInitFile(client);
       expect(
         await relcacheInitFileExists(),
@@ -340,9 +345,7 @@ describe("runMigrations: 共有の拡張ロック（EXTENSION_LOCK_KEY）", () =
     }
   }, 20_000);
 
-  // Issue #1825: 上の2本は CI で1回だけ「バックエンドが現れなかった」で落ちた。原因は確定して
-  // いない（手元の再現は 0/約370 回）。次に落ちたとき、待っていた処理が先に失敗していたのか、
-  // 本当に現れなかったのかを、エラー文だけで見分けられるようにする。
+  // `waitForBackend` が、待っていた処理の先の失敗と、本当に現れなかったことを、エラー文だけで見分けられる。
   describe("waitForBackend の診断（Issue #1825）", () => {
     it("待っている間に runMigrations が先に失敗したら、待ちの打ち切りではなく、その元のエラー文で落ちる", async () => {
       // 読めない migrationsDir は、DB に触れる前に reject する（ADR 0448）。
