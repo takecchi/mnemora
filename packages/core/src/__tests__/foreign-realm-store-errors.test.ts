@@ -13,15 +13,7 @@ import {
 } from "./foreign-realm-errors.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * ADR 0418: `@mnemora/core` が利用者の手元で2つの版に分かれたとき、adapter が投げる store 例外は
- * runtime 側のクラスの `instanceof` では見分けられない。実測（postgres@1.1.0 + core@1.0.2）では、
- * `tick()` の complete 経路でリース競合が見分けられず `fail()` へ進み、それも弾かれて
- * `tick()` 全体が reject され、同じバッチの後続ジョブが処理されなかった。
- *
- * この歯は、store に「別の realm の例外」（`vm` で定義し直したクラス）を投げさせて、
- * runtime がそれを本物と同じに扱うことを検査する。
- */
+/** store に別の realm の例外（`vm` で定義し直したクラス）を投げさせて、runtime がそれを本物と同じに扱うことを検査する。 */
 
 const ctx: Ctx = { tenantId: "tenant-1" };
 
@@ -67,8 +59,6 @@ describe.each(FOREIGN_VARIANTS)("別の realm の store 例外 — $label", (var
     const memoryIdA = observeA.memoryIds[0]!;
     const memoryIdB = observeB.memoryIds[0]!;
 
-    // 先頭のジョブ（A）の complete/fail だけが、別の realm の OutboxLeaseConflictError で弾かれる。
-    // 実測の経路: complete が弾かれ → runtime は fail() へ進み → それも弾かれる。
     let conflictJobId: string | null = null;
     const originalComplete = stores.outboxStore.complete.bind(stores.outboxStore);
     const originalFail = stores.outboxStore.fail.bind(stores.outboxStore);
@@ -96,7 +86,6 @@ describe.each(FOREIGN_VARIANTS)("別の realm の store 例外 — $label", (var
       kind: "embed",
       attemptedOutcome: "complete",
     });
-    // 後続のジョブは、競合と無関係にいつもどおり処理されている。
     const embedded = [
       (await stores.memoryStore.get(ctx, memoryIdA))?.embeddingStatus,
       (await stores.memoryStore.get(ctx, memoryIdB))?.embeddingStatus,
@@ -133,9 +122,8 @@ describe.each(FOREIGN_VARIANTS)("別の realm の store 例外 — $label", (var
       status: "archived",
     };
     const memory = await stores.memoryStore.createMemory(ctx, newMemory);
-    // 別のワーカーが先に復帰させていた、という状況。store は別の realm の例外で CAS の失敗を知らせる。
     stores.memoryStore.updateStatusWithEvent = async (_c, id, expected) => {
-      // ADR 0562: `createMemory` の返り値は写し。store の中の行を書き換える。
+      // `createMemory` の返り値は写しなので、store の中の行を書き換える。
       stores.memoryStore.liveRowForTest(ctx, memory.id)!.status = "active";
       throw foreignMemoryStatusConflict(id, expected, "active", variant);
     };

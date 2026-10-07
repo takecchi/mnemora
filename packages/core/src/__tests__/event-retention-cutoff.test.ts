@@ -1,16 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { computeEventRetentionCutoff } from "../event-retention-purge.js";
 
-/**
- * `computeEventRetentionCutoff(now, days)` は、`now` から `days` 日ぶん遡った時刻を返す。
- * 日数が大きすぎて `Date` で表せる範囲（±8.64e15 ms）の外に出るときだけ、表せる最も古い時刻へ寄せる
- * （Invalid Date にしない。それより古い行は無いので、結果は0件の削除になる。ADR 0354）。
- *
- * 既存の歯は `days` が 7 などの小さい値と、寄せが効く極大の値だけを使う。ここは、
- * **寄せが効かない大きい日数（200万日 = 約5476年）でも、cutoff が `now` − 日数のまま**であることと、
- * 寄せが効く日数で `Date` の下限になることを縛る。寄せる下限を `now` に近い時刻へ上げる実装は、
- * 200万日の cutoff を「`now` − 日数」より新しい時刻にしてしまい、それより新しい行まで消す。
- */
+/** 200万日（約5476年）は寄せが効かない大きい日数で、cutoff が `now` − 日数のままであることを縛る。寄せる下限を `now` に近い時刻へ上げる実装は、200万日の cutoff を「`now` − 日数」より新しくし、それより新しい行まで消す。 */
 
 const NOW = new Date("2026-09-27T00:00:00.000Z");
 const DAY_MS = 86_400_000;

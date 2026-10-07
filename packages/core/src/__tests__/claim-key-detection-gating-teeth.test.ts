@@ -7,17 +7,6 @@ import { createRuntime } from "../runtime.js";
 import { defaultDecayStrategy } from "../strategies/decay.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * claim key の contested 検出の opt-in・再送・観測を持たない記憶の扱いの歯
- * （Issue #372・ADR 0324・ADR 0377・ADR 0378。Issue #1775 の #745）。
- *
- * ADR 0377・0473 で「同じ観測の兄弟を除く」は狭まり、0378・0381 で広がった。いまの約束に当てる:
- * - 検出は `detectContested: true` のときだけ走る。`enabled: true` だけ、`detectContested: false` では、
- *   `findActiveByClaimKey`・`findContestedByClaimKey` を一度も呼ばず、`contestedDetection` も返さない
- *   （`ClaimKeyOptions.detectContested` の doc「既定 false」）。
- * - 観測（`sourceObservationId`）を持たない記憶は、どの観測の兄弟にもならない（ADR 0377 手順2.6）。
- */
-
 const ctx: Ctx = { tenantId: "tenant-745-gating" };
 
 function llm(): LLMProvider {

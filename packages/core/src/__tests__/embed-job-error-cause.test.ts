@@ -6,15 +6,7 @@ import type { NewMemory } from "../memory.js";
 import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * Issue #962（前半）: `processEmbedJob` は埋め込みの失敗を受けて `embeddingStatus: 'failed'`
- * を書いてから元の例外を投げ直す。その `failed` の書き込み自体が失敗すると、元の例外
- * （なぜ埋め込めなかったか）が失われ、outbox 行の `lastError` には二次的な失敗しか残らなかった。
- * 元の例外は `cause` に残し、`lastError` にも両方が載ることを測る。
- */
-
 const ctx: Ctx = { tenantId: "tenant-1" };
-// 以前の Fake は outbox 行の `availableAt` を実時刻で付けたため、runtime の時計を実時刻より後にしている。今の Fake は `opts.now` に従う（ADR 0555）ので、この置き方は必須ではない（組み替えは ADR 0555 の「残り」）。
 const LATER = new Date(Date.now() + 60_000);
 
 function newMemory(): NewMemory {
@@ -141,7 +133,6 @@ describe("processEmbedJob — lastError の形（Issue #962）", () => {
     });
 
     expect(lastError).toBeDefined();
-    // 連鎖の末尾が元の例外。メッセージ本文に1回、cause として1回、計2回。二次的な失敗は本文に1回だけ。
     expect(lastError!.endsWith(" <- caused by: embedding provider down")).toBe(true);
     expect(countOccurrences(lastError!, "embedding provider down")).toBe(2);
     expect(countOccurrences(lastError!, "db connection reset while marking failed")).toBe(1);

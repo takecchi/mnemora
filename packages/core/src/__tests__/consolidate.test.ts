@@ -13,21 +13,7 @@ import type { Memory, MemoryStatus, NewMemory } from "../memory.js";
 import { createRuntime, DEFAULT_CONSOLIDATE_MIN_AFFINITY } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * `runtime.consolidate`（Issue #103、ADR 0089）の歯。
- *
- * 置き場所・作法は `forget.test.ts` に揃える（ADR 0089 には該当する記述が見当たらない）:
- * - `@mnemora/testkit` には依存しない（`runtime-fakes.ts` 冒頭のコメントと同じ理由）。
- * - LLM の偽物はこのファイルにローカルに定義する（`runtime.test.ts` の `llmReturning` /
- *   `throwingLlm` と同じ形）。
- *
- * 設計の要点（`runtime.ts` の `ConsolidateOutcome`/`ConsolidateSourceOutcome`/`consolidate`
- * の doc コメント参照）:
- * - 統合元は `forget`/`purge`/減衰のどれでもない第4の位置——`status: 'superseded'`。
- *   行も `content` も消えない。`forgotten` は絶対に統合元にしない。
- * - `eligible` が0件・1件なら書き込み無し（冪等性の芯）。
- * - `dryRun` は LLM を呼ばず1件も書かない。
- */
+/** `@mnemora/testkit` には依存しない（`runtime-fakes.ts` 冒頭のコメントと同じ理由）。 */
 
 const ctx: Ctx = { tenantId: "tenant-1" };
 const NOW = new Date("2026-06-01T00:00:00.000Z");
@@ -98,12 +84,7 @@ function throwingLlm(message = "simulated LLM outage"): LLMProvider {
   };
 }
 
-/**
- * `wireLexicalStore` は既定 `false`（この関数の既存の全呼び出しと1バイトも変わらない）。
- * `true` にすると `stores.lexicalStore`（`FakeLexicalStore`）を配線する——
- * `recall-channels.test.ts`/`buildRuntime` と同じ opt-in パターン。窓（ADR 0089
- * 「引き受けた負債」4）の ANN/lexical 非対称を測る歯だけがこれを使う。
- */
+/** `wireLexicalStore: true` で `stores.lexicalStore`（`FakeLexicalStore`）を配線する。窓（ANN/lexical 非対称）を測る歯だけが使う。 */
 function buildRuntime(
   llmProvider: LLMProvider = notUsedLlm,
   opts: { wireLexicalStore?: boolean } = {},
@@ -128,12 +109,7 @@ function supersededEvents(stores: ReturnType<typeof createFakeRuntimeStores>, me
   return stores.eventStore.events.filter((e) => e.memoryId === memoryId && e.kind === "superseded");
 }
 
-/**
- * `consolidate` が新しい Memory を作ったときにだけ `kind: 'created'` のイベントを積む
- * （`createMemoriesFromCandidates` と同じ規律）。**`FakeMemoryStore` の private な `backing`
- * へ直接アクセスしない**——公開された観測（イベントログ）だけで「新しい統合先が
- * 作られたか」を数える。
- */
+/** 公開された観測（イベントログ）だけで「新しい統合先が作られたか」を数える。`FakeMemoryStore` の private な `backing` へ直接アクセスしない。 */
 function createdEventCount(stores: ReturnType<typeof createFakeRuntimeStores>): number {
   return stores.eventStore.events.filter((e) => e.kind === "created").length;
 }
@@ -164,7 +140,6 @@ describe("runtime.consolidate — 基本の統合", () => {
       const stored = await stores.memoryStore.get(ctx, original.id);
       expect(stored?.status).toBe("superseded");
       expect(stored?.supersededById).toBe(result.consolidatedMemoryId);
-      // 行も content も消えない（north-star 表4「元を消さない」）。
       expect(stored?.content).toBe(original.content);
     }
 
@@ -173,8 +148,6 @@ describe("runtime.consolidate — 基本の統合", () => {
     expect(created?.digest).toBe("統合後の要旨");
     expect(created?.status).toBe("active");
 
-    // docs/architecture.md:83-90「consolidate → ... → MemoryStore.create → EventStore.append」
-    // ——統合先の新しい Memory にも `created` イベントが1件積まれる。
     const createdEvents = stores.eventStore.events.filter(
       (e) => e.memoryId === result.consolidatedMemoryId && e.kind === "created",
     );
@@ -216,15 +189,11 @@ describe("runtime.consolidate — 基本の統合", () => {
       supersededById: result.consolidatedMemoryId,
       note: "手動での統合テスト",
     });
-    // content はイベントのどの欄にも運ばれない。
     expect(Object.keys(event)).not.toContain("content");
     expect(JSON.stringify(event)).not.toContain("A本文");
   });
 
   it("opts.actor と opts.reason は、統合先の created イベントにも入る（統合元の superseded と同じ。reflect の created と同じ形）", async () => {
-    // `ConsolidateOptions.actor` の TSDoc は「`memory_events.actor`」、`reason` は
-    // 「`memory_events.meta` へ足す補足」と書いており、統合元のイベントだけに限っていない。
-    // 以前は統合先の created だけ actor が `{ type: "system" }` に決め打ちで、note も無かった。
     const { runtime, stores } = buildRuntime(llmConsolidatingTo({ content: "統合後" }));
     const a = await stores.memoryStore.createMemory(ctx, newMemory({ content: "A" }));
     const b = await stores.memoryStore.createMemory(ctx, newMemory({ content: "B" }));
@@ -246,7 +215,6 @@ describe("runtime.consolidate — 基本の統合", () => {
       sources: [a.id, b.id],
       note: "手動での統合テスト",
     });
-    // 統合元の superseded も同じ actor（既存の振る舞い。揃っていることを並べて固定する）。
     expect(supersededEvents(stores, a.id)[0]!.actor).toEqual(actor);
   });
 });
@@ -373,7 +341,6 @@ describe("runtime.consolidate — dryRun", () => {
       { memoryId: b.id, kind: "eligible" },
       { memoryId: forgotten.id, kind: "status_not_active", status: "forgotten" },
     ]);
-    // 1件も書かない——イベント数もそのまま（新しい統合先の created イベントも積まれない）。
     expect(stores.eventStore.events.length).toBe(eventCountBefore);
 
     const aAfter = await stores.memoryStore.get(ctx, a.id);
@@ -407,26 +374,18 @@ describe("runtime.consolidate — LLM 障害", () => {
 });
 
 describe("runtime.consolidate — 並行の書き込み（CAS）", () => {
-  /**
-   * 🔴 `FakeMemoryStore` の穴（ADR 0087 実測）: in-memory の偽物は `Memory` をその場で
-   * 書き換え、`getMany` が**同じ参照**を配る。ここは「読んでから書くまでの間に別の書き込みが
-   * 割り込む」を測りたいので、`beforeUpdateStatus`（テスト専用フック、CAS 判定の直前に発火。
-   * `runtime-fakes.ts` 参照）を使って決定的に割り込ませる——`reextract` の歯と同じ手口。
-   */
+  /** `FakeMemoryStore` は `Memory` をその場で書き換え、`getMany` が同じ参照を配る。「読んでから書くまでの間に別の書き込みが割り込む」を決定的に測るため、`beforeUpdateStatus`（CAS 判定の直前に発火するテスト専用フック）で割り込ませる。 */
   it("CAS が破れたら status_changed_concurrently（他の1件は続行）", async () => {
     const { runtime, stores } = buildRuntime(llmConsolidatingTo({ content: "統合後" }));
     const a = await stores.memoryStore.createMemory(ctx, newMemory({ content: "A" }));
     const b = await stores.memoryStore.createMemory(ctx, newMemory({ content: "B" }));
 
-    // ADR 0562: `FakeMemoryStore.get` は写しを返す（以前は backing.memories の行そのものだった）ので、
-    // 行そのものを引く `liveRowForTest` で取った参照の status を書き換えて「割り込み」を再現する
-    // （`runtime.test.ts` の reextract の歯と同じ手口）。
+    // `FakeMemoryStore.get` は写しを返すので、行そのものを引く `liveRowForTest` の参照の status を書き換えて「割り込み」を再現する。
     const aLive = stores.memoryStore.liveRowForTest(ctx, a.id);
     let intervened = false;
     stores.memoryStore.beforeUpdateStatus = (id) => {
       if (!intervened && id === a.id) {
         intervened = true;
-        // 割り込み: consolidate が a を読んでから書くまでの間に、別の誰かが forget した体。
         aLive!.status = "forgotten";
       }
     };
@@ -452,10 +411,8 @@ describe("runtime.consolidate — 途中で store が投げたら打ち切る", 
     const b = await stores.memoryStore.createMemory(ctx, newMemory({ content: "B" }));
     const c = await stores.memoryStore.createMemory(ctx, newMemory({ content: "C" }));
 
-    // ⚠ この歯は ADR 0089 決定5（打ち切って返す・投げない）を検査している。ADR 0100 以降、
-    // その契約が生きているのは**口を持たない adapter の経路**である——⟹ 口を外して測る。
-    // さもないと差し替えた `updateStatusWithEvent` が呼ばれず、**歯が黙って意味を失う**
-    // （ADR 0031 決定8 が名指しした壊れ方）。口が在る経路の振る舞いは下の別の歯が測る。
+    // 口を持たない adapter の経路で測るため、口を外す。さもないと差し替えた `updateStatusWithEvent` が呼ばれず、歯が黙って意味を失う。
+    // 口が在る経路の振る舞いは下の別の歯が測る。
     const base = stores.memoryStore;
     (base as { supersedeWithNewMemories?: unknown }).supersedeWithNewMemories = undefined;
     let updateCalls = 0;
@@ -538,26 +495,8 @@ describe("runtime.consolidate — recall() との裏取り（recall 側は変更
   });
 });
 
-/**
- * ADR 0089「引き受けた負債」4（Issue #765 項目4）: `consolidate` は統合先の作成時に
- * `createMemoryWithOutbox(..., ["embed"])` で `embed` ジョブを積むだけであり、`tick` が
- * 回るまで `embeddingStatus: 'pending'` のまま ANN の候補に入らない。統合元は同じ呼び出しの
- * 中で `superseded` へ動くため、「元は引けなくなったが統合先もまだ引けない」窓が開く。
- *
- * 🔴 **この describe は挙動を変えない。**今の実装がこの窓をどう見せるかを、そのまま
- * 歯として固定するだけである——塞ぐ変更ではない（Issue #765 が「今は決めない」と書いた
- * 候補のどちらも実装しない）。
- */
+/** 今の実装がこの窓（統合元は引けなくなったが、統合先は embed 前でまだ引けない）をどう見せるかを固定するだけで、塞ぐ変更ではない。 */
 describe("runtime.consolidate — 統合直後の埋め込み非同期窓（ADR 0089 引き受けた負債4、Issue #765）", () => {
-  /**
-   * この describe だけ `tick()` を経由して `embed` ジョブを claim する。ファイル共通の
-   * `buildRuntime` は `clock: { now: () => NOW }`（`2026-06-01` 固定）を注入しているが、
-   * 以前の Fake は `enqueueJob` が `availableAt` を `new Date()`（実時刻）で刻んだため（今は `opts.now` に従う。ADR 0555）、
-   * 固定 clock だと `availableAt <= now` が成り立たず1件も claim されなかった——下の
-   * 「`runtime.tick — consolidate ジョブは種の subjectId...」describe が同じ理由で
-   * 既に `buildRuntimeWithRealClock` を使っている（そちらのコメント参照）。ここでも
-   * 同じ回避を踏む。
-   */
   function buildRuntimeWithRealClock(llmProvider: LLMProvider) {
     const stores = createFakeRuntimeStores();
     const runtime = createRuntime({
@@ -591,20 +530,14 @@ describe("runtime.consolidate — 統合直後の埋め込み非同期窓（ADR 
     const result = await runtime.consolidate(ctx, { target: { memoryIds: [a.id, b.id] } });
     const consolidatedId = result.consolidatedMemoryId!;
 
-    // (a) 統合先は作られた直後、embeddingStatus は 'pending' のまま
-    // （`buildConsolidatedMemory`、strategies/consolidate.ts、常にこの値を積む）。
     const justCreated = await stores.memoryStore.get(ctx, consolidatedId);
     expect(justCreated?.embeddingStatus).toBe("pending");
 
-    // (b) 窓の中: 統合元は superseded で filtered、統合先はまだ vectorStore に
-    // upsert されていないので ANN（既定チャンネル）には一切出てこない——recall は
-    // 0件になる。「見つからなかった」ではなく「まだ引ける状態になっていない」。
     const duringWindow = await runtime.recall(ctx, { text: "統合後の本文" });
     expect(duringWindow.memories.map((m) => m.memoryId)).not.toContain(consolidatedId);
     expect(duringWindow.memories.map((m) => m.memoryId)).not.toContain(a.id);
     expect(duringWindow.memories.map((m) => m.memoryId)).not.toContain(b.id);
 
-    // (d) tick が embed ジョブを処理すると窓は閉じる。
     const tickResult = await runtime.tick(ctx, { kinds: ["embed"], leaseMs: 60_000 });
     expect(tickResult).toEqual({ processed: 1, failed: 0, unsupported: [], leaseConflicts: [] });
 
@@ -626,7 +559,6 @@ describe("runtime.consolidate — 統合直後の埋め込み非同期窓（ADR 
     const consolidatedId = result.consolidatedMemoryId!;
     expect((await stores.memoryStore.get(ctx, consolidatedId))?.embeddingStatus).toBe("pending");
 
-    // ANN チャンネルだけでは、この describe の1つ目の歯と同じ理由でまだ引けない。
     const annOnly = await runtime.recall(ctx, { text: "XYZ", channels: ["ann"] });
     expect(annOnly.memories.map((m) => m.memoryId)).not.toContain(consolidatedId);
 
@@ -657,7 +589,6 @@ describe("runtime.consolidate — target の { query } の形", () => {
       target: { query: { vector: [1, 0] }, maxCandidates: 1 },
     });
 
-    // maxCandidates: 1 に切られた結果、eligible は1件だけ ⟹ single_eligible_source。
     expect(result.outcome).toBe("nothing_to_consolidate");
     expect(result.nothingReason).toBe("single_eligible_source");
     expect(result.sources).toHaveLength(1);
@@ -678,7 +609,6 @@ describe("runtime.consolidate — target の { query } の形", () => {
       sources: [],
       llmCalls: 0,
       llmFailure: null,
-      // ADR 0100: 書き込みを1件も試みていない。
       atomicity: "not_attempted",
     });
   });
@@ -710,7 +640,6 @@ describe("runtime.consolidate — target の { seedMemoryId } の形（Issue #13
     const result = await runtime.consolidate(ctx, { target: { seedMemoryId: seed.id } });
 
     expect(result.outcome).toBe("consolidated");
-    // low は候補にすら入らない——ids に無いので sources にも現れない。
     expect(result.sources.map((s) => s.memoryId)).toEqual([seed.id, high.id]);
     expect(result.sources.every((s) => s.kind === "superseded")).toBe(true);
     const lowStored = await stores.memoryStore.get(ctx, low.id);
@@ -741,13 +670,11 @@ describe("runtime.consolidate — target の { seedMemoryId } の形（Issue #13
     });
 
     expect(result.outcome).toBe("consolidated");
-    // recall のランク順（similarity が高い順）: high(1.0) → mid(≈0.707)。
     expect(result.sources.map((s) => s.memoryId)).toEqual([seed.id, high.id, mid.id]);
   });
 
   it("種の embedding がまだ無く recall() の結果に現れなくても、種は先頭に足される", async () => {
     const { runtime, stores } = buildRuntime(llmConsolidatingTo({ content: "統合後" }));
-    // 種の embeddingStatus は既定の 'pending'——vectorStore には一切 upsert しない。
     const seed = await stores.memoryStore.createMemory(
       ctx,
       newMemory({ content: "seed content", digest: "seed" }),
@@ -771,13 +698,11 @@ describe("runtime.consolidate — target の { seedMemoryId } の形（Issue #13
       newMemory({ content: "seed content", digest: "seed", embeddingStatus: "ready" }),
     );
     await stores.vectorStore.upsert(ctx, stores.embeddingProvider.space, seed.id, [4, 0]);
-    // similarity ≈ 1.0（[4,0] と同じ向き）。
     const first = await stores.memoryStore.createMemory(
       ctx,
       newMemory({ content: "first neighbor", digest: "f1", embeddingStatus: "ready" }),
     );
     await stores.vectorStore.upsert(ctx, stores.embeddingProvider.space, first.id, [8, 0]);
-    // similarity ≈ 0.970（[8,0] と [4,0] の間、first よりわずかに離れている）。
     const second = await stores.memoryStore.createMemory(
       ctx,
       newMemory({ content: "second neighbor", digest: "f2", embeddingStatus: "ready" }),
@@ -813,28 +738,7 @@ describe("runtime.consolidate — target の { seedMemoryId } の形（Issue #13
   });
 });
 
-/**
- * Issue #579 / ADR 0317: `tick()` の `consolidate` ジョブハンドラ（`processConsolidateJob`）は、
- * 種の `subjectId` を `ctx.subjectId` に置いてから `consolidate(ctx', { target: { seedMemoryId } })`
- * を呼ぶ——ADR 0310 が実測したとおり、`tick()` はジョブを subject で絞って claim できないため、
- * `ctx.subjectId`（呼び手が `tick()` に渡した値）と種の `subjectId` の食い違いが、subject を
- * またぐ統合（統合後の `Memory.subjectId` が `null` に畳まれる）の主な経路だった。
- *
- * ⚠ これは `runtime.consolidate(ctx, { target: { seedMemoryId } })` を**直接**呼ぶ経路の
- * 歯ではない——上の describe（`{ seedMemoryId } の形`）がその経路をすでに固定しており、
- * この変更はそちらに一切触れていない（明示呼び出しは呼び手の `ctx.subjectId` で完全に
- * 制御できる、ADR 0310 決定2）。ここで測るのは、必ず `runtime.tick()` を経由する
- * `processConsolidateJob` の分岐だけである。
- */
 describe("runtime.tick — consolidate ジョブは種の subjectId に近傍探索を絞る（Issue #579 / ADR 0317）", () => {
-  /**
-   * 上のファイル共通の `buildRuntime` は `clock: { now: () => NOW }`（`2026-06-01` 固定）を
-   * 注入している——`runtime.consolidate()` を直接呼ぶ既存の歯はこれで問題ない（`tick`
-   * 自体を経由しないため）。この describe は `tick()` の `claimBatch` を経由する
-   * ため、outbox 行の `availableAt`（以前の Fake は `enqueueJob` が `new Date()`＝
-   * 実時刻で刻んだ。今は `opts.now` に従う。ADR 0555）より前の固定 clock を使うと、以前は `availableAt <= now` が成り立たず
-   * 1件も claim されなかった。⟹ ここだけ実時計（既定の `systemClock`）を使う。
-   */
   function buildRuntimeWithRealClock(llmProvider: LLMProvider) {
     const stores = createFakeRuntimeStores();
     const runtime = createRuntime({
@@ -850,12 +754,7 @@ describe("runtime.tick — consolidate ジョブは種の subjectId に近傍探
     return { runtime, stores };
   }
 
-  /**
-   * `FakeEmbeddingProvider` は使わない——`vectorStore.upsert` で直接ベクトルを置く
-   * （上の `{ seedMemoryId }` の形の歯と同じ作法）。ここでは「同一の話題（同一 digest 相当）
-   * を複数 subject が持つ」を、**同じベクトル**を複数 subject の Memory に置くことで模す
-   * ——ADR 0310 の shared 極（話題が重なる使い方）に対応する、affinity が十分高いケース。
-   */
+  /** `FakeEmbeddingProvider` は使わず `vectorStore.upsert` で直接ベクトルを置き、同じベクトルを複数 subject の Memory に置いて「同一の話題を複数 subject が持つ」を模す。 */
   async function enqueueConsolidateJob(
     stores: ReturnType<typeof createFakeRuntimeStores>,
     overrides: Partial<NewMemory>,
@@ -883,7 +782,6 @@ describe("runtime.tick — consolidate ジョブは種の subjectId に近傍探
     });
     await stores.vectorStore.upsert(ctx, stores.embeddingProvider.space, seed.id, [4, 0]);
 
-    // 種と同じ subject の近傍——similarity 1.0（[4,0] と同じ向き）。
     const neighborSameSubject = await stores.memoryStore.createMemory(
       ctx,
       newMemory({
@@ -900,8 +798,7 @@ describe("runtime.tick — consolidate ジョブは種の subjectId に近傍探
       [8, 0],
     );
 
-    // 別 subject の近傍——**同じベクトル**（話題が重なる使い方、ADR 0310 shared 極）。
-    // 種の subject に絞らなければ、これも既定の minAffinity（0.8）を満たして候補に入る。
+    // 別 subject の近傍も同じベクトルで、種の subject に絞らなければ既定の minAffinity（0.8）を満たして候補に入る。
     const neighborOtherSubject = await stores.memoryStore.createMemory(
       ctx,
       newMemory({
@@ -918,9 +815,7 @@ describe("runtime.tick — consolidate ジョブは種の subjectId に近傍探
       [8, 0],
     );
 
-    // `ctx` に subjectId を付けずに tick を呼ぶ——ADR 0310 の「絞らない」列に相当する
-    // 呼び方。修正前はここで別 subject の近傍が混ざり、統合後の subjectId が null に
-    // 畳まれた（本 PR 本文に、実装を一時的に戻して赤くなることを確認した記録がある）。
+    // `ctx` に subjectId を付けずに tick を呼ぶ（ADR 0310 の「絞らない」列）。
     const tickResult = await runtime.tick(ctx, { kinds: ["consolidate"], leaseMs: 60_000 });
     expect(tickResult).toEqual({ processed: 1, failed: 0, unsupported: [], leaseConflicts: [] });
 
@@ -928,7 +823,6 @@ describe("runtime.tick — consolidate ジョブは種の subjectId に近傍探
     expect(seedAfter?.status).toBe("superseded");
     const consolidated = await stores.memoryStore.get(ctx, seedAfter!.supersededById!);
     expect(consolidated).not.toBeNull();
-    // 混在 0%: 統合後の subjectId は null に畳まれず、種の subject のままである。
     expect(consolidated!.subjectId).toBe("subject-a");
     expect(consolidated!.provenance).toMatchObject({
       kind: "consolidated",
@@ -937,7 +831,6 @@ describe("runtime.tick — consolidate ジョブは種の subjectId に近傍探
     expect((consolidated!.provenance as { sources: MemoryId[] }).sources).not.toContain(
       neighborOtherSubject.id,
     );
-    // 別 subject の近傍は候補にすら入らないので、統合されず active のまま残る。
     const otherAfter = await stores.memoryStore.get(ctx, neighborOtherSubject.id);
     expect(otherAfter?.status).toBe("active");
   });
@@ -971,10 +864,7 @@ describe("runtime.tick — consolidate ジョブは種の subjectId に近傍探
       [8, 0],
     );
 
-    // ctx.subjectId と同じ subject の近傍——ADR 0310 §3 が実測したとおり、`tick()` は
-    // ジョブを subject で絞って claim できないため、種と別の subject が来ることがある。
-    // ここでは「ctx.subjectId に付けた subject」を優先すると、かえってこれが混ざる
-    // ことになる（ADR 0310 の「種と別」の列）——それを防ぐのがこの歯である。
+    // `tick()` はジョブを subject で絞って claim できないので、ctx.subjectId の subject を優先すると種と別の subject が混ざる。それを防ぐ歯。
     const neighborSameAsCtx = await stores.memoryStore.createMemory(
       ctx,
       newMemory({
@@ -1002,7 +892,6 @@ describe("runtime.tick — consolidate ジョブは種の subjectId に近傍探
     expect(seedAfter?.status).toBe("superseded");
     const consolidated = await stores.memoryStore.get(ctx, seedAfter!.supersededById!);
     expect(consolidated).not.toBeNull();
-    // 種の subject（subject-a）を優先する——ctx に付けた subject-c ではない。
     expect(consolidated!.subjectId).toBe("subject-a");
     expect((consolidated!.provenance as { sources: MemoryId[] }).sources).toEqual(
       expect.arrayContaining([seed.id, neighborSameAsSeed.id]),
@@ -1038,8 +927,6 @@ describe("runtime.tick — consolidate ジョブは種の subjectId に近傍探
     );
     await stores.vectorStore.upsert(ctx, stores.embeddingProvider.space, neighbor.id, [8, 0]);
 
-    // ctx に subjectId を付けない——種が null のとき、ctx をそのまま使うので recall は
-    // テナント全体を見る。今日どおりの挙動（変えていない）を固定する。
     const tickResult = await runtime.tick(ctx, { kinds: ["consolidate"], leaseMs: 60_000 });
     expect(tickResult).toEqual({ processed: 1, failed: 0, unsupported: [], leaseConflicts: [] });
 
@@ -1052,25 +939,7 @@ describe("runtime.tick — consolidate ジョブは種の subjectId に近傍探
     );
   });
 
-  /**
-   * Issue #849 / ADR 0157 決定2 追記: `consolidate()` は LLM 呼び出しが失敗しても例外を
-   * 投げず、`outcome: "llm_failed"`（`llmFailure` 付き）を正常な戻り値として返す
-   * （ADR 0089 の公開の約束、`notUsedLlm`/`throwingLlm` の直接呼び出しの歯 —
-   * 「runtime.consolidate — LLM 障害」describe参照）。だが `processConsolidateJob`
-   * （`tick()` 経由）は戻り値を見ずに `await consolidate(...)` するだけだったため、
-   * LLM が本当に落ちても `tick()` はそのジョブを complete() し `processed` を増やしていた
-   * ——ADR 0157 決定2「LLM/store が本当に失敗したときの例外だけが伝播して `tick()` に
-   * `fail()` させる」という前提が実際には成り立っていなかった。
-   *
-   * ⚠ `runtime.tick — consolidate/reflect ジョブを処理する`（`runtime.test.ts` 1296〜1341行）の
-   * 「payload が正しければ processed」の歯とは違う——あちらは `nothing_to_consolidate`
-   * （近傍が無く LLM を呼ばずに決まる正規の結末）を測っており、ここは**LLM を実際に呼んで
-   * 実際に落ちた**ケースを測る。そのため、eligible が2件（種＋同一 subject の高affinity近傍）
-   * になるようにし、LLM 呼び出しの直前まで到達させる。
-   *
-   * `buildRuntimeWithRealClock`/`enqueueConsolidateJob` はこの describe 冒頭で定義した
-   * ものをそのまま使う——`tick()` を経由する必要がある点は上のテスト群と同じ。
-   */
+  /** 陽性対照: eligible が2件（種＋同一 subject の高 affinity 近傍）になるようにして、LLM 呼び出しの直前まで到達させる（近傍が無いと LLM を呼ばず nothing_to_consolidate で終わる）。 */
   describe("LLM が実際に失敗すると、tick は failed に数える（Issue #849 / ADR 0157 決定2 追記）", () => {
     function throwingLlmWithCallCount(message = "simulated LLM outage") {
       const state = { calls: 0 };
@@ -1098,8 +967,6 @@ describe("runtime.tick — consolidate ジョブは種の subjectId に近傍探
       });
       await stores.vectorStore.upsert(ctx, stores.embeddingProvider.space, seed.id, [4, 0]);
 
-      // 種と同じ subject の近傍——similarity 1.0（[4,0] と同じ向き）。eligible が2件になり、
-      // LLM を実際に呼ぶ段まで到達する（1件だけだと nothing_to_consolidate で LLM を呼ばず終わる）。
       const neighbor = await stores.memoryStore.createMemory(
         ctx,
         newMemory({
@@ -1114,12 +981,9 @@ describe("runtime.tick — consolidate ジョブは種の subjectId に近傍探
       const tickResult = await runtime.tick(ctx, { kinds: ["consolidate"], leaseMs: 60_000 });
 
       expect(tickResult).toEqual({ processed: 0, failed: 1, unsupported: [], leaseConflicts: [] });
-      // LLM が実際に呼ばれたこと自体を固定する——nothing_to_consolidate に化けて LLM を
-      // 呼ばないまま緑になる退行を防ぐ（この歯自身が測りたい経路に実際に乗ったことの証跡）。
+      // LLM が実際に呼ばれたこと自体を固定する: nothing_to_consolidate に化けて LLM を呼ばないまま緑になる退行を防ぐ。
       expect(state.calls).toBe(1);
 
-      // 種は active のまま——ADR 0089「1件も書いていない」どおり、LLM 失敗を根拠に
-      // 既存の記憶へは一切書き込まれていない。
       const seedAfter = await stores.memoryStore.get(ctx, seed.id);
       expect(seedAfter?.status).toBe("active");
 
@@ -1222,7 +1086,6 @@ describe("runtime.consolidate — 空の target", () => {
       sources: [],
       llmCalls: 0,
       llmFailure: null,
-      // ADR 0100: 書き込みを1件も試みていない。
       atomicity: "not_attempted",
     });
     expect(stores.eventStore.events).toHaveLength(0);
@@ -1383,7 +1246,6 @@ describe("buildConsolidatedMemory（純関数）", () => {
     expect(memory.digest.length).toBeLessThanOrEqual(11); // 10文字 + "…"
   });
 
-  // Issue #153（ADR 0312 決定4）: `attributes` は積集合。
   describe("attributes は eligible 全件に同じキー・同じ値で入っているものだけを残す（積集合）", () => {
     it("全件一致するキーだけが残る。値が割れているキー・一部にしか無いキーは落ちる", () => {
       const memory = buildConsolidatedMemory({
@@ -1398,7 +1260,6 @@ describe("buildConsolidatedMemory（純関数）", () => {
         halfLifeHours: 24,
         now: NOW,
       });
-      // visibility は両方 "internal" で一致 ⟹ 残る。region は値が割れている ⟹ 落ちる。
       expect(memory.attributes).toEqual({ visibility: "internal" });
     });
 
@@ -1419,7 +1280,6 @@ describe("buildConsolidatedMemory（純関数）", () => {
     });
 
     it("3件以上で、あるキーが一部の件でしか一致しないなら、そのキーは残らない（every であって some ではない）", () => {
-      // region: m1・m2 は "jp" で一致するが m3 だけ "us"。tier: m1 だけが持つ。
       // 「1件でも一致すれば残す」実装だと region も tier も残ってしまう。
       const eligible = [
         fixtureMemory({
@@ -1467,7 +1327,6 @@ describe("buildConsolidatedMemory（純関数）", () => {
     });
   });
 
-  // Issue #1188 残り（ADR 0368）: `validFrom`/`validUntil` は eligible の区間の積。
   describe("validFrom/validUntil は eligible 全件の区間の積（ADR 0368）", () => {
     it("両端とも eligible ごとに違う: validFrom は最大値、validUntil は最小値", () => {
       const memory = buildConsolidatedMemory({
@@ -1586,14 +1445,12 @@ describe("runtime.consolidate — 口が在る adapter（ADR 0100）", () => {
       { memoryId: a.id, kind: "superseded", previousStatus: "active" },
       { memoryId: b.id, kind: "superseded", previousStatus: "active" },
     ]);
-    // 統合元は両方 superseded で、統合先を指している。
     expect((await stores.memoryStore.get(ctx, a.id))?.supersededById).toBe(
       result.consolidatedMemoryId,
     );
     expect((await stores.memoryStore.get(ctx, b.id))?.supersededById).toBe(
       result.consolidatedMemoryId,
     );
-    // 監査ログの `meta.supersededById` も store が埋めている（ADR 0100 の契約）。
     expect(supersededEvents(stores, a.id)[0]?.meta.supersededById).toBe(
       result.consolidatedMemoryId,
     );
@@ -1622,13 +1479,7 @@ describe("runtime.consolidate — 口が在る adapter（ADR 0100）", () => {
     expect(result.outcome).toBe("consolidated");
   });
 
-  /**
-   * 🔴🔴 この歯が ADR 0100 の芯である。
-   *
-   * **投げること自体は本題ではない。*巻き戻ること*が本題である。**
-   * ⚠ 例外が投げられたことだけを見る歯は、書き込みが残っていても緑になる——⟹ store を
-   * 実際に見に行って「新しい Memory も supersede も1つも書かれていない」ことを assert する。
-   */
+  /** 投げること自体は本題ではなく、巻き戻ること。例外が投げられたことだけを見る歯は書き込みが残っていても緑になるので、store を実際に見て「新しい Memory も supersede も1つも書かれていない」ことを assert する。 */
   it("口が投げたら例外は呼び出し側まで届き、新しい Memory も supersede も1件も書かれていない", async () => {
     const { stores } = buildRuntime();
     const a = await stores.memoryStore.createMemory(ctx, newMemory({ content: "A" }));
@@ -1640,8 +1491,6 @@ describe("runtime.consolidate — 口が在る adapter（ADR 0100）", () => {
     const memoriesBefore = backingMemories.size;
     const eventsBefore = stores.eventStore.events.length;
 
-    // 口が「トランザクションを張ったが失敗した」を模す。⛔ 部分的な書き込みは残さない
-    // （本物のトランザクションのロールバックに相当する）。
     const failing = new Proxy(stores.memoryStore, {
       get(target, prop, receiver) {
         if (prop === "supersedeWithNewMemories") {
@@ -1666,13 +1515,11 @@ describe("runtime.consolidate — 口が在る adapter（ADR 0100）", () => {
       clock: { now: () => NOW },
     });
 
-    // 🔴 ADR 0089 決定5 をこの経路では部分的に覆す——投げる。理由は「投げない」の理由
-    // （部分的に起きたことを見えなくしない）が、1トランザクションでは成立しないため。
+    // ADR 0089 決定5 をこの経路では部分的に覆して投げる: 「投げない」の理由（部分的に起きたことを見えなくしない）が1トランザクションでは成立しないため。
     await expect(
       runtimeFailing.consolidate(ctx, { target: { memoryIds: [a.id, b.id] } }),
     ).rejects.toThrow("simulated transaction failure");
 
-    // 🔴 本題: 何も書かれていない。
     expect(backingMemories.size).toBe(memoriesBefore);
     expect(stores.eventStore.events.length).toBe(eventsBefore);
     expect((await stores.memoryStore.get(ctx, a.id))?.status).toBe("active");

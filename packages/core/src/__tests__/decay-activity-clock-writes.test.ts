@@ -7,16 +7,7 @@ import type { NewMemory } from "../memory.js";
 import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * [ADR 0165](../../../docs/decisions/0165-decay-activity-clock.md) 決めたこと3・5・12 の
- * 書き込み側3箇所（`runtime.ts` の `buildNewMemoriesForCandidates` / `consolidate` 手順6 /
- * `reflect` 手順7）の配線の歯。
- *
- * 3箇所とも同じ形の `resolveActivityClockInputs` を通る——ここでは代表として抽出
- * （`observe`）で両方の分岐（'wall'/'activity'）を厚く検査し、consolidate・reflect は
- * 「同じ配線が効いている」ことを1本ずつ確認する（3箇所を同じ深さで繰り返さない。
- * 核となる分岐ロジックは共有関数なので、重複した深さのテストは同じバグしか捕まえない）。
- */
+/** consolidate・reflect は「同じ配線が効いている」ことを1本ずつ確認するだけで、3箇所を同じ深さで繰り返さない（分岐ロジックは共有関数 `resolveActivityClockInputs` なので、重複した深さのテストは同じバグしか捕まえない）。 */
 
 const ctx: Ctx = { tenantId: "tenant-1" };
 const NOW = new Date("2026-06-01T00:00:00.000Z");
@@ -120,8 +111,6 @@ describe("runtime.observe（抽出） — 活動時計の3つ組の配線（ADR 
     expect(memory?.decayBaseSeq ?? null).toBeNull();
     expect(memory?.decayFloorSeq ?? null).toBeNull();
     expect(memory?.halfLifeRecalls ?? null).toBeNull();
-    // ADR 0165 決めたこと2 の doc「tenant_settings は読み出しの多い設定行」——
-    // 'wall' のテナントでは activity_seq を読みに行く理由が無い。
     expect(getActivitySeqCalls).toBe(0);
   });
 
@@ -130,8 +119,7 @@ describe("runtime.observe（抽出） — 活動時計の3つ組の配線（ADR 
       llmReturningMemories([{ content: "東京出張の予定", provenanceKind: "stated" }]),
     );
     await stores.tenantSettingsStore.setDecayClock(ctx, "activity");
-    // activity_seq を先に進めておく(3にする)——recall を3回行う代わりに、
-    // createRecall の同じ経路を直接使う(ADR 0165 決めたこと5 と同じ書き込み口)。
+    // recall を3回行う代わりに、`createRecall` の同じ経路を直接使う。
     for (let i = 0; i < 3; i += 1) {
       await stores.memoryStore.createRecall(ctx, {
         tenantId: ctx.tenantId,
@@ -173,8 +161,6 @@ describe("runtime.observe（抽出） — 活動時計の3つ組の配線（ADR 
       );
       await stores.tenantSettingsStore.setDecayClock(ctx, "activity");
       const bobCtx: Ctx = { tenantId: ctx.tenantId, subjectId: "bob" };
-      // S_bob だけを5まで進める（T には一度も触れない、activityCounting: "subject" 相当の
-      // 前進を createRecall の口で直接行う）。
       for (let i = 0; i < 5; i += 1) {
         await stores.memoryStore.createRecall(ctx, {
           tenantId: ctx.tenantId,
@@ -203,8 +189,6 @@ describe("runtime.observe（抽出） — 活動時計の3つ組の配線（ADR 
       });
       const memory = await stores.memoryStore.get(bobCtx, result.memoryIds[0]!);
 
-      // T(0) + S_bob(5) = 5。T を1度も進めていないのに decayBaseSeq が進むことが、
-      // 「作成時も、その記憶の subject の有効ないまを使う」ことの直接の証拠。
       expect(memory?.decayBaseSeq).toBe(5);
     },
   );

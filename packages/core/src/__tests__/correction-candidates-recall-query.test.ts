@@ -5,16 +5,7 @@ import type { NewRecallRecord } from "../recall.js";
 import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * `Runtime.findCorrectionCandidates` の TSDoc「既存の `recall(ctx, { text: input.text })` を**1回だけ**呼ぶ」
- * 「`text` 以外のフィールド（`limit`/`channels`/`overFetchFactor`/`scoreThreshold` 等）は一切変えず、
- * `recall()` の既定に委ねる」を縛る。振る舞いは変えていない。
- *
- * 中の `recall()` は recall の記録を1件書く（Issue #1244）。その記録の数と `query` を見る。
- * `limit`・`excludeMemoryIds` を渡しても、`recall()` へは `text` しか渡らない。
- * （postgres 側の `correction-candidates-recall-record.postgres.test.ts` は `toMatchObject({ text })` なので、
- * 余計な欄が混ざっても緑になる。）
- */
+/** postgres 側の `correction-candidates-recall-record.postgres.test.ts` は `toMatchObject({ text })` なので余計な欄が混ざっても緑になる。ここでは recall の記録の数と `query` 全体を見る。 */
 
 const ctx: Ctx = { tenantId: "tenant-1" };
 

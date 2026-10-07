@@ -7,17 +7,6 @@ import type { NewMemory } from "../memory.js";
 import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * [ADR 0394](../../../docs/decisions/0394-activity-clock-writes-use-memorys-own-subject.md):
- * `MemoryStore.supportsAddOwnSubjectSeq?()`（store の宣言）による、強化の渡し方の分岐。
- *
- * - 宣言が無い store（`addOwnSubjectSeq` を読まない第三者 adapter）には、runtime は今までどおりの値
- *   （`T + S_ctx` をそのまま `nowSeq` に、フラグなし）を渡す——挙動が今より悪くならない。
- * - 宣言のある store にだけ、`T` と `addOwnSubjectSeq: true` を渡す。
- *
- * 数値は T=10・S_alice=7・S_bob=20。
- */
-
 const TENANT = "tenant-1";
 const tenantCtx: Ctx = { tenantId: TENANT };
 const aliceCtx: Ctx = { tenantId: TENANT, subjectId: "alice" };

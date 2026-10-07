@@ -6,13 +6,7 @@ import { defaultDecayStrategy } from "../strategies/decay.js";
 import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * `findCorrectionCandidates` の `excludeMemoryIds` は、大文字小文字を無視して突き合わせる
- * （`CorrectionCandidatesInput.excludeMemoryIds` の TSDoc。ADR 0485 の PR 本文「大文字の除外」）。
- * `correction-candidates-exclude-edges.test.ts` は「渡した id が大文字」の向きだけを縛っている。この歯は逆向き——
- * store が返す記憶の id が大文字を含み、渡した id が小文字のときも除外される（adapter が id を大文字で返しても効く）。
- * core の Fake は id を小文字の `mem-N` で返すので、`getMany` の口だけを差し替えて、返す記憶の `id` を大文字にする。
- */
+/** core の Fake は id を小文字の `mem-N` で返すので、`getMany` の口だけを差し替えて、返す記憶の `id` を大文字にする。 */
 
 const ctx: Ctx = { tenantId: "tenant-1" };
 const NOW = new Date("2026-06-01T00:00:00.000Z");
