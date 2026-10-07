@@ -45,8 +45,8 @@ export interface StructuredRequest<T> {
  * - タイムアウト・レート制限・失敗時は例外を投げる。`LLMProvider` 自体はリトライを
  *   内蔵しない（責務の混在を避ける）。
  *
- * ⚠ **2026-09-26 追記（[Issue #850](https://github.com/takecchi/mnemora/issues/850)）:
- * `completeStructured` が返した後の値を、core は `req.schema` で再検証しない。**
+ * ⚠ **`completeStructured` が返した後の値を、core は `req.schema` で再検証しない**
+ * （[Issue #850](https://github.com/takecchi/mnemora/issues/850)）。
  * core・呼び出し側（`extraction.ts`/`claim-key.ts`/`strategies/consolidate.ts`/
  * `strategies/reflect.ts`）は戻り値の型 `T` をそのまま信じて使う。schema への適合を
  * 保証するのは provider の責務であり、`@mnemora/openai`・`@mnemora/anthropic` は
@@ -58,53 +58,40 @@ export interface StructuredRequest<T> {
  * （`docs/memory-model.md` §4）は `completeStructured` が例外を*投げた*場合だけを覆い、
  * この形（成功したように見えて中身の型が違う場合）は覆わない。
  *
- * ⚠ **2026-09-26 追記（[Issue #884](https://github.com/takecchi/mnemora/issues/884)）:
- * 「`LLMProvider` 自体はリトライを内蔵しない」は、mnemora の provider コードが再試行を
- * 書いていない、という意味である。**`client` を指定しない `@mnemora/openai`
- * （`OpenAILLMProvider`）・`@mnemora/anthropic`（`AnthropicLLMProvider`）は SDK 既定の
- * クライアントを作り（`options.client ?? new OpenAI({ apiKey })` /
- * `new Anthropic({ apiKey })`）、その SDK 自身が内部で 429・5xx 等に対して再試行する
- * （実測: `openai@7.10.0` / `@anthropic-ai/sdk@0.124.0` はどちらも既定
+ * ⚠ **「リトライを内蔵しない」は、mnemora の provider コードが再試行を書いていない、という意味である**
+ * （[Issue #884](https://github.com/takecchi/mnemora/issues/884)）。
+ * `client` を指定しない `@mnemora/openai`（`OpenAILLMProvider`）・`@mnemora/anthropic`
+ * （`AnthropicLLMProvider`）は SDK 既定のクライアントを作り、その SDK 自身が内部で 429・5xx 等に
+ * 対して再試行する（実測: `openai@7.10.0` / `@anthropic-ai/sdk@0.124.0` はどちらも既定
  * `maxRetries: 2`＝最大3回・`timeout: 600000`ms）。この数値は mnemora の契約ではなく
  * SDK の既定値であり、SDK の版が上がれば変わりうる。変えたい呼び出し側は、
  * `maxRetries`/`timeout` を設定した SDK client を自分で作り、各 Options の `client` へ
  * 渡す（`OpenAILLMProviderOptions`/`AnthropicLLMProviderOptions` の `client`）。
  *
- * ⚠ **2026-09-27 追記（今の振る舞いを書いたもの、[Issue #1200](https://github.com/takecchi/mnemora/issues/1200)）:
- * runtime はこの呼び出しに時間の上限を付けず、中断の口（`AbortSignal` など）も渡さない。**`complete`/`completeStructured` が
- * 返るまで、呼んだ Runtime の口（`observe`・`recall`・`tick`・`consolidate`・`reflect`・`reextract`）も返らない。
- * 上限になるのは provider の側の設定だけである（`@mnemora/openai`・`@mnemora/anthropic` は SDK の既定——
- * 上の #884 の追記、`@mnemora/local-embedding` は推論のタイムアウトを持たない）。待っている間、
- * runtime は DB の接続を握らない（【実測 2026-09-27】`@mnemora/postgres` で `max: 1` の pool の横から
- * 別の DB 操作が通った。歯は `packages/postgres/src/__tests__/provider-hang.postgres.test.ts`）。
- *
- * ⚠ **2026-09-29 追記（クローン miku の判断。[Issue #1200](https://github.com/takecchi/mnemora/issues/1200)、
- * [ADR 0359](../../../../docs/decisions/0359-abort-signal-for-provider-calls.md)）: 上の「中断の口も渡さない」は
- * もう成り立たない。** `complete`/`completeStructured` は任意の第3引数 `opts?: AbortOptions` を受け取る。
- * `opts.signal` を渡すと:
- * - 呼ぶ前に既に abort 済みなら、runtime はこの呼び出しを行わずに reject する。
+ * ⚠ **中断と時間の上限**（Issue #1200、
+ * [ADR 0359](../../../../docs/decisions/0359-abort-signal-for-provider-calls.md)）:
+ * `complete`/`completeStructured` は任意の第3引数 `opts?: AbortOptions` を受け取る。
+ * - **既定の時間の上限は持たない。** `opts`/`opts.signal` を省略すれば、provider が返るまで
+ *   呼んだ Runtime の口（`observe`・`recall`・`tick`・`consolidate`・`reflect`・`reextract`）も返らない。
+ *   上限になるのは provider 側の設定だけである（`@mnemora/openai`・`@mnemora/anthropic` は SDK の既定、
+ *   上の #884）。待っている間、runtime は DB の接続を握らない
+ *   （歯は `packages/postgres/src/__tests__/provider-hang.postgres.test.ts`）。
+ * - `opts.signal` を渡したとき、呼ぶ前に既に abort 済みなら、runtime はこの呼び出しを行わずに reject する。
  * - 呼んでいる間に abort されたら、runtime はこの Promise の解決を待たずに reject する
  *   （`signal.reason`。無ければ `AbortError` 相当）——**provider がこの引数を無視しても**、
  *   runtime 自身が provider の Promise と abort を競わせるため、呼んだ Runtime の口は返る。
- * - **既定の時間の上限は今回も持たない。**`opts`/`opts.signal` を省略すれば、今までどおり
- *   provider が返るまで待ち続ける——この追記は opt-in の選択肢を足しただけで、上の
- *   「今の振る舞い」の記述を1バイトも動かさない。
  * - `opts` を渡さない既存の実装（2引数の `complete`/`completeStructured`）は、そのまま
  *   この interface に適合する（TypeScript の構造的部分型——第3引数が省略可能なため）。
- *   `@mnemora/openai`・`@mnemora/anthropic` は `opts.signal` を SDK 呼び出しの request options
- *   （`{ signal }`）へ渡す。`@mnemora/local-embedding`（`EmbeddingProvider`）は推論の前後で
- *   `signal` を確かめるだけで、推論の途中では止まらない（`embedding-provider.ts` の追記）。
- *
- * ⚠ **2026-10-01 追記（[ADR 0445](../../../../docs/decisions/0445-local-embedding-chunk-abort-chat-drain-provider-docs.md)。上の「SDK の
- * request options へ渡す」は [ADR 0428](../../../../docs/decisions/0428-provider-abort-reason-and-error-guards.md) より前の記述で、不完全だった）:**
- * `@mnemora/openai`・`@mnemora/anthropic` は SDK 呼び出しを core の `runAbortable` で包む。**provider を直に呼んだときも**、
- * abort の reject の値は `signal.reason`（SDK の `APIUserAbortError` ではない）で、呼ぶ前に abort 済みなら SDK を呼ばずに reject し、
- * SDK の再試行待ち（429 の `retry-after` 等）の最中でも abort の時点で返る。`signal` は SDK にも渡すので裏のリクエストも切れる。
- * 読み込み待ち（`@mnemora/local-embedding`）の扱いは `embedding-provider.ts` の同日付の追記を見ること。
+ * - `@mnemora/openai`・`@mnemora/anthropic` は SDK 呼び出しを core の `runAbortable` で包み、`signal` を SDK にも
+ *   渡す。**provider を直に呼んだときも**、abort の reject の値は `signal.reason`（SDK の `APIUserAbortError` ではない）
+ *   で、呼ぶ前に abort 済みなら SDK を呼ばずに reject し、SDK の再試行待ち（429 の `retry-after` 等）の最中でも
+ *   abort の時点で返る（[ADR 0428](../../../../docs/decisions/0428-provider-abort-reason-and-error-guards.md)、
+ *   [ADR 0445](../../../../docs/decisions/0445-local-embedding-chunk-abort-chat-drain-provider-docs.md)）。
+ *   `EmbeddingProvider` 側の扱いは `embedding-provider.ts` を見ること。
  */
 export interface LLMProvider {
-  /** `req` を送り、応答の本文を返す。失敗は例外で返す（上の契約。リトライは内蔵しない）。`opts.signal` は上の2026-09-29追記を参照。 */
+  /** `req` を送り、応答の本文を返す。失敗は例外で返す（上の契約。リトライは内蔵しない）。`opts.signal` は上の「中断と時間の上限」を参照。 */
   complete(ctx: Ctx, req: PromptSpec, opts?: AbortOptions): Promise<LLMResponse>;
-  /** `req.schema` に合う値を返させる。`req.schema` への適合を保証するのは provider である（上の #850 の追記）。失敗は例外で返す。`opts.signal` は上の2026-09-29追記を参照。 */
+  /** `req.schema` に合う値を返させる。`req.schema` への適合を保証するのは provider である（上の #850）。失敗は例外で返す。`opts.signal` は上の「中断と時間の上限」を参照。 */
   completeStructured<T>(ctx: Ctx, req: StructuredRequest<T>, opts?: AbortOptions): Promise<T>;
 }

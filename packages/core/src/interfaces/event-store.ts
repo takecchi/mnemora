@@ -16,28 +16,25 @@ export interface EventStore {
    * クラス名の接頭辞は `PostgresEventStore:`／`InMemoryEventStore:`）。実在しない id・別のテナントの Memory の id・
    * uuid の形でない id（`@mnemora/postgres`）を区別しない。`memoryId` が `null` のイベント（`events_purged`）は Memory を
    * 指さないので検査しない。`@mnemora/postgres` は確かめと書き込みを1つの SQL 文にしている。
-   * ⚠ **ADR 0436 より前は違った**: `@mnemora/postgres` はほかのテナントの Memory の id も受け付け、呼んだテナントのイベントとして
-   * 書いた（`memories(id)` への外部キーは `tenant_id` を見ない）。その行は、指された Memory のテナントの `eraseTenant` を
-   * `blocked_by_foreign_reference` で止めた。`docs/memory-model.md` §5 の 2026-09-27 追記（Issue #1051）の表は、その当時の記録である。
    *
    * ⚠ **`event.meta`・`event.actor` の値の中身は検査しない。**JSON で往復しない値と、NUL・孤立サロゲートを
-   * 含む文字列の扱いは adapter によって違う（**BigInt は 2026-09-29 から両 adapter で揃った**——下記参照）
+   * 含む文字列の扱いは adapter によって違う（BigInt は両 adapter とも拒む——下記参照）
    * ——{@link MemoryEvent.meta} の doc の表を参照（[Issue #1211](https://github.com/takecchi/mnemora/issues/1211)、
    * [Issue #1384](https://github.com/takecchi/mnemora/issues/1384)）。
    *
-   * ⚠ 2026-09-28 追記（今の振る舞い。`@mnemora/postgres` と testkit の fixture へ同じ入力を当てて確かめた）:
+   * ⚠ 今の振る舞い（`@mnemora/postgres` と testkit の fixture へ同じ入力を当てて確かめた）:
    * **`event` の形もほとんど検査しない。**
    * - 列挙に無い `actor.type`、`actor: null`、オブジェクトでない `meta`（`null`・配列・文字列）、負の `sizeBeforeBytes` も、
    *   そのまま書いて返す。**返った `MemoryEvent` は `MemoryEventSchema` を通らないことがある。**
    * - 整数でない `sizeBeforeBytes`（`1.5`・`NaN`・`Infinity`）と、`integer`（int4）の範囲（`-2^31`〜`2^31 - 1`）に収まらない値は、
-   *   例外を投げる（列が `integer`。2026-10-01 から、`@mnemora/postgres` も testkit の fixture も同じ入力を拒む——
+   *   例外を投げる（列が `integer`。`@mnemora/postgres` も testkit の fixture も同じ入力を拒む——
    *   [ADR 0434](../../../../docs/decisions/0434-testkit-fixtures-align-nul-int4-invalid-date-purged-at.md)。範囲の端ちょうどの値は通る）。
    * - `event.tenantId` が `ctx.tenantId` と違っても拒まず、**`ctx.tenantId` のテナントとして書く**（返る値の `tenantId` も
    *   `ctx.tenantId`）。
    * - 拒むのは、列挙に無い `kind`・`memoryId` が非 `null` の `events_purged`（{@link MemoryEvent.memoryId}）・Invalid Date の `at`・
    *   存在しない（または形式の壊れた）`memoryId`・別のテナントの Memory を指す `memoryId`（ADR 0436）・`actor`/`meta` に含まれる NUL（U+0000）か孤立サロゲートの文字列
-   *   （2026-09-29、[Issue #1211](https://github.com/takecchi/mnemora/issues/1211)。両方とも adapter で同じ入力を拒む）・
-   *   `actor`/`meta` に含まれる BigInt（2026-09-29、[Issue #1384](https://github.com/takecchi/mnemora/issues/1384)。
+   *   （[Issue #1211](https://github.com/takecchi/mnemora/issues/1211)。両方とも adapter で同じ入力を拒む）・
+   *   `actor`/`meta` に含まれる BigInt（[Issue #1384](https://github.com/takecchi/mnemora/issues/1384)。
    *   同じく両方とも adapter で同じ入力を拒む）である（例外の種類は adapter で違う）。
    * - ⚠ **BigInt はこの一覧の他のどの拒否よりも先に働く**——`@mnemora/postgres` は `INSERT` の引数を
    *   すべて JS 側で評価してから初めて問い合わせを送るため、`actor`/`meta` に BigInt があると、`kind`・
