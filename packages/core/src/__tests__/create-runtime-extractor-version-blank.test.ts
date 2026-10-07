@@ -2,10 +2,6 @@ import { describe, expect, it } from "vitest";
 import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * ADR 0630: `RuntimeConfig.extractorVersion` が空文字・空白だけなら、`createRuntime` が組み立ての時点で拒む
- * （書くと、読み戻したときに `MemorySchema` を通らない）。`undefined`・`null` は既定 `"v1"` に倒す。
- */
 function build(config?: unknown) {
   const stores = createFakeRuntimeStores();
   return createRuntime({

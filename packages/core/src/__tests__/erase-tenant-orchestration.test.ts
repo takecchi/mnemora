@@ -3,12 +3,7 @@ import type { Ctx } from "../ctx.js";
 import { eraseTenant, type EraseTenantMissingStore } from "../erase-tenant.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * `eraseTenant`（PR #1444、ADR 0383）が4つの port を束ねる部分の歯。
- * 各 port の `eraseTenant?` の中身（何を消すか）は testkit の適合テストが見る。ここでは、
- * port を記録だけの偽物に差し替えて、オーケストレータ自身が port に何を渡し、何を返し、
- * どの port を呼ばないかを縛る。
- */
+/** 各 port の `eraseTenant?` の中身は testkit の適合テストが見る。ここでは port を記録だけの偽物に差し替えて、オーケストレータ自身を縛る。 */
 
 const ctx: Ctx = { tenantId: "tenant-1" };
 
@@ -187,7 +182,6 @@ describe("eraseTenant: port が投げた例外は、同じ例外のまま素通�
         eraseTenant(ctx, deps, { confirmTenantId: ctx.tenantId, limit: 10 }),
       ).rejects.toBe(boom);
 
-      // 投げた port までは呼ばれ、その後ろは呼ばれない（前の port の削除は戻さない）。
       expect(calls.map((c) => c.port)).toEqual(PORTS.slice(0, index + 1));
     });
   });

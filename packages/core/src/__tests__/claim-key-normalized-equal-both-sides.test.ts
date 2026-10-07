@@ -5,16 +5,6 @@ import { ExtractionResultSchema } from "../extraction.js";
 import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * 穴 O-3（ADR 0424）の確かめ直し（Issue #1734、PR #1527）で足した歯。
- * 比べる規則は「NFC の後に `trim()`」だけで、**両側**を同じ規則で正規化して比べる。
- *
- * - 先に保存した側が NFD・末尾空白のとき（`claim-key-normalized-equal-not-contested.test.ts` は、
- *   後から来る側だけが崩れている）。
- * - 大文字小文字・全角半角・文中の空白の数は、規則の外（同じ文として扱わない）。矛盾として検出される。
- * - 既に `contested` の相手と content が等しい行も、件数から除く。
- */
-
 const ctx: Ctx = { tenantId: "tenant-o3-both-sides" };
 
 function sameKeyLlm(contents: string[]): LLMProvider {
@@ -77,7 +67,6 @@ describe("claim key の検出: 正規化は NFC + trim だけで、両側に同�
   });
 
   it("既に contested の相手と content が等しい行は、件数に数えない", async () => {
-    // A と B が contested になった後で、A と正規化すると等しい C が来る。数えるのは B だけ。
     const [, , c] = await observeAll(["住所は東京", "住所は大阪", "住所は東京 "]);
     expect(c!.contestedDetection).toEqual([expect.objectContaining({ matchCount: 1 })]);
   });

@@ -5,14 +5,7 @@ import { ExtractionResultSchema } from "../extraction.js";
 import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * 空の区間（`validFrom === validUntil`）・逆転した区間（`validFrom > validUntil`）の記憶は、`recall()` の
- * `validAt` ゲートをどの時点でも通らない——**真であった瞬間が無い**。そういう記憶が、同じ claim key の有効な記憶と
- * 「有効期間が重なる」として矛盾（`contested`）を作ってはならない（ADR 0324 決定4: 重なりは矛盾の必要条件）。
- *
- * 【実測 2026-10-01】直す前は、有効な1件目の後に、空・逆転した区間の2件目を `observe` すると、2件とも `contested`
- * になった。陽性対照: 普通の区間（1件目と重なる）の2件目は、直す前も後も `contested` になる。
- */
+/** 陽性対照: 普通の区間（1件目と重なる）の2件目は `contested` になる。 */
 
 const ctx: Ctx = { tenantId: "claim-key-empty-interval-core" };
 

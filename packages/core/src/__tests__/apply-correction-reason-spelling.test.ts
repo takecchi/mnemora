@@ -1,16 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildCorrectionReason } from "../apply-correction.js";
 
-/**
- * `buildCorrectionReason` の `winner` が、`winnerId` と `correctedId`/`correctingId` の綴り（大文字小文字）が
- * 食い違うときに、実際の勝者に合うこと（ADR 0446 決定3。Issue #1804 の確かめ直しで、変異が素通りした形を塞ぐ）。
- *
- * 約束の出所は `buildCorrectionReason` の TSDoc: 文字列がそのまま一致する側を先に採る。どちらとも一致しないときだけ、
- * 大文字小文字を無視して**どちらか一方だけ**に一致する側を採る。決まらなければ `corrected`。
- * 本物の Postgres に当てる同種の歯は `packages/postgres` 側にあるが、DB が無いと走らないので、純関数であるこの口の
- * 歯は core にも置く。
- */
-
 const discovery = {
   recallId: "recall-1",
   candidates: [],

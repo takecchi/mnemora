@@ -6,13 +6,6 @@ import { ExtractionResultSchema } from "../extraction.js";
 import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * `relationStore` を配線した呼び出しで、3件が同じ claim key で競合して群を書こうとしたが、
- * 書き込みが CAS に弾かれて群にならなかったとき（`outcome.kind` が `contested_group` でない）は、
- * 群を名乗らず、`relationStore` を配線しない呼び出しと同じ形（`unresolved_conflict`・evidence の追記）に戻る。
- * 状態は動かさない（3件目は `active` のまま）。
- */
-
 const ctx: Ctx = { tenantId: "tenant-group-write-fallback" };
 const CLAIM_KEY = { subject: "user", predicate: "address" };
 
@@ -46,7 +39,6 @@ describe("claim key の検出: 群の書き込みが弾かれたら、群を名�
       hashContent: (content: string) => `sha256(${content})`,
       relationStore: stores.relationStore,
     });
-    // 群の書き込みだけが、CAS 競合で弾かれる。
     stores.memoryStore.markContestedGroup = async (_ctx, members) => {
       throw new MemoryStatusConflictError(members[0]!.id, "active", "forgotten");
     };

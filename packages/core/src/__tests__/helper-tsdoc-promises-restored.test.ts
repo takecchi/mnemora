@@ -11,10 +11,6 @@ import type { ScoreBreakdown } from "../recall.js";
 
 type ScoredCandidate = Parameters<typeof compareScoredCandidates>[0];
 
-/**
- * 公開の純関数の TSDoc の約束を、実装が守っていなかった4か所の歯（4回目の TSDoc の棚卸しの C1〜C4）。
- */
-
 function candidate(id: string, recordedAt: Date, total = 1): ScoredCandidate {
   return {
     memory: { id, recordedAt, occurredAt: null, digest: "d" },

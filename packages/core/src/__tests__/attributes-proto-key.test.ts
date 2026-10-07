@@ -5,12 +5,7 @@ import type { Ctx } from "../ctx.js";
 import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * ADR 0496（ADR 0472 材料1）: attributes のキー `__proto__` は、文字種の規則を通っても zod の record がキーの検査より前に読み飛ばし、
- * 黙って落とした（`recall` の絞り込みが `{}` になって外れる・`observe` の属性が消える）。今は `Runtime.observe`・`Runtime.recall` の入口が、
- * zod の前に `ZodError`（既存のキー検査と同じ `invalid_key`）で断る。`constructor`・`prototype` などは落ちないので断らない。
- * `JSON.parse` は `__proto__` を自前のキーとして作る（オブジェクトリテラルの `{ __proto__: … }` は prototype の設定で、キーにならない）。
- */
+/** `JSON.parse` は `__proto__` を自前のキーとして作る（オブジェクトリテラルの `{ __proto__: … }` は prototype の設定で、キーにならない）。 */
 
 const ctx: Ctx = { tenantId: "tenant-attributes-proto" };
 const NOW = new Date("2099-01-01T00:00:00.000Z");

@@ -7,16 +7,7 @@ import { defaultDecayStrategy } from "../strategies/decay.js";
 import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * Issue #1734（2026-09-30 マージ分の確かめ直し）の歯。PR #1507（ADR 0416）の変異試験で、「名乗らない adapter で、
- * `created: false`（冪等で既存行に当たった）の行にも `created` を積む」変異が、consolidate・reextract の両方で
- * すり抜けた（reextract 側は、確かめ直しの時点の main では `fake-runtime-tick-jobs-and-correction-reextract-parity.test.ts` が赤にするので、この歯は consolidate だけ）。担当はクローン（miku）の判断で進めている作業であり、オーナーの判断ではない。
- *
- * ADR 0416 決定1・2: store が `createdEventsWritten: true` と名乗らないとき、runtime は今までどおり別の文で
- * `created` を積む。今までの経路は `created: true` の行にだけ積んでいた（`created: false` は既存の行で、
- * `created` は既に在る）。`created-event-claim.test.ts` の「名乗らない adapter」は、`supersedeWithNewMemories` が
- * 常に `created: true` を返す `FakeMemoryStore` で、`created: false` を返す場面を作っていなかった。
- */
+/** `created-event-claim.test.ts` の「名乗らない adapter」は `supersedeWithNewMemories` が常に `created: true` を返す `FakeMemoryStore` で、`created: false` を返す場面を作っていなかったので、ここで足す。 */
 
 const ctx: Ctx = { tenantId: "created-event-claim-existing-row" };
 const NOW = new Date("2026-06-01T00:00:00.000Z");
