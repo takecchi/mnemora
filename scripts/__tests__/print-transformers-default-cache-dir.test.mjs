@@ -33,7 +33,6 @@ describe("print-transformers-default-cache-dir.mjs（Issue #1004）", () => {
       .split("\n");
     expect(out).toHaveLength(2);
     expect(out[1]).toBe(`version=${version}`);
-    // 既定の場所は、その版の transformers.js のパッケージの中の `.cache/` である（4.2.0 の DEFAULT_CACHE_DIR）。
     expect(out[0]).toBe(`dir=${join(dirname(pkgJsonPath), "/.cache/")}`);
   });
 

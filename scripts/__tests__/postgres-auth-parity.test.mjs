@@ -13,19 +13,6 @@ import {
 const CI_YML_PATH = fileURLToPath(new URL("../../.github/workflows/ci.yml", import.meta.url));
 const COMPOSE_PATH = fileURLToPath(new URL("../../docker-compose.yml", import.meta.url));
 
-/**
- * ⭐ この歯が測っているもの(消す前に読むこと)
- *
- * `docker-compose.yml`（手元用、ADR 0130 で新設）が、`.github/workflows/ci.yml` の
- * 非 matrix な Postgres ジョブ群と同じ認証まわりの値（`image` /
- * `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` / `POSTGRES_INITDB_ARGS`）を
- * 持ち続けているかどうか。**どちらか片方だけを変えると、この歯が赤くなる**
- * ——それが Issue #232 が求めた「非対称が再発したら赤くなる歯」である。
- *
- * 合わせて、CI 側の8ジョブが**互いに**同じ値を宣言していることも見る
- * （`crossJobMismatches`）——`docker-compose.yml` が正しくても、CI 側のどれか1本が
- * こっそり値を変えていたら、それも非対称の再発である。
- */
 describe("docker-compose.yml と ci.yml の Postgres 認証まわりの値が揃っている（Issue #232 / ADR 0130）", () => {
   const ciYamlText = readFileSync(CI_YML_PATH, "utf8");
   const composeText = readFileSync(COMPOSE_PATH, "utf8");
