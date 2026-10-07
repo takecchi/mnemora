@@ -48,15 +48,6 @@ describe("formatRecall", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// formatRecallQualityTable
-//
-// これは DB を要さない、純粋な整形の検査である——`ComparisonRow` を手で組み立てて
-// 渡すだけで、`recall()` や Postgres を一切呼ばない。北極星の物差し
-// （「削っても目的の記憶が落ちないと言えるか」）に答える表そのものが、
-// `omitted` の件数と「ANN の候補になれた件数」を落とさずに出すことを押さえる。
-// ---------------------------------------------------------------------------
-
 function baseRow(overrides: Partial<ComparisonRow> = {}): ComparisonRow {
   return {
     fillerPairs: 320,
@@ -93,8 +84,6 @@ describe("formatRecallQualityTable", () => {
         totalInScope: 321,
         annCandidateCount: 50,
         omitted: [
-          // ADR 0069: 札は certainty を持つようになった。**この歯の主題（件数を潰さない）は
-          // 変えていない** —— 固定値を新しい形に合わせただけで、期待値は緩めていない。
           {
             kind: "ann_truncated",
             countKind: "unknown",
@@ -107,9 +96,7 @@ describe("formatRecallQualityTable", () => {
         ],
       });
       const output = formatRecallQualityTable([row]);
-      // スコープ内(321)とANN候補(50)が食い違うことがそのまま列に見える。
       expect(output).toContain("| 642 | 321 | 50 | 10 | ✅ | ");
-      // 内訳が「件数」を保ったまま出ている(kind だけに潰されていない)。
       expect(output).toContain("not_indexed(pending):271");
       expect(output).toContain("over_limit:30");
       expect(output).toContain("ann_truncated");
@@ -132,14 +119,6 @@ describe("formatRecallQualityTable", () => {
   });
 });
 
-/**
- * `chat` の「まとめ」の行。目次帯（index）は予算の対象外なので、予算で落とした記憶が
- * 目次帯へ回ると、予算を渡した run の全量（`usage.chars`）は渡さない run より大きくなりうる
- * （README「`budget` は `memories` tier だけを切り詰め、`index` tier は切り詰めない」）。
- * 【実測 2026-09-27、空の DB で `run chat`】budget 無し 346 に対し budget あり 793——
- * 内訳が出ていなかったので「予算を渡したら増えた」と読めた。⟹ 予算の外の目次帯の
- * 文字数（`usage.indexChars`）と、予算の対象になった量を並べる。
- */
 describe("formatChatSummary", () => {
   const usage = (chars: number, indexChars: number) =>
     ({

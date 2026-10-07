@@ -2,16 +2,6 @@ import { describe, expect, it } from "vitest";
 import { computeMargin, computeMarginStats } from "../identifier-arm.js";
 import type { ProbeScoreDetail } from "../retrieval-quality.js";
 
-/**
- * `identifier-arm.ts` の `margin`(ADR 0135 §5.5)を計算する純関数の歯。
- * DB もネットワークも要らない——`ProbeScoreDetail` を手で組み立てて渡すだけ。
- *
- * ⭐ **この歯が実際に噛むこと自体を、変異試験で示した**(報告に記録)——
- * `computeMargin` の減算を加算に変える/`computeMarginStats` の `n-1` を `n` に
- * 変えるといった変異を入れて、ここの assertion が実際に赤くなることを確認し、
- * 戻して緑に戻ることまで確かめた。
- */
-
 function scoreDetail(roles: ProbeScoreDetail["roles"], similarity: number | undefined) {
   return {
     roles,
@@ -87,7 +77,6 @@ describe("computeMarginStats", () => {
   });
 
   it("count>=2 で標本標準偏差(自由度 n-1)を計算する", () => {
-    // 値: 1, 2, 3 → mean=2, 分散(n-1)=(1+0+1)/2=1 → stdDev=1
     const stats = computeMarginStats([1, 2, 3]);
     expect(stats.count).toBe(3);
     expect(stats.mean).toBeCloseTo(2, 10);
