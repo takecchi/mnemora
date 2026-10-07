@@ -12,22 +12,13 @@ import {
 } from "@mnemora/testkit/fixtures";
 import { AnthropicLLMProvider } from "../llm-provider.js";
 
-/**
- * Issue #1080: `@mnemora/openai` の `api-key-header-safety.test.ts` と同じ判定を
- * `AnthropicLLMProvider` に当てる。SDK は `apiKey` を `x-api-key` ヘッダで、`authToken`
- * （`ANTHROPIC_AUTH_TOKEN` から読まれうる）を `Authorization: Bearer <authToken>` で送る。
- * 途中に CR・LF・NUL があると、`fetch` の例外文にキー全体が入り、`observe` の
- * `extractionFailure.message` に残っていた。
- *
- * ここで使うキーは実在しない、この歯のためだけの文字列である。
- */
+/** ここで使うキーは実在しない、この歯のためだけの文字列である。 */
 
 const ctx: Ctx = { tenantId: "tenant-1" };
 const BROKEN_KEY = "sk-ant-zq9X7vK2pL\nW8mR4tY6";
 
 function keyFragments(key: string): string[] {
   const fragments: string[] = [];
-  // 制御文字（U+0000〜U+001F・U+007F）で区切る。
   const parts = [...key]
     .map((ch) => (ch.charCodeAt(0) < 0x20 || ch.charCodeAt(0) === 0x7f ? "\n" : ch))
     .join("")
@@ -66,9 +57,7 @@ function constructionError(build: () => unknown): Error | null {
   }
 }
 
-// SDK は `authToken` を省略すると `ANTHROPIC_AUTH_TOKEN` を読む。この歯の外の環境に
-// 左右されないよう、テストの間は外しておく。万一ヘッダの検査を抜けても外へ出ないよう、
-// 接続先もローカルにしておく（送信の前に失敗するので、実際にはどこにも接続しない）。
+// SDK は `authToken` を省略すると `ANTHROPIC_AUTH_TOKEN` を読むので、環境に左右されないよう外しておく。接続先もローカルにしておく（送信の前に失敗するので、実際にはどこにも接続しない）。
 const ORIGINAL_ENV = {
   ANTHROPIC_AUTH_TOKEN: process.env.ANTHROPIC_AUTH_TOKEN,
   ANTHROPIC_BASE_URL: process.env.ANTHROPIC_BASE_URL,

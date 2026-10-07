@@ -5,25 +5,8 @@ import { AnthropicLLMProviderError } from "../errors.js";
 import { AnthropicLLMProvider } from "../llm-provider.js";
 
 /**
- * **`LLMProvider` の interface が逐語で約束していて、一度も測られていなかった1行の歯**
- * （Issue #389 / ADR 0198）。`packages/core/src/interfaces/llm-provider.ts` の契約:
- *
- * > - タイムアウト・レート制限・失敗時は例外を投げる。`LLMProvider` 自体はリトライを
- * >   内蔵しない（責務の混在を避ける）。
- *
- * 🔴 **既存の歯が測っていたのは「応答が返った後の異常」だけだった**——JSON 構文エラー・
- * `ZodError`・`no_content`・`refusal`・`truncated`。**SDK の呼び出し自体が reject する側は
- * 1本も無かった**（【実測】Issue #389 へのコメント: この2パッケージのテストに
- * `mockRejected` が0件）。⟹ **ここがその側である。**
- *
- * ⛔ **`packages/testkit` に適合 suite を作っていない。**それを作るかどうか・契約を
- * どの粒度で切るかは Issue #389 の未決の設計判断であり、この歯はそこへ踏み込まない
- * （ADR 0198「採らなかった案」）。⟹ **`@mnemora/openai` 側にも同じ形の歯を置いてある**
- * （`packages/openai/src/__tests__/call-failure.test.ts`）。**片方だけ直さないこと。**
- *
- * ⚠ **測っているのは「この wrapper がリトライしないこと」であって、「production の
- * 経路がリトライしないこと」ではない。** `client` を注入しているため、`new Anthropic()`
- * が既定で持つ SDK 内部のリトライはここを通らない（ADR 0198「確かめていないこと」）。
+ * `packages/testkit` に適合 suite は作らない（契約の切り方が未決のため）。`@mnemora/openai` 側に同じ形の歯があるので、片方だけ直さないこと。
+ * 測っているのは「この wrapper がリトライしないこと」で、production の経路ではない。`client` を注入しているので、`new Anthropic()` が既定で持つ SDK 内部のリトライはここを通らない。
  */
 const ctx: Ctx = { tenantId: "tenant-1" };
 
@@ -40,9 +23,7 @@ function providerWithRejecting(error: unknown) {
   return { create, provider };
 }
 
-/** レート制限・タイムアウトを模した例外。⚠ **SDK の本物のエラークラスではない**
- * （ADR 0198「確かめていないこと」）——この wrapper は例外の種類で分岐していないので、
- * 種類を変えても同じ道を通る、という主張をここで固定している。 */
+/** レート制限・タイムアウトを模した例外。SDK の本物のエラークラスではない。wrapper は例外の種類で分岐していないので、種類を変えても同じ道を通る。 */
 class FakeRateLimitError extends Error {
   readonly status = 429;
   constructor() {
@@ -62,15 +43,13 @@ describe("AnthropicLLMProvider — 呼び出し自体が失敗したとき（cor
     const sentinel = new Error("boom");
     const { create, provider } = providerWithRejecting(sentinel);
 
-    // 🔴 **同一性で見る。**`toThrow(/boom/)` だと、wrapper が別の Error へ包み直しても
-    // メッセージさえ同じなら通ってしまう。
+    // 同一性で見る。`toThrow(/boom/)` だと、wrapper が別の Error へ包み直してもメッセージさえ同じなら通ってしまう。
     await expect(provider.complete(ctx, prompt)).rejects.toBe(sentinel);
-    // ⛔ 「無い」の種類を潰さない——転送の失敗を `no_content` へ化けさせないこと。
+    // 「無い」の種類を潰さない。転送の失敗を `no_content` へ化けさせないこと。
     await expect(
       providerWithRejecting(sentinel).provider.complete(ctx, prompt),
     ).rejects.not.toBeInstanceOf(AnthropicLLMProviderError);
 
-    // ⭐ **リトライを内蔵しない。**ちょうど1回。
     expect(create).toHaveBeenCalledTimes(1);
   });
 

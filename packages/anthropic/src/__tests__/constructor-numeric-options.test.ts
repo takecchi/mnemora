@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { AnthropicLLMProvider } from "../llm-provider.js";
 
-// ADR 0498: maxTokens は構築時に検査する（正の安全な整数）。省略時の既定（DEFAULT_MAX_TOKENS）は変えない。
 // `temperature` の欄はこの provider に無い。
 
 const client = {} as never;

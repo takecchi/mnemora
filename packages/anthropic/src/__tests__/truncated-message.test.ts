@@ -4,13 +4,7 @@ import type { Ctx } from "@mnemora/core";
 import type { AnthropicLLMProviderError } from "../errors.js";
 import { AnthropicLLMProvider } from "../llm-provider.js";
 
-/**
- * 応答が途中で切れた（`stop_reason: "max_tokens"` / `"model_context_window_exceeded"`）ときの
- * 例外の文面。直し方は `stop_reason` で違う——`max_tokens` なら `maxTokens` を上げれば効くが、
- * `model_context_window_exceeded`（入力が文脈窓を超えた）には効かず、入力を短くするしかない。
- * 起きたこと（途中で切れた・`stop_reason`）も名乗る。プロンプトや応答の本文は文面に載せない。
- * 種類（`name`・`kind`・`stopReason`）は文面とは別に守る。
- */
+/** 直し方は `stop_reason` で違う。`max_tokens` なら `maxTokens` を上げれば効くが、`model_context_window_exceeded` には効かず入力を短くするしかない。プロンプトや応答の本文は文面に載せない。 */
 const ctx: Ctx = { tenantId: "tenant-1" };
 const PROMPT_BODY = "秘密の本文-プロンプト-9f3a";
 const PARTIAL_CONTENT = '{"content":"途中までの応答-7c1d';

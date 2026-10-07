@@ -3,8 +3,7 @@ import { fileURLToPath } from "node:url";
 import ts from "typescript";
 import { describe, expect, it } from "vitest";
 import Anthropic from "@anthropic-ai/sdk";
-// `anthropic-sdk-latest` は devDependency のエイリアス（`package.json` の
-// `"anthropic-sdk-latest": "npm:@anthropic-ai/sdk@0.129.0"`。下の docstring 参照）。
+// `anthropic-sdk-latest` は devDependency のエイリアス（`package.json` の `npm:@anthropic-ai/sdk@0.129.0`）。
 import AnthropicLatest from "anthropic-sdk-latest";
 import type { Ctx } from "@mnemora/core";
 import type {
@@ -15,29 +14,11 @@ import type {
 import { AnthropicLLMProvider } from "../llm-provider.js";
 
 /**
- * [Issue #1221](https://github.com/takecchi/mnemora/issues/1221) の歯。`@mnemora/openai` の
- * `client-type-compat.test.ts` と同じ形・同じ理由——詳細はそちらの冒頭コメントを見ること。
- *
- * `AnthropicLLMProviderOptions.client` の型は、`@anthropic-ai/sdk` のクラスを名指ししない
- * 自前の構造型（`client-types.ts`）である。この歯は3つを縛る（3つ目は下の
- * `describe("公開する .d.ts に …")`。`stop_details` の型の歯と `system` の送り方の歯も下にある）:
- *
- * 1. **型**: 固定した版（`@anthropic-ai/sdk@0.124.0`）と、利用者が入れうる別の版
- *    （devDependency に `"anthropic-sdk-latest": "npm:@anthropic-ai/sdk@0.129.0"` として
- *    エイリアスした、2026-09-29 時点の最新）の**両方**の `Anthropic` インスタンスが
- *    `AnthropicMessagesClient` に代入できること——この行が `tsc -p tsconfig.json` を
- *    通ること自体が検査である。
- * 2. **実際の呼び出し**: 本物の SDK client（`fetch` を差し替えたもの）を provider に渡し、
- *    実際に送られる URL・method・JSON body が変わっていないことを、固定した版・別の版の
- *    両方で確かめる。
- * 3. **公開 `.d.ts`**: 公開する `.d.ts` に `@anthropic-ai/sdk` の import が出ないこと
- *    （`import ... from "@anthropic-ai/sdk"`・`import("@anthropic-ai/sdk")`・
+ * 公開 `.d.ts` に SDK の import が出ないこと（`import ... from "@anthropic-ai/sdk"`・`import("@anthropic-ai/sdk")`・
  *    `/// <reference types="@anthropic-ai/sdk" />`）。⚠ CI は `test` を `build` より前に走らせる
- *    （`.github/workflows/ci.yml`）ので `dist` はまだ無い。そのためこの歯は `dist` を読まず、
- *    `tsconfig.build.json` と同じ設定で TypeScript の API が `.d.ts` をメモリへ出したものを読む
- *    （`dist` が無くても黙って通らない）。
- *
- * ⚠ **ネットワークは叩かない**（`live.anthropic.test.ts` の役目ではない）。
+ * ので `dist` がまだ無い。そのため `dist` を読まず、`tsconfig.build.json` と同じ設定で TypeScript の API が
+ * `.d.ts` をメモリへ出したものを読む（`dist` が無くても黙って通らない）。
+ * 詳細は `@mnemora/openai` の `client-type-compat.test.ts` の冒頭コメントと同じ。
  */
 const ctx: Ctx = { tenantId: "tenant-1" };
 
@@ -71,7 +52,6 @@ interface CapturedRequest {
   body: unknown;
 }
 
-/** `fetch` を差し替えた本物の SDK client を作る。捕まえたリクエストは `calls` に積む。 */
 function withCapturingFetch<T>(
   buildClient: (fetchStub: typeof fetch) => T,
   respond: () => Response,
@@ -161,7 +141,6 @@ describe("実際に送られる HTTP は、client の型を切り離す前と変
   });
 });
 
-/** `create` に渡された引数をそのまま積む偽 client（SDK の直列化を挟まずに `system` を見る）。 */
 function fakeMessagesClient(): {
   client: AnthropicMessagesClient;
   bodies: AnthropicMessageCreateParams[];
@@ -190,7 +169,6 @@ describe("PromptSpec.system は top-level の system として送られる（cal
 
     expect(bodies).toHaveLength(1);
     expect(bodies[0]?.system).toBe("あなたは記憶の整理役です。");
-    // system は messages 配列へは入らない（Anthropic の messages に role: "system" は無い）。
     expect(bodies[0]?.messages).toEqual([{ role: "user", content: "hi" }]);
   });
 
@@ -210,15 +188,8 @@ type Equals<X, Y> =
 type Expect<T extends true> = T;
 
 /**
- * `AnthropicMessageResult.stop_details`（`assertNotRefusedOrTruncated` が拒否の category を
- * 読む欄）が構造型に在ること。実 SDK の `Message` は `stop_details` を持つので、この欄を
- * 構造型から消しても、上の代入の歯（実 SDK の `Anthropic` の代入）は緑のままである。
- * 型だけの表明で、外れると `tsc`（`pnpm run typecheck`）が赤くなる——実行時の it は
- * 「歯が在る」ことを vitest に見せるためのもの。
- *
- * - `stop_details` を消すと、`AnthropicMessageResult["stop_details"]` が `TS2339`。
- * - `category` の型が変わると `Equals` が `false` になり `TS2344`。
- * - `stop_details` を必須にしても、`NonNullable` を通すので緑のまま（約束の外）。
+ * 型だけの表明で、外れると `tsc` が赤くなる。実行時の it は「歯が在る」ことを vitest に見せるためのもの。
+ * `stop_details` を必須にしても `NonNullable` を通すので緑のまま（約束の外）。実 SDK の代入の歯は `stop_details` を消しても緑のままなので、この歯が別に要る。
  */
 type _StopDetailsCategory = Expect<
   Equals<NonNullable<AnthropicMessageResult["stop_details"]>["category"], string | null | undefined>
@@ -237,12 +208,7 @@ describe("AnthropicMessageResult は stop_details.category を持つ（型の歯
   });
 });
 
-/**
- * 公開する `.d.ts` に SDK の import が出ないこと。`@mnemora/openai` の
- * `client-type-compat.test.ts` の同名の describe と同じ形・同じ理由——`dist` は読まず
- * （CI は `test` を `build` より前に走らせる）、build の設定で `.d.ts` をメモリへ出して読む。
- * `@mnemora/core` だけは `dist` が無いので `core/src` を指させる。
- */
+/** `@mnemora/core` だけは `dist` が無いので `core/src` を指させる。 */
 const PACKAGE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const SDK_SPECIFIER = String.raw`(?:@anthropic-ai/sdk|anthropic-sdk-latest)(?:/[^"']*)?`;
 /** 直前が引用符なので、`"@mnemora/anthropic"` や `"./anthropic.js"` には当たらない。 */

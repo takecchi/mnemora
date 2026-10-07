@@ -3,13 +3,6 @@ import { z } from "zod";
 import type { Ctx } from "@mnemora/core";
 import { AnthropicLLMProvider } from "../llm-provider.js";
 
-/**
- * [Issue #1200](https://github.com/takecchi/mnemora/issues/1200) /
- * [ADR 0359](../../../docs/decisions/0359-abort-signal-for-provider-calls.md):
- * `opts?.signal` が `messages.create` の request options（`{ signal }`）へ実際に届くこと、
- * そして SDK が signal を尊重する体の偽 client を使ったとき、abort で reject することを
- * 確かめる（`@mnemora/openai` の同名の歯と同じ形・同じ理由）。
- */
 const ctx: Ctx = { tenantId: "tenant-abort" };
 
 function textResponse(text: string) {
