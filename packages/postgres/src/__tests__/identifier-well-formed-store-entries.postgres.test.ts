@@ -4,20 +4,6 @@ import { buildNewMemoryFixture } from "@mnemora/testkit";
 import { PostgresMemoryStore } from "../memory-store.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
-/**
- * Issue #1734（2026-09-30 マージ分の確かめ直し）の歯。PR #1520（ADR 0423）の変異試験で、Postgres の
- * `aggregateScope`（`scope.subjectId`）・`listActiveClaimPredicates`（`query.subjectId`）・`createRecall`
- * （`record.subjectId`）が識別子の入口検査を外してもすり抜けた。担当はクローン（miku）の判断で進めている作業であり、
- * オーナーの判断ではない。
- * PR 本文が「store の各メソッドは1つずつは確かめていない（conformance は代表の口）」と書いていた通りの穴で、
- * ADR 0423 決定2は、識別子を入力に持つ口を全部、書き込みより前に断ると決めている。同じ型の
- * `findActiveByClaimKey`・`findContestedByClaimKey`・`createMemoryWithOutbox` も、同じ表で見る。
- * `memory-store-conformance.ts` には足さない（公開の適合テストは触らない）。
- *
- * 断る対象: 孤立サロゲートと NUL を含む識別子（`kind: "malformed_identifier"`、message に入力値を入れない）。
- * 対をなすサロゲート（絵文字）は受け付ける（陽性対照）。
- */
-
 const ctx: Ctx = { tenantId: "identifier-well-formed-store-entries" };
 
 const MALFORMED: ReadonlyArray<readonly [label: string, value: string]> = [

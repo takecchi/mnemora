@@ -2,29 +2,13 @@ import { afterAll, describe, expect, it } from "vitest";
 import { closeTestClient, getTestClient } from "./test-db.js";
 
 /**
- * 一般形の歯: public スキーマの**全ての外部キー**について、参照元（子）テーブルに
- * 「先頭列が FK 列」の索引が在ることを縛る。
+ * `erase-tenant-fk-indexes.postgres.test.ts` は索引名の固定表を持つので、次に外部キーを足したときに気づけない。
+ * この歯は `pg_constraint` から外部キーを数え上げ、固定表を持たない。migration の本数にも索引名にも触れない。
  *
- * 背景: 親の行を消す（`eraseTenant` など）と、Postgres は子テーブルへ
- * `WHERE <fk列> = $1` の RI 検査を行う。子側に先頭列が FK 列の索引が無いと、
- * 消す行ごとに子テーブルを全走査する。`erase-tenant-fk-indexes.postgres.test.ts`
- * （0027 の歯）は索引名の固定表を持つため、**次に外部キーを足したときに気づけない**。
- * この歯は `pg_constraint` から外部キーを数え上げるので、固定表を持たない。
- *
- * 判定:
- * - 単一列 FK: 索引の先頭列が FK 列であること。
- * - 複数列 FK: 索引の先頭 n 列（n = FK の列数）の**集合**が FK 列の集合と一致すること
- *   （順序は問わない。RI 検査は等値条件の AND なので、先頭 n 列が同じ集合なら効く）。
- * - **部分索引（WHERE 付き）も「在る」と見なす**（例: `memories.contested_with_id` の
- *   `idx_memories_contested_with`）。NULL でない行だけを索引にした部分索引は、
- *   RI 検査の `= $1`（NULL とは等しくならない）を述語が含意するため使える。
- *   ただし式索引の列（indkey = 0）と、無効な索引（indisvalid = false）は数えない。
- * - 埋め込み空間テーブル（動的に作られる）も public に在れば同じ規則で数える。
- *
- * ⚠ **migration の本数にも索引名にも触れない**（`AGENTS.md`「数を、道具と生成物に焼き込まない」）。
- *
- * 例外（下の {@link EXEMPT}）は、外部キーの名前・理由と一緒にここへ名指しで書く。
- * 黙って除外しない。
+ * - 複数列 FK: 索引の先頭 n 列（n = FK の列数）の集合が FK 列の集合と一致すること（RI 検査は等値条件の AND なので順序は問わない）。
+ * - 部分索引（WHERE 付き）も「在る」と見なす。NULL でない行だけを索引にした部分索引は、RI 検査の `= $1` を述語が含意するため使える。
+ *   式索引の列（indkey = 0）と、無効な索引（indisvalid = false）は数えない。
+ * - 例外（下の {@link EXEMPT}）は、外部キーの名前・理由と一緒に名指しで書く。黙って除外しない。
  */
 
 afterAll(async () => {

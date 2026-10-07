@@ -21,12 +21,6 @@ import {
   TEST_EMBEDDING_SPACE,
 } from "./test-db.js";
 
-/**
- * ADR 0502（ADR 0482 の材料1）: `utterance.text`・`event.name`・`document.content` が `trim` で空になる値
- * のとき、`observe()` は ZodError で断る。LLM が失敗する構成でも、空白だけの Memory は残らない。
- * `@mnemora/postgres` と testkit の fixture で同じ。前後に空白のある普通の文は通る。
- */
-
 const ctx: Ctx = { tenantId: "observe-whitespace-only-input" };
 
 beforeEach(async () => {

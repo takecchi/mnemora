@@ -8,14 +8,7 @@ import type { NewMemory } from "../memory.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
 /**
- * ADR 0456: LLM が返した値のうち、保存の口が拒む形（NUL・孤立サロゲート）の扱いを縛る。
- *
- * - 抽出の候補の `subjectId`: 一覧（`subjectCandidates`）が無くても弾き、observation の `subjectId` へ
- *   フォールバックする。以前は保存の口が `MalformedIdentifierError` を投げ、`observe` が例外で終わった。
- * - 統合・内省の `digest`・`tags`: 保存できない値だけを落とし、統合先・内省の記憶は作る
- *   （ADR 0443 が抽出に対してやったことと同じ）。
- *
- * ここの Fake は識別子も NUL も検査しない。赤→緑は「落とした後の値」で見る（直す前は値がそのまま残る）。
+ * ここの Fake は識別子も NUL も検査しないので、例外の有無ではなく「落とした後の値」で見る。
  * 実 DB の歯は `packages/postgres` の `llm-malformed-aux-values.postgres.test.ts`。
  */
 

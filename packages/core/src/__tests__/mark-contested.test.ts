@@ -6,24 +6,6 @@ import type { MemoryStatus, NewMemory } from "../memory.js";
 import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * `runtime.markContested`（Issue #197、ADR 0134）の歯。
- *
- * 設計の要点（`runtime.ts` の `MarkContestedOutcome`/`markContested` の doc コメント参照）:
- * - 両側とも呼び出し時点で `status === 'active'` であることを CAS で要求する。
- * - 成功すれば両側が `status='contested'` になり、`contestedWithId` を相互に設定する。
- * - `firstId === secondId` は書き込み前に `RangeError` を投げる。
- * - どちらか一方でも `active` でなければ（不在・別 status）、書き込みを一切試みず
- *   `ineligible` を返す。
- * - `MemoryStore.markContestedPair` が無い adapter では `supported: false` になり、
- *   フォールバックしない。
- * - `tick()`/`observe()` からは呼ばれない。
- * - `recall()` 側は一切変更していない——既存の段1 status ゲート・段3 mandatory
- *   companion retrieval にそのまま合流する（この歯の最後で実測する）。
- *
- * `@mnemora/testkit` には依存しない（`purge.test.ts` と同じ理由）。
- */
-
 const ctx: Ctx = { tenantId: "tenant-1" };
 const NOW = new Date("2026-06-01T00:00:00.000Z");
 
@@ -122,7 +104,6 @@ describe("runtime.markContested — 基本の成功", () => {
     expect(eventsA).toHaveLength(1);
     expect(eventsB).toHaveLength(1);
     expect(eventsA[0]?.kind).toBe("updated");
-    // Issue #1160: 両側のイベントに対向の id が入る。
     expect(eventsA[0]?.meta).toEqual({ reason: "contested", contestedWithId: b.id });
     expect(eventsB[0]?.kind).toBe("updated");
     expect(eventsB[0]?.meta).toEqual({ reason: "contested", contestedWithId: a.id });
@@ -293,7 +274,7 @@ describe("runtime.markContested — 並行（markContestedPair が MemoryStatusC
     const b = await stores.memoryStore.createMemory(ctx, newMemory({ digest: "B" }));
     stores.memoryStore.beforeUpdateStatus = (id) => {
       if (id === b.id) {
-        // ADR 0562: `createMemory` の返り値は写し。store の中の行を書き換える。
+        // `createMemory` の返り値は写し。store の中の行を書き換える。
         stores.memoryStore.liveRowForTest(ctx, b.id)!.status = "archived";
       }
     };
@@ -310,7 +291,6 @@ describe("runtime.markContested — 並行（markContestedPair が MemoryStatusC
         ],
       },
     });
-    // 片方だけ書き換わった状態を残さない——`a` も書き込まれていない。
     const storedA = await stores.memoryStore.get(ctx, a.id);
     expect(storedA?.status).toBe("active");
     expect(stores.eventStore.events).toHaveLength(0);
@@ -337,7 +317,6 @@ describe("runtime.markContested — recall() の段3が実際に発火する（I
       newMemory({ digest: "強い方", embeddingStatus: "ready" }),
     );
     await stores.vectorStore.upsert(ctx, stores.embeddingProvider.space, strong.id, [1, 0]);
-    // わざとクエリベクトルから離す——スコアだけなら選ばれない側。
     const weak = await stores.memoryStore.createMemory(
       ctx,
       newMemory({ digest: "弱い方", embeddingStatus: "ready" }),
@@ -350,39 +329,27 @@ describe("runtime.markContested — recall() の段3が実際に発火する（I
     const result = await runtime.recall(ctx, { vector: [1, 0], limit: 1 });
 
     const ids = result.memories.map((m) => m.memoryId);
-    // `limit: 1` かつ `weak` はクエリと直交するベクトルなので、スコアだけなら
-    // 候補にすら残らないはずである。それでも同伴として強制的に足される。
     expect(ids).toContain(strong.id);
     expect(ids).toContain(weak.id);
 
     const companion = result.memories.find((m) => m.memoryId === weak.id);
     expect(companion?.retrievedVia).toBe("mandatory_companion");
     expect(companion?.companionOf).toBe(strong.id);
-    // Issue #548 方向2 / ADR 0352: 段3（連想枠を経由しない）の必須の同伴取得も、
-    // `fetchMandatoryCompanions` は similarity/lexicalMatch を渡さないので
-    // affinityMeasured: false になる——「連想由来ではない、普通の mandatory_companion」
-    // も total/similarity/lexicalMatch という欄を持たない（ADR 0352 決定2）。
+    // 段3（連想枠を経由しない）の必須の同伴取得は similarity/lexicalMatch を渡さないので affinityMeasured: false になる。
     expect(companion?.score.affinityMeasured).toBe(false);
     expect(companion?.score).not.toHaveProperty("total");
 
-    // 隣接性（docs/memory-model.md §5 機構3）。
-    // ⚠ Issue #293（実測で見つかった盲点）: `indexOf` は見つからないとき `-1` を返すため、
-    // 片方だけが結果から完全に消えた世界でも `Math.abs(0 - (-1)) === 1` が偶然成立して
-    // しまう。⟹ 両方が実際に結果に含まれていること（`index >= 0`）を先に assert してから、
-    // 隣接性を比較する（`stage3-mandatory-companion-mutation.test.ts` の変異体Cが、この式を
-    // 直さないと緑のままであることを実測している）。
+    // 隣接性（docs/memory-model.md §5 機構3）。`indexOf` は見つからないとき `-1` を返すため、
+    // 片方だけが結果から消えた世界でも `Math.abs(0 - (-1)) === 1` が偶然成立する。
+    // 両方が実際に結果に含まれていること（`index >= 0`）を先に assert してから比較する。
     const indexStrong = ids.indexOf(strong.id);
     const indexWeak = ids.indexOf(weak.id);
     expect(indexStrong).toBeGreaterThanOrEqual(0);
     expect(indexWeak).toBeGreaterThanOrEqual(0);
     expect(Math.abs(indexStrong - indexWeak)).toBe(1);
 
-    // 段3が実際に発火したことを trace 経由でも確認する——これが「今日は一度も通らない
-    // 分岐」だった、まさにその段である（recall-runtime.ts の該当コメント参照）。
-    // ⚠ Issue #293: `executed` は本番コードが `companions.length` に関わらず常に `true` を
-    // 返すため、これ単独では「段3が壊れていない」ことの根拠にならない——「段3のコードが
-    // 実行された」ことしか言っていない。段3が実際に発火した（同伴取得が起きた）ことを
-    // 測っているのは、直後の `detail.companionsAdded` の方である。
+    // `executed` は本番コードが `companions.length` に関わらず常に `true` を返すため、これ単独では
+    // 段3が発火した根拠にならない。同伴取得が起きたことを測っているのは、直後の `detail.companionsAdded` の方である。
     const stage = result.explain.stages.find((s) => s.stage === "contradiction_resolution");
     expect(stage?.executed).toBe(true);
     expect(stage?.detail).toEqual({ companionsAdded: 1 });

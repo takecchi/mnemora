@@ -7,13 +7,8 @@ import type { RecallRuntimeDeps } from "../recall-runtime.js";
 import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * ADR 0430 決定3: 公開の独立関数 `runRecall`・`eraseTenant`・`purgeExpiredEventsForTenant` が
- * 投げる例外も、`Runtime` の各メソッド（ADR 0423 決定6）と同じく、drizzle の
- * `Failed query: <SQL>\nparams: <値>` の `params:` より後ろを落とす。
- *
- * store が drizzle 形の message の例外を投げる fake で縛る（DB は要らない）。
- */
+// 公開の独立関数 `runRecall`・`eraseTenant`・`purgeExpiredEventsForTenant` が投げる例外も、`Runtime` の各メソッドと同じく、
+// drizzle の `Failed query: <SQL>\nparams: <値>` の `params:` より後ろを落とす。store が drizzle 形の message の例外を投げる fake で縛る（DB は要らない）。
 
 const SECRET = "問いの本文-SECRET-孤立サロゲート\uD800-末尾";
 const NOW = new Date("2026-06-01T00:00:00.000Z");

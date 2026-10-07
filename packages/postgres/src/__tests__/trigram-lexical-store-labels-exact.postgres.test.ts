@@ -9,11 +9,9 @@ import {
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
 /**
- * `PostgresTrigramLexicalStore.search` の `filter.labels`（PR #991）は、`VectorFilter.labels` と
- * 同じ欄・同じ意味——名前は**文字列の完全一致**で比べる（`RecallScope.labels` の doc、Issue #953）。
- * 大文字小文字・前後の空白は同じものとして扱わない。`trigram-lexical-store-labels.postgres.test.ts`
- * は「OR で通る」「窓を占めない」を見ており、一致の厳しさは見ていない。
- * UTF8 の `server_encoding` を前提とする（ADR 0103。同ファイルと同じ）。
+ * `PostgresTrigramLexicalStore.search` の `filter.labels` は、`VectorFilter.labels` と
+ * 同じ欄・同じ意味——名前は**文字列の完全一致**で比べる。
+ * 大文字小文字・前後の空白は同じものとして扱わない。UTF8 の `server_encoding` を前提とする。
  */
 
 const TENANT = "trigram-labels-exact-tenant";
@@ -52,7 +50,6 @@ describe("PostgresTrigramLexicalStore.search: filter.labels は完全一致（Is
     });
     expect(hits.map((h) => h.memoryId)).toEqual([exact.id]);
 
-    // 渡す側が違う綴りなら、一致するのはその綴りの記憶だけ。
     const upperHits = await trigramStore.search(ctx, QUERY, {
       limit: 50,
       filter: { tenantId: TENANT, labels: ["PROJECT"] },

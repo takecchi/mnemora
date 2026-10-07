@@ -14,18 +14,6 @@ import {
   TEST_EMBEDDING_SPACE,
 } from "./test-db.js";
 
-/**
- * ADR 0433 決定1: 偽の LLM が btree の1行の上限（2704 バイト）を超える長さの subject・predicate を
- * 返しても、`observe(... claimKey: { enabled: true })` が成功し、鍵は `null` になる。
- *
- * 直す前は `INSERT INTO memories` が `index row size ... exceeds btree version 4 maximum 2704 for
- * index "idx_memories_claim_key"` で落ち、observation だけが残って memory は 0 件だった。
- * core の Fake での同じ歯は `packages/core/src/__tests__/claim-key-oversized-part.test.ts`。
- *
- * 上限ちょうど（256 コードポイント × 4 バイト文字を subject と predicate の両方に）が、
- * 長い tenant_id・subject_id と一緒でも INSERT できることも縛る（上限の根拠のバイト見積もり）。
- */
-
 const ctx: Ctx = { tenantId: "claim-key-oversized" };
 
 /** CJK 統合漢字拡張 B（U+20000 台、UTF-8 で 4 バイト、NFKC で変わらない）の疑似乱数の文字列。 */
@@ -45,10 +33,7 @@ function astralNoise(seed: string, chars: number): string {
   return out;
 }
 
-/**
- * 圧縮が効かない長い hex（種から決まる）。⚠ `"ab".repeat(1600)` のような繰り返しは、
- * Postgres が索引の値を圧縮するので 2704 バイトの壁に届かず、直す前でも通ってしまう（実測）。
- */
+/** 圧縮が効かない長い hex（種から決まる）。⚠ `"ab".repeat(1600)` のような繰り返しは、Postgres が索引の値を圧縮するので 2704 バイトの壁に届かない。 */
 function incompressibleHex(seed: string, length: number): string {
   let out = "";
   for (let i = 0; out.length < length; i++) {

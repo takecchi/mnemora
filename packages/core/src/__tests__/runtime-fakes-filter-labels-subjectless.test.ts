@@ -5,20 +5,8 @@ import type { Memory, NewMemory } from "../memory.js";
 import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * Issue #948: `FakeVectorStore.search` / `FakeLexicalStore.search`
- * （`packages/core/src/__tests__/runtime-fakes.ts`）は、`VectorFilter`/`LexicalFilter` の
- * `labels`（OR の絞り込み、ADR 0323）と `includeSubjectless`（`subjectId` 一致に加えて
- * 主体なしの行も含める、ADR 0286）を一度も見ていなかった——同じ filter の `attributes`・
- * `excludeProvenanceKinds`・`period`・`validAt`・`decayFloor*` は適用しているのに、
- * この2つだけ抜けていた。`packages/postgres` と `packages/testkit`（`InMemoryVectorStore`/
- * `InMemoryLexicalStore`）はどちらも適用しており、Fake だけが取り残されていた。
- *
- * over-fetch の窓（`limit × overFetchFactor`）が広い既存の歯（`recall-taxonomy-filter.test.ts`
- * 等）では `recall-runtime.ts` の後置フィルタが取りこぼしを隠すため表に出ないが、窓を
- * 絞ると Fake 版 runtime と Postgres 版 runtime が同じ入力に対して違う結果を返す
- * （このファイルの最後の2つの it が、その崩れを直接再現する）。
- */
+// over-fetch の窓（`limit × overFetchFactor`）が広い既存の歯では `recall-runtime.ts` の後置フィルタが取りこぼしを隠すため、
+// 窓を絞って Fake の取りこぼしを表に出す。
 
 const NOW = new Date("2026-06-01T00:00:00.000Z");
 const ctx: Ctx = { tenantId: "tenant-1" };

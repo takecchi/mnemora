@@ -6,18 +6,8 @@ import { createRuntime } from "../runtime.js";
 import { defaultDecayStrategy } from "../strategies/decay.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * outcome の `error`（`forget` / `purge` / `restoreArchived` / `restoreSuperseded` の `"failed"`、
- * `reinforceError`、`purge` の `embeddingCleanup.error`）は、outbox の `last_error` と**同じ整形**
- * （[ADR 0363](../../../../docs/decisions/0363-outbox-last-error-omit-params-and-cap-length.md)、
- * 2026-09-30 追記）で返る。
- *
- * 以前は例外の `message` をそのまま返していたので、drizzle が包んだ失敗
- * （`Failed query: <SQL>\nparams: <値>`）では SQL に付けた値（params）が載り、
- * pg の理由と SQLSTATE（`cause` 側にある）は落ちていた。
- * ここでは DB を使わず、drizzle が包んだ形の例外を fake の store に投げさせる
- * （本物の drizzle/pg での形は `packages/postgres` の outbox の歯が見ている）。
- */
+// ここでは DB を使わず、drizzle が包んだ形の例外を fake の store に投げさせる
+// （本物の drizzle/pg での形は `packages/postgres` の outbox の歯が見ている）。
 
 const ctx: Ctx = { tenantId: "tenant-1" };
 const NOW = new Date("2026-06-01T00:00:00.000Z");
@@ -197,7 +187,7 @@ describe("runtime.purge — 競合後の再読で already_purged になる枝の
     const memory = await stores.memoryStore.createMemory(ctx, newMemory({ status: "forgotten" }));
     stores.memoryStore.beforeUpdateStatus = (id) => {
       if (id === memory.id) {
-        // ADR 0562: `createMemory` の返り値は写し。store の中の行を書き換える。
+        // `createMemory` の返り値は写し。store の中の行を書き換える。
         const live = stores.memoryStore.liveRowForTest(ctx, memory.id)!;
         live.purgedAt = new Date();
         live.content = "[purged]";
@@ -224,7 +214,7 @@ describe("runtime.purge — 競合後の再読で already_purged になる枝の
     const memory = await stores.memoryStore.createMemory(ctx, newMemory({ status: "forgotten" }));
     stores.memoryStore.beforeUpdateStatus = (id) => {
       if (id === memory.id) {
-        // ADR 0562: `createMemory` の返り値は写し。store の中の行を書き換える。
+        // `createMemory` の返り値は写し。store の中の行を書き換える。
         const live = stores.memoryStore.liveRowForTest(ctx, memory.id)!;
         live.purgedAt = new Date();
         live.content = "[purged]";

@@ -5,20 +5,11 @@ import { PostgresMemoryStore } from "../memory-store.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
 /**
- * Issue #1734（2026-09-30 マージ分の確かめ直し）で、PR #1484 の変異試験が**すり抜けた**2本を塞ぐ歯。
- * 担当はクローン（miku）の判断で進めている作業であり、オーナーの判断ではない。
- *
- * `listActiveClaimPredicates` は、新しい順（`MAX(created_at)` の降順）の内側の同着を、predicate の
- * コードポイント順の昇順で返す（interface の契約・PR #1484 の本文）。Postgres は
- * `ORDER BY MAX(created_at) DESC, claim_key_predicate COLLATE "C" ASC`。
- *
- * - 「副キーを丸ごと外す」: 適合テストの同着の歯は数件の predicate で、GROUP BY の出力順（実行計画しだいの
- *   偶然の並び）が昇順に当たり、副キーが無くても緑だった。ここでは同着の predicate を多数・書いた順と
- *   無関係な名前で入れ、偶然では昇順にならないようにする。
+ * - 「副キーを丸ごと外す」: GROUP BY の出力順（実行計画しだいの偶然の並び）が昇順に当たると副キーが無くても緑になるので、
+ *   同着の predicate を多数・書いた順と無関係な名前で入れ、偶然では昇順にならないようにする。
  * - 「`COLLATE "C"` を外す」: DB の既定の照合順序が `C.UTF-8` だと、外してもコードポイント順になり差が出ない
- *   （ADR 0582 の実測と同じ）。CI の2脚（UTF8 / SQL_ASCII）も C 系で、C でない照合順序の DB を立てる脚は無い。
- *   結果では見えないので、**発行される SQL の `ORDER BY` が副キーと `COLLATE "C"` を持つこと**を文面で縛る
- *   （実行計画の形ではなく、書いた文の形を見る歯。偽陽性は SQL を書き換えたときだけ）。
+ *   （CI の2脚も C 系で、C でない照合順序の DB を立てる脚は無い）。結果では見えないので、
+ *   発行される SQL の `ORDER BY` が副キーと `COLLATE "C"` を持つことを文面で縛る。
  */
 
 const ctx: Ctx = { tenantId: "claim-predicates-tie-break-tenant" };

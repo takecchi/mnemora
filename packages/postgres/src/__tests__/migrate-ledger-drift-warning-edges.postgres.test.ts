@@ -6,17 +6,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest
 import { DEFAULT_MIGRATIONS_DIR, listMigrationFiles, runMigrations } from "../migrate.js";
 import { requireDatabaseUrl } from "./test-db.js";
 
-/**
- * - 警告の spy は最初の `runMigrations` より前に置く。台帳が空の最初の適用で「番号の最大」が
- *   定まらないまま警告を出す実装は、あとから spy を置く形では見えない。
- * - 台帳の最大と同じ番号の未適用ファイルは「小さい番号」ではないので警告しない。
- *   `<` が `<=` になると、同じ番号を後から足した利用者に偽の警告が出る。
- * - 手元に無い名前が複数あるときは全部を名指しする。1つ目だけ・最後だけが出る実装では、
- *   どの名前を確かめればよいかが欠ける。
- * - 番号で始まらない名前は「番号の最大」の候補にしない。先頭の数字だけを見る約束が外れると、
- *   名前の途中の数字が基準になり、警告が別のファイルを名指しする。
- * - (a) と (b) は別々の警告で出す。1つにまとめると、利用者が grep する1行に別の原因が混ざる。
- */
+/** 警告の spy は最初の `runMigrations` より前に置く。台帳が空の最初の適用で「番号の最大」が定まらないまま警告を出す実装は、あとから spy を置く形では見えない。 */
 
 const SCHEMA = "mnemora_ledger_drift_warning_edges";
 const ALL_FILES = listMigrationFiles(DEFAULT_MIGRATIONS_DIR);

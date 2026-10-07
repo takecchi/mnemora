@@ -14,16 +14,7 @@ import {
   TEST_EMBEDDING_SPACE,
 } from "./test-db.js";
 
-/**
- * ADR 0456（ADR 0424 O-6-1 の続き）: 読み取りの絞り（`labels`・`attributes` の key と value）・claim key・
- * `extractorVersion` に NUL（U+0000）が入ったとき、DB の生の例外（`Failed query: … params: …`、原因は
- * `invalid byte sequence for encoding "UTF8": 0x00` か `unsupported Unicode escape sequence`）ではなく、
- * DB に触れる前の名指しの例外（`<口>: <欄> must not contain NUL characters (U+0000)`）で断る。
- *
- * 断る入力は増やさない——直す前も、同じ入力は例外で落ちていた（陽性対照: 各 it の最初に、NUL を含まない
- * 同じ形の入力が通ることを見る）。`RecallQuery.labels`・`RecallQuery.attributes` の値は zod が NUL を
- * 弾かない（key は文字種の正規表現が弾く）ので、`runtime.recall` から実際にここへ届く。
- */
+/** 各 it の最初に、NUL を含まない同じ形の入力が通ることを見る（陽性対照）。`RecallQuery.labels`・`attributes` の値は zod が NUL を弾かない（key は文字種の正規表現が弾く）ので、`runtime.recall` から実際にここへ届く。 */
 
 const A: Ctx = { tenantId: "read-nul" };
 const NUL = "x\u0000y";

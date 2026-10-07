@@ -17,50 +17,9 @@ import {
 } from "./test-db.js";
 
 /**
- * 北極星 項目1「言ったことを、次の日も覚えている。」（docs/north-star.md:28）を、
- * **本物の Postgres + `Runtime.recall()`** を通して実測する（Issue #302）。
- *
- * これまでの検証は数式だけだった:
- * `floorAt()` = recordedAt + halfLifeHours × log2(strength/threshold)
- * （`packages/core/src/strategies/decay.ts`）に既定値
- * （`DEFAULT_HALF_LIFE_HOURS=720`・`DEFAULT_DECAY_THRESHOLD=0.05`・`strength=1`）を
- * 当てはめると `decay_floor_at ≈ 作成 + 約129.6日` になる、というコードパスの追跡であって、
- * `runtime.observe()` → `runtime.recall()` を実際に走らせて確かめたことは一度も無かった
- * （PR #286 の `recall-decay-gate.test.ts` はインメモリの `createFakeRuntimeStores()` で
- * Postgres を通らず、Postgres 側で `decayFloorAtAfter` を見ているのは
- * `vector-search-hnsw.test.ts` の1件のみで `VectorStore.search()` 単体・時間経過なし）。
- *
- * ここでは `deps.clock`（`RuntimeDeps.clock`、既定は `systemClock`）を可変にした
- * `MutableClock`（`examples/chat/src/mutable-clock.ts` の `MutableClock`/`createMutableClock`
- * と同じ形——別パッケージなのでここに複製する）を注入し、実時間を待たずに
- * 「日をまたいだ」「忘却ゲートの既定余裕を跨いだ」状態を作って測る。
- *
- * ⚠ このファイルが `tick()` の直前に `clock.set(new Date())` で取り直すのは、歴史的な理由で
- * 残している対処である。ADR 0355 より前は、`packages/postgres` の `outbox.available_at` が
- * アプリの `Clock` を読まず、Postgres 側の SQL `now()` で入っていた。そのため `tick()`
- * （embed の消化）は**必ずクロックを実時刻付近に置いた状態で呼ぶ**必要があり、
- * 過去や未来へ振った直後に呼ぶと `available_at <= opts.now` が成り立たず embed ジョブを
- * claim できなかった（`outbox-store.ts` の `claimBatch`）。**当時、ローカル Postgres で
- * 実際にこの失敗を再現した**（`observe()` の直前に取った `t0` をそのまま `tick()` に渡すと、
- * `observe()` の INSERT が実際にコミットされる実時刻のほうがわずかに後になり、
- * `available_at > opts.now` で 0件しか claim できなかった）。いまは `available_at` も
- * 注入した時計に従う（ADR 0559、`examples/chat/src/mutable-clock.ts` の docstring）。
- * 取り直す処理は `archive-sweep-cost.ts` と同じで、変えていない。
- *
- * ⭐ **実測で分かった、忘却ゲート（`decayGateActive`）と段2のスコア減衰は別物である**
- * （`(乙)` の歯で検算した）。`decayGateActive` は段1・SQL 側の**硬い**除外だが、
- * `strategies/scoring.ts` の `total = affinity × decay × tagMatch × freshness × strength`
- * も同じ `defaultDecayStrategy.strengthAt()` を使っており、`decayFloorAt` を過ぎた
- * Memory は `includeFullyDecayed: true` でゲートを外しても**既定の `scoreThreshold`
- * （0.1）では below_threshold として落ちる**（`decay`/`freshness` が ≈threshold(0.05) 以下
- * になるため）。⟹ ゲート単体の効果を切り出すには `scoreThreshold: 0` を併用する必要がある
- * ——`(乙)` はこの2つを分けて検算している。
- *
- * **確かめていないこと**: この歯は `channels` を指定しない既定（ANN のみ、
- * `DEFAULT_RECALL_CHANNELS`）でしか測っていない。語彙チャンネル（lexical）は
- * `LexicalFilter` が `decayFloorAtAfter` を持たず、忘却ゲートは全チャンネル共通の
- * 後置フィルタ（`recall-runtime.ts` の `decayFilteredCount`）で掛かる——ANN 単体とは
- * 別の経路であり、ここでは検査していない。
+ * 本物の Postgres + `Runtime.recall()` を通して、日をまたいだ減衰を測る。
+ * `deps.clock` に可変の `MutableClock`（`examples/chat/src/mutable-clock.ts` と同じ形。別パッケージなのでここに複製する）を注入し、
+ * 実時間を待たずに「日をまたいだ」「忘却ゲートの既定余裕を跨いだ」状態を作る。
  */
 
 function createMutableClock(initial: Date): Clock & { set(at: Date): void } {
@@ -107,20 +66,10 @@ describe("runtime.recall() が decay を跨いで実際にどう振る舞うか 
     const observed = await runtime.observe(ctx, { kind: "utterance", text });
     const memoryId = observed.memoryIds[0]!;
 
-    // embed を消化する直前に、クロックを実時刻へ**取り直す**（`t0` のまま使い回さない）。
-    // ⚠ 歴史的な理由で残している（ADR 0559）。ADR 0355 より前に実測で踏んだ罠: `outbox.available_at` が
-    // Postgres 側の SQL `now()` で入っていたため、`observe()` の INSERT が実際にコミットされる時刻は
-    // `t0` よりわずかに後になった。`opts.now`（`claimBatch` の `available_at <= opts.now` 判定に
-    // 使われる）を `t0` のままにしておくと `available_at > opts.now` になり、embed ジョブを1件も
-    // claim できなかった（`tickResult.processed` が 0 のまま）——当時、実際にローカル Postgres で
-    // この失敗を再現した。`archive-sweep-cost.ts` が `tick()` の直前に必ず
-    // `clock.set(new Date())` で取り直しているのと同じ理由・同じ対処。
     clock.set(new Date());
     const tickResult = await runtime.tick(ctx, { kinds: ["embed"], leaseMs: 60_000 });
     expect(tickResult.processed).toBe(1);
 
-    // 前提の検算: 既定の忘却ゲートの余裕（≈ +129.6日）は +24h よりずっと先である
-    // （Issue #302 の数式をこの歯自身でも検算する。数式だけに頼らない）。
     const floorAt = defaultDecayStrategy.floorAt({
       recordedAt: t0,
       lastReinforcedAt: null,
@@ -130,15 +79,13 @@ describe("runtime.recall() が decay を跨いで実際にどう振る舞うか 
     const oneDayMs = 24 * 60 * 60 * 1000;
     expect(floorAt.getTime()).toBeGreaterThan(t0.getTime() + oneDayMs);
 
-    // 「次の日」へ進める。occurredAt/recordedAt には触れない——clock だけを進める。
     clock.set(new Date(t0.getTime() + oneDayMs));
 
     const result = await runtime.recall(ctx, { text, limit: 10 });
     const ids = result.memories.map((m) => m.memoryId);
     expect(ids).toContain(memoryId);
 
-    // 忘却ゲート自体は既定で有効なまま（ADR 0153）——+24h ではまだ何も落とさないことを
-    // stages 側からも見る（「ゲートが働いていないから通った」のではないことの確認）。
+    // 忘却ゲートは既定で有効なまま。+24h ではまだ何も落とさないことを stages 側からも見る（ゲートが働いていないから通ったのではない）。
     const candidateGen = result.explain.stages.find((s) => s.stage === "candidate_generation");
     const detail = candidateGen?.detail as { decayGate?: string } | undefined;
     expect(detail?.decayGate).toBe("pushed_down");
@@ -155,7 +102,6 @@ describe("runtime.recall() が decay を跨いで実際にどう振る舞うか 
     const observed = await runtime.observe(ctx, { kind: "utterance", text });
     const memoryId = observed.memoryIds[0]!;
 
-    // embed を消化する直前にクロックを実時刻へ取り直す（(甲) と同じ理由・同じ罠）。
     clock.set(new Date());
     const tickResult = await runtime.tick(ctx, { kinds: ["embed"], leaseMs: 60_000 });
     expect(tickResult.processed).toBe(1);
@@ -174,23 +120,6 @@ describe("runtime.recall() が decay を跨いで実際にどう振る舞うか 
     const gatedIds = gated.memories.map((m) => m.memoryId);
     expect(gatedIds).not.toContain(memoryId);
 
-    // ⭐⭐ Issue #329 / [ADR 0173](../../../../docs/decisions/0173-decayed-omission-counted-by-aggregate-scope.md):
-    // **この歯は反転している。**PR #324 当時ここは `toBe(false)` だった——既定の ANN 単独
-    // 経路では `decayFloorAtAfter` を段1の SQL へ押し下げるので、落ちた記憶は候補集合に
-    // すら入らず、後置フィルタ（当時の `decayFilteredCount`）は一度も鳴らなかったためである。
-    //
-    // **なぜ反転が正しいのか**（詳細は ADR 0173。ここには要約だけ置く）:
-    // - 当時の期待の出所は仕様でも ADR でもなく**当時の実装を追跡した結果**だった
-    //   （旧コメントが「確かめた実態（`recall-runtime.ts` を読んで追跡した）」と自認していた）。
-    // - その実態は **ADR 0153 が自分で「引き受けた負債」2 として明記したもの**と同一である。
-    //   ⟹ この歯が固定していたのは**負債の現在値**であり、負債を返した以上それは動く。
-    // - そしてその状態は、北極星 項目6（「見つからなかった」と「探していない」を、同じ顔で
-    //   返さない）と正面から衝突していた。`AGENTS.md`「正典と実装が食い違ったら、
-    //   バグなのは実装のほうである」。
-    //
-    // ⟹ **この歯の役割が変わった。**「減衰しきった記憶が消える事実の記録」から、
-    // **「段1の押し下げと段5の集約が同じ述語を見ていることの検算」**へ。
-    // 押し下げは1バイトも外していない（下の `decayGate === "pushed_down"` がそれを固定する）。
     const decayedOmissions = gated.omitted.filter(
       (o) => o.kind === "filtered" && o.condition === "decayed",
     );
@@ -201,25 +130,16 @@ describe("runtime.recall() が decay を跨いで実際にどう振る舞うか 
       count: number;
       countKind: string;
     };
-    // (a) count がこの scope の実際の減衰件数と一致する。この tenant には
-    // `observe()` した1件しか居ないので、実測値は 1 である——scope を無視して
-    // tenant 全体や DB 全体を数える実装はここで落ちる。
+    // この tenant には `observe()` した1件しか居ない。scope を無視して tenant 全体や DB 全体を数える実装はここで落ちる。
     expect(decayedOmission.count).toBe(1);
-    // (b) countKind は "exact"（"lower_bound" から上がった。ADR 0173「戻り値の意味が変わった」）。
     expect(decayedOmission.countKind).toBe("exact");
-    // 押し下げは外していない——候補集合そのものから除かれたままであることを stages で固定する。
     const gatedCandidateGen = gated.explain.stages.find((s) => s.stage === "candidate_generation");
     const gatedDetail = gatedCandidateGen?.detail as { decayGate?: string } | undefined;
     expect(gatedDetail?.decayGate).toBe("pushed_down");
 
-    // ⚠ 実測で分かったこと（設計当初は想定していなかった）: `includeFullyDecayed: true` で
-    // ゲートを外しても、**既定の scoreThreshold（0.1）のままでは戻ってこない。**
-    // 段2の再スコア（`strategies/scoring.ts`）の `total = affinity × decay × tagMatch ×
-    // freshness × strength` のうち `decay`/`freshness` はどちらも
-    // `defaultDecayStrategy.strengthAt()` そのもので、floorAt を過ぎた時点では
-    // ≈threshold（0.05）以下——ゲートとは**別の理由**（below_threshold、段2のソフトな
-    // 足切り）で落ちる。⟹ ゲート単体の効果を切り出すには `scoreThreshold: 0` で
-    // このソフトな足切りを外す必要がある。まずそれ自体を検算する。
+    // `includeFullyDecayed: true` でゲートを外しても、既定の scoreThreshold（0.1）のままでは戻ってこない。
+    // 段2の再スコアの `decay`/`freshness` は floorAt を過ぎると ≈threshold（0.05）以下になり、ゲートとは別の理由（below_threshold）で落ちる。
+    // ゲート単体の効果を切り出すには `scoreThreshold: 0` が要るので、まずそれ自体を検算する。
     const ungatedDefaultThreshold = await runtime.recall(ctx, {
       text,
       limit: 10,
@@ -229,10 +149,8 @@ describe("runtime.recall() が decay を跨いで実際にどう振る舞うか 
     expect(ungatedDefaultThresholdIds).not.toContain(memoryId);
     expect(ungatedDefaultThreshold.omitted.some((o) => o.kind === "below_threshold")).toBe(true);
 
-    // 対照実験（本題）: `includeFullyDecayed: true` **かつ** `scoreThreshold: 0` で
-    // 段2のソフトな足切りも外すと戻ってくる。gate 側は `scoreThreshold` を通っていない
-    // （段1・SQL 側の話）ので、`scoreThreshold: 0` にしても gated 側の結果は変わらないはず
-    // ——それも合わせて検算する（下の `gatedZeroThreshold`）。
+    // 対照: `includeFullyDecayed: true` かつ `scoreThreshold: 0` なら戻ってくる。
+    // gate 側は `scoreThreshold` を通らない（段1・SQL 側）ので、`scoreThreshold: 0` でも gated 側の結果は変わらないはずで、それも検算する。
     const gatedZeroThreshold = await runtime.recall(ctx, { text, limit: 10, scoreThreshold: 0 });
     const gatedZeroThresholdIds = gatedZeroThreshold.memories.map((m) => m.memoryId);
     expect(gatedZeroThresholdIds).not.toContain(memoryId);
@@ -251,9 +169,7 @@ describe("runtime.recall() が decay を跨いで実際にどう振る舞うか 
     const ungatedDetail = ungatedCandidateGen?.detail as { decayGate?: string } | undefined;
     expect(ungatedDetail?.decayGate).toBe("disabled");
 
-    // (c) ⭐ Issue #329 / ADR 0173: `includeFullyDecayed: true` のときは逆に、この
-    // omission が**積まれない**——ゲートを外したのだから「ゲートで落ちた」は 0 件である。
-    // これを固定しないと、「常に1件積む」だけの実装でも (a)(b) が通ってしまう。
+    // (c) `includeFullyDecayed: true` のときはこの omission が積まれない。これを固定しないと「常に1件積む」だけの実装でも (a)(b) が通ってしまう。
     expect(ungated.omitted.some((o) => o.kind === "filtered" && o.condition === "decayed")).toBe(
       false,
     );
@@ -265,14 +181,8 @@ describe("runtime.recall() が decay を跨いで実際にどう振る舞うか 
   });
 
   /**
-   * ⭐⭐ Issue #329 / ADR 0173: **活動時計（`decay_clock: 'activity'` / `'either'`）でも、
-   * 段1の押し下げと段5の集約が同じ述語を見ていること。**
-   *
-   * ⚠ **ADR 0173 の実測（latency / EXPLAIN / 候補の質）は全行 `wall` でしか取っていない。**
-   * この軸は歯で埋める、というのがマネージャーの指示であり、これがその歯である。
-   * **本物の Postgres でしか測れない**——`decay_floor_seq` は `bigint` 列であり、
-   * `count(*) FILTER` の NULL 三値論理（`decay_floor_seq IS NULL` は沈まない側、
-   * ADR 0165 決めたこと4）も SQL 側の振る舞いだからである。
+   * 活動時計（`decay_clock: 'activity'` / `'either'`）でも、段1の押し下げと段5の集約が同じ述語を見ていること。
+   * 本物の Postgres でしか測れない: `decay_floor_seq` は `bigint` 列で、`count(*) FILTER` の NULL 三値論理も SQL 側の振る舞いである。
    */
   it("(丙) 活動時計のテナントでも、段1の押し下げと段5の集約が同じ述語で一致する（ADR 0165 の2軸）", async () => {
     await resetTestDatabase();
@@ -324,7 +234,7 @@ describe("runtime.recall() が decay を跨いで実際にどう振る舞うか 
     await seed({ decayFloorAt: farPast, decayFloorSeq: 100, hash: "wall-dead-activity-alive" });
     // 壁=死 / 活=死
     await seed({ decayFloorAt: farPast, decayFloorSeq: 0, hash: "wall-dead-activity-dead" });
-    // 壁=死 / 活は床が無い（NULL）——ADR 0165 決めたこと4 で「この軸では沈まない」。
+    // 壁=死 / 活は床が無い（NULL）: この軸では沈まない。
     await seed({ decayFloorAt: farPast, decayFloorSeq: null, hash: "wall-dead-activity-null" });
 
     const decayedCount = async (): Promise<number> => {
@@ -340,24 +250,18 @@ describe("runtime.recall() が decay を跨いで実際にどう振る舞うか 
       return omission.count;
     };
 
-    // 'wall'（既定）: 壁時計だけを見る ⟹ farPast の3件。
     expect(await decayedCount()).toBe(3);
 
-    // 'activity': 活動時計だけを見る ⟹ decayFloorSeq が 0（= nowSeq 以下）の2件。
-    // NULL の1件は沈まない。壁時計の farPast は一切効かない。
-    // ⚠ `decay_clock != 'wall'` のテナントでは recall のたびに activity_seq が +1 する
-    //   （ADR 0165 決めたこと5）。`decayFloorSeq: 100` はそれでも当分沈まない。
+    // 'activity': 活動時計だけを見るので、壁時計の farPast は一切効かない。
+    // ⚠ `decay_clock != 'wall'` のテナントでは recall のたびに activity_seq が +1 する。`decayFloorSeq: 100` はそれでも当分沈まない。
     await tenantSettingsStore.setDecayClock(ctx, "activity");
     expect(await decayedCount()).toBe(2);
 
     // 'either': **OR**（どちらかが生きていれば沈まない）⟹ 両方沈んだ1件だけ。
     // ⚠ AND/OR を取り違えた集約（`NOT wall OR NOT seq`）はここで 3 を返して赤くなる。
-    //   **これが段1の押し下げ（`vector-store.ts` の `decayFloorAnyAxis`）と段5の集約が
-    //   同じ述語であることの検算そのものである。**
     await tenantSettingsStore.setDecayClock(ctx, "either");
     expect(await decayedCount()).toBe(1);
 
-    // 鳴ってはいけない側: ゲートを外せば、どの時計でも 0 件。
     const ungated = await runtime.recall(ctx, {
       vector: [0, 0, 1],
       limit: 10,

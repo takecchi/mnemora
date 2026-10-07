@@ -63,6 +63,9 @@ const SERIAL_TEST_FILES = [
   "src/__tests__/search-many-primary-key-lookup.postgres.test.ts",
   "src/__tests__/search-primary-key-lookup.postgres.test.ts",
   "src/__tests__/search-stats-presence-result-equivalence.postgres.test.ts",
+  // クラスタ全体には効かないが直列群に置く: 適合の suite を import して登録し直すので、
+  // `isolate: false` の並列群では、同じ worker で先に評価された適合ファイルの評価が残り、何も登録されない。
+  "src/__tests__/outbox-concurrent-claim-wiring.postgres.test.ts",
 ];
 
 const SHARED_SETUP_FILES = [

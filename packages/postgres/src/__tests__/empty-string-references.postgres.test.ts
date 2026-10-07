@@ -5,17 +5,6 @@ import { InMemoryMemoryStore } from "@mnemora/testkit/fixtures";
 import { PostgresMemoryStore } from "../memory-store.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
-/**
- * 空文字の参照・冪等の鍵を、testkit の fixture も Postgres と同じく「値が在る」として扱う。
- * - `createMemory` の `sourceObservationId`・`supersededById`・`contestedWithId` が `""`: Postgres は uuid として
- *   読めずに拒む。fixture も「参照先が無い」として拒む（`null`/`undefined` だけが「参照しない」）。
- * - `createObservation` の `externalId` が `""`: Postgres の一意制約は `external_id IS NOT NULL` の行に効くので、
- *   2回目は既存の行を返す。fixture も同じく既存の行を返す。
- *
- * 【実測 2026-09-28】以前は testkit の fixture が、`""` を偽として扱っていた——参照は検査せずに `""` のまま保存し、
- * `externalId: ""` は毎回新しい行を作っていた（store の公開の口に境界の入力を2実装へ流す差分で見つけた）。
- */
-
 const KITS: Array<[string, () => Promise<MemoryStore>]> = [
   ["testkit の InMemory", async () => new InMemoryMemoryStore()],
   [

@@ -12,15 +12,9 @@ import {
 } from "./test-db.js";
 
 /**
- * `PostgresMemoryStore.aggregateScope` の `scopeAggregate: "skip"` は、件数集計（`GROUP BY subject_id`）を
- * 止める代わりに、目次帯（`digestBand`）だけを別の `SELECT` で引く。この目次帯は、`"exact"` の目次帯と
- * 中身・順序・件数が1バイトも違ってはならない（`"skip"` は件数を捨てるだけで、帯の選び方は変えない）。
- *
- * `memory-store-conformance.ts` には足さない（外部 adapter へ要求を増やさない）。`conformance.postgres.test.ts` の
- * `"skip"` の歯は記憶が1件・絞りなしで、帯の絞り込み（subject・attributes・labels・期間・有効期間）・順序の
- * 同点の決め方・件数の上限・除外 id・`contested` を見ていなかった。ここでは `"exact"` を物差しに、同じ入力で
- * `"skip"` の帯が一致することを縛る。物差し側（`"exact"`）が両方揃って壊れる偽陽性を避けるため、
- * 「期待する id の列」を JS で独立に組み、`"exact"` の側にも当てる。
+ * `"skip"` の目次帯は `"exact"` の目次帯と中身・順序・件数が同じでなければならない。
+ * 物差し側（`"exact"`）が壊れても一致してしまう偽陽性を避けるため、「期待する id の列」を JS で独立に組み、
+ * `"exact"` の側にも当てる。
  */
 
 const TENANT = "skip-digest-band-tenant";
@@ -60,7 +54,6 @@ describe("PostgresMemoryStore.aggregateScope: scopeAggregate 'skip' の目次帯
         ...overrides,
       }),
     );
-    // 実効時刻は occurredAt ?? recordedAt。
     rows.set(label, { id: memory.id, effTime: (overrides?.occurredAt ?? effTime).getTime() });
   }
 
@@ -78,7 +71,6 @@ describe("PostgresMemoryStore.aggregateScope: scopeAggregate 'skip' の目次帯
     for (let i = 0; i < TIE_COUNT; i += 1) {
       await put(`tie-${i}`, { subjectId: "s1", tags: ["alpha"], attributes: { k: "v" } }, day(10));
     }
-    // contested は帯に入る（対のまま。`markContestedPair` でしか作れない）。新しいほうの2件。
     const claimKey = { subject: "user", predicate: "skip-digest-band" };
     for (const [label, at] of [
       ["contested", day(20)],
@@ -93,16 +85,13 @@ describe("PostgresMemoryStore.aggregateScope: scopeAggregate 'skip' の目次帯
       { id: a, event: buildNewMemoryEventFixture({ memoryId: a, kind: "updated" }) },
       { id: b, event: buildNewMemoryEventFixture({ memoryId: b, kind: "updated" }) },
     );
-    // active・別の subject・別の attributes・別のラベル。
     await put("s2", { subjectId: "s2", tags: ["beta"], attributes: { k: "w" } }, day(15));
     await put("subjectless", { subjectId: null, tags: [], attributes: {} }, day(14));
-    // occurredAt が recordedAt より古い: 実効時刻は occurredAt（COALESCE の左）。
     await put(
       "occurred-old",
       { subjectId: "s1", tags: ["alpha"], attributes: { k: "v" }, occurredAt: day(2) },
       day(40),
     );
-    // 有効期間: validAt = day(30) で、片方は終わっており、片方はまだ始まっていない。
     await put(
       "expired",
       { subjectId: "s1", tags: ["alpha"], attributes: { k: "v" }, validUntil: day(25) },
@@ -113,7 +102,6 @@ describe("PostgresMemoryStore.aggregateScope: scopeAggregate 'skip' の目次帯
       { subjectId: "s1", tags: ["alpha"], attributes: { k: "v" }, validFrom: day(35) },
       day(13),
     );
-    // 帯に入らない status。どれも実効時刻はいちばん新しい。
     await put("archived", { status: "archived", subjectId: "s1", tags: ["alpha"] }, day(50));
     await put("superseded", { status: "superseded", subjectId: "s1", tags: ["alpha"] }, day(51));
     await put("forgotten", { status: "forgotten", subjectId: "s1", tags: ["alpha"] }, day(52));
@@ -156,7 +144,6 @@ describe("PostgresMemoryStore.aggregateScope: scopeAggregate 'skip' の目次帯
     const exact = await store.aggregateScope(ctx, scope, { scopeAggregate: "exact", digestBand });
     expect(skip.countKind).toBe("unknown");
     expect(exact.countKind).toBe("exact");
-    // 中身（digest 本文）も同じ。
     expect(skip.digests).toEqual(exact.digests);
     // 索引を使えない接続（Seq Scan + Sort しか選べない）でも同じ。索引が `id DESC` の順を
     // 持っているので、索引が使える計画だけを見ていると、ORDER BY の同点の決め方が抜けても気づけない。
@@ -173,7 +160,6 @@ describe("PostgresMemoryStore.aggregateScope: scopeAggregate 'skip' の目次帯
 
   it("絞りなし・上限が十分: active と contested だけが、実効時刻の降順・同じなら id の降順で出る", async () => {
     const { skip, exact } = await bands({}, 100);
-    // occurred-old は実効時刻 day(2) で最後に来る。
     const expected = expectedIds(allBandLabels);
     expect(expected.at(-1)).toBe(rows.get("occurred-old")!.id);
     expect(exact).toEqual(expected);
@@ -185,8 +171,6 @@ describe("PostgresMemoryStore.aggregateScope: scopeAggregate 'skip' の目次帯
   });
 
   it("上限が同じ実効時刻の塊の途中を通っても、id の降順で切れる。件数は上限ちょうど", async () => {
-    // contested(day20), contested-b(day19), s2(day15), subjectless(day14), not-yet-valid(day13), expired(day12)
-    // の次に、実効時刻が同じ tie が10件（7番目から16番目まで）。
     for (const limit of [6, 7, 8, 10, 12, 15, 16, 17]) {
       const { skip, exact } = await bands({}, limit);
       const expectedAll = expectedIds(allBandLabels);
@@ -234,7 +218,6 @@ describe("PostgresMemoryStore.aggregateScope: scopeAggregate 'skip' の目次帯
     const expected = expectedIds(["s2", "subjectless", "not-yet-valid"]);
     expect(exact).toEqual(expected);
     expect(skip).toEqual(expected);
-    // occurredAt が古い行は、recordedAt が新しくても期間の外。
     expect(skip).not.toContain(rows.get("occurred-old")!.id);
   });
 

@@ -7,12 +7,6 @@ import { createRuntime } from "../runtime.js";
 import type { ContestedResolution } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * ADR 0496（ADR 0446 の「見つけたが直していない点」）: 未知の `resolution.kind`（型を外した呼び出し）は、
- * 以前は `supersede` の分岐へ倒れ、勝者の無いまま両側とも `superseded` になった。今は **書き込む前に** `RangeError`。
- * 2者版・群版・`applyCorrection`（`resolution` を渡したとき）の3口で、何も書かれないことを確かめる。
- */
-
 const ctx: Ctx = { tenantId: "tenant-unknown-kind" };
 const NOW = new Date("2026-06-01T00:00:00.000Z");
 

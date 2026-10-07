@@ -53,7 +53,6 @@ describe("capLexicalQueryTotalChars: 境目に書記素が来る入力", () => {
   );
 
   it.each(straddlingInputs)("%s: 孤立サロゲートを残さない", (_name, query) => {
-    // u フラグ付きの \p{Surrogate} は、対になっていない孤立サロゲートだけに当たる。
     expect(capLexicalQueryTotalChars(query)).not.toMatch(/\p{Surrogate}/u);
   });
 

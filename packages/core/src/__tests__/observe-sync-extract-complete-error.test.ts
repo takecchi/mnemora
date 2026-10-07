@@ -5,17 +5,6 @@ import type { LLMProvider } from "../interfaces/llm-provider.js";
 import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * Issue #1734（2026-09-30 マージ分の確かめ直し）の歯。PR #1492（ADR 0407）の変異試験で、
- * 「`observe({ extract: "sync" })` が `complete` の例外を全部握る」変異がすり抜けた。担当はクローン（miku）の
- * 判断で進めている作業であり、オーナーの判断ではない。
- *
- * ADR 0407 決定3: LLM がリースより長くかかり tick に取り直されたら、observe は `OutboxLeaseConflictError`
- * **だけ**を握って通常の結果（`memoryIds`）を返す。それ以外の例外（接続断・`TypeError` など）は今までどおり
- * 投げ直す。既存の歯（`observe-sync-extract-job-lease.test.ts`）は、リース競合の例外が握られることしか
- * 見ていなかった。
- */
-
 const ctx: Ctx = { tenantId: "observe-sync-extract-complete-error" };
 
 const llm: LLMProvider = {

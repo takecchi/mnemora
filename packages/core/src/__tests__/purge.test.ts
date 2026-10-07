@@ -8,23 +8,6 @@ import type { MemoryStatus, NewMemory } from "../memory.js";
 import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores, FakeEmbeddingProvider } from "./runtime-fakes.js";
 
-/**
- * `runtime.purge`（Issue #198、[ADR 0124](../../../../docs/decisions/0124-purge-physical-delete.md)）の歯。
- *
- * 設計の要点（`runtime.ts` の `PurgeOutcome`/`purge` の doc コメント参照）:
- * - `forgotten` からのみ遷移できる（任意 status からの直接 purge はできない）。
- * - `content`/`digest` をトゥームストーンで上書きし、`purgedAt` を設定。行は消えない。
- * - CAS の条件は `status = 'forgotten' AND purgedAt IS NULL` の両方
- *   ——`status` だけでは2回目の呼び出しを弾けない（この操作は `status` を動かさないため）。
- * - `opts.dryRun` は書き込み無しで下見を返す。
- * - `MemoryStore.purgeMemory` が無い adapter では `supported: false` になり、全対象が
- *   `not_attempted`。
- * - `tick()`/`observe()` からは呼ばれない。
- * - `recall()`/`aggregateScope` は一切変更していない。
- *
- * `@mnemora/testkit` には依存しない（`forget.test.ts`/`restore-archived.test.ts` と同じ理由）。
- */
-
 const ctx: Ctx = { tenantId: "tenant-1" };
 const NOW = new Date("2026-06-01T00:00:00.000Z");
 
@@ -459,7 +442,7 @@ describe("runtime.purge — 対応する embedding が実際に消える", () =>
 
     const result = await runtime.purge(ctx, { memoryId: memory.id });
 
-    // kind はそのまま。失敗は任意の欄 `embeddingCleanup` で知らせる（ADR 0399）。
+    // kind はそのまま。失敗は任意の欄 `embeddingCleanup` で知らせる。
     expect(result.outcomes).toEqual([
       {
         memoryId: memory.id,
@@ -504,7 +487,6 @@ describe("runtime.purge — already_purged の再実行でも embedding をベ�
   it("既に purge 済みの記憶で、後から見つかった embedding も deleteAcrossSpaces で消える", async () => {
     const { runtime, stores } = buildRuntime();
     const memory = await stores.memoryStore.createMemory(ctx, newMemory({ status: "forgotten" }));
-    // 1回目の purge（embedding は無い状態のまま）。
     const first = await runtime.purge(ctx, { memoryId: memory.id });
     expect(first.outcomes[0]?.kind).toBe("purged");
 
@@ -584,7 +566,6 @@ describe("runtime.purge — already_purged の再実行で、v1.1.0 より前の
       newMemory({ status: "active", contentHash: "scrub-c" }),
     );
     await runtime.purge(ctx, { memoryId: purgedAlready.id });
-    // 最初の purge（purged）では呼ばない。
     expect(calls).toEqual([]);
 
     const result = await runtime.purge(ctx, {
@@ -598,7 +579,6 @@ describe("runtime.purge — already_purged の再実行で、v1.1.0 より前の
     ]);
     expect(calls).toEqual([[purgedAlready.id]]);
 
-    // dryRun: 下見は何も書かない。
     await runtime.purge(ctx, { memoryId: purgedAlready.id }, { dryRun: true });
     await runtime.purge(ctx, { memoryId: fresh.id }, { dryRun: true });
     expect(calls).toEqual([[purgedAlready.id]]);
@@ -613,7 +593,7 @@ describe("runtime.purge — already_purged の再実行で、v1.1.0 より前の
     const memory = await stores.memoryStore.createMemory(ctx, newMemory({ status: "forgotten" }));
     stores.memoryStore.beforeUpdateStatus = (id) => {
       if (id === memory.id) {
-        // ADR 0562: `createMemory` の返り値は写し。store の中の行を書き換える。
+        // `createMemory` の返り値は写し。store の中の行を書き換える。
         const live = stores.memoryStore.liveRowForTest(ctx, memory.id)!;
         live.purgedAt = new Date();
         live.content = "[purged]";
@@ -669,7 +649,6 @@ describe("runtime.purge — already_purged の再実行で、v1.1.0 より前の
       },
     ]);
 
-    // 掃除の両方が失敗した。どちらの欄も付き、kind は変わらない。
     installScrub(stores, async () => {
       throw new Error("simulated scrub outage");
     });
@@ -765,7 +744,7 @@ describe("runtime.purge — 並行（purgeMemory が MemoryPurgeConflictError �
     const memory = await stores.memoryStore.createMemory(ctx, newMemory({ status: "forgotten" }));
     stores.memoryStore.beforeUpdateStatus = (id) => {
       if (id === memory.id) {
-        // ADR 0562: `createMemory` の返り値は写し。store の中の行を書き換える。
+        // `createMemory` の返り値は写し。store の中の行を書き換える。
         const live = stores.memoryStore.liveRowForTest(ctx, memory.id)!;
         live.purgedAt = new Date();
         live.content = "[purged]";
@@ -785,7 +764,7 @@ describe("runtime.purge — 並行（purgeMemory が MemoryPurgeConflictError �
     await stores.vectorStore.upsert(ctx, stores.embeddingProvider.space, memory.id, [1, 0]);
     stores.memoryStore.beforeUpdateStatus = (id) => {
       if (id === memory.id) {
-        // ADR 0562: `createMemory` の返り値は写し。store の中の行を書き換える。
+        // `createMemory` の返り値は写し。store の中の行を書き換える。
         const live = stores.memoryStore.liveRowForTest(ctx, memory.id)!;
         live.purgedAt = new Date();
         live.content = "[purged]";
@@ -804,7 +783,7 @@ describe("runtime.purge — 並行（purgeMemory が MemoryPurgeConflictError �
     const memory = await stores.memoryStore.createMemory(ctx, newMemory({ status: "forgotten" }));
     stores.memoryStore.beforeUpdateStatus = (id) => {
       if (id === memory.id) {
-        // ADR 0562: `createMemory` の返り値は写し。store の中の行を書き換える。
+        // `createMemory` の返り値は写し。store の中の行を書き換える。
         stores.memoryStore.liveRowForTest(ctx, memory.id)!.status = "active";
       }
     };
@@ -822,7 +801,7 @@ describe("runtime.purge — 並行（purgeMemory が MemoryPurgeConflictError �
     const memory = await stores.memoryStore.createMemory(ctx, newMemory({ status: "forgotten" }));
     stores.memoryStore.beforeUpdateStatus = (id) => {
       if (id === memory.id) {
-        // ADR 0562: `createMemory` の返り値は写し。store の中の行を書き換える。
+        // `createMemory` の返り値は写し。store の中の行を書き換える。
         stores.memoryStore.liveRowForTest(ctx, memory.id)!.status = "active";
       }
     };
@@ -927,12 +906,8 @@ describe("runtime.purge — tick()/observe() から呼ばれない", () => {
 
 describe("runtime.purge — recall()/aggregateScope への影響（ADR 0124 決定6）", () => {
   /**
-   * 🔴 purge は `status` を動かさないため、purge された Memory は purge の前後を通じて
-   * 常に `status = 'forgotten'` であり、`docs/recall.md` §2 段0・§5 の決定
-   * （スコープ = tenant + subject + period + taxonomy + status ゲート）により、
-   * そもそも一度も「スコープ内」に入ったことが無い。この歯はそれを主張ではなく実測で示す
-   * ——`forget → purge` の前後で `recall()` の `memories`/`omitted`・
-   * `index.totalInScope`/`groups` が変わらないことを見る。
+   * purge は `status` を動かさないため、purge された Memory は purge の前後を通じて常に `status = 'forgotten'` であり、
+   * そもそも一度も「スコープ内」に入ったことが無い。この歯はそれを主張ではなく実測で示す。
    */
   it("forget → purge の前後で recall() の結果も index.totalInScope/groups も変わらない", async () => {
     const { runtime, stores } = buildRuntime();
@@ -941,7 +916,6 @@ describe("runtime.purge — recall()/aggregateScope への影響（ADR 0124 決�
       newMemory({ status: "active", embeddingStatus: "ready" }),
     );
     await stores.vectorStore.upsert(ctx, stores.embeddingProvider.space, forgotten.id, [1, 0]);
-    // 母数のための別の active な Memory。
     const other = await stores.memoryStore.createMemory(
       ctx,
       newMemory({ status: "active", embeddingStatus: "ready" }),
@@ -982,10 +956,7 @@ describe("runtime.purge — recall()/aggregateScope への影響（ADR 0124 決�
 });
 
 describe("runtime.purge — CAS が破れた後の再読そのものが失敗する", () => {
-  /**
-   * `forget.test.ts` の同名の describe と同じ理由（「例外はこのメソッドの外へは投げない」）。
-   * 1件目の purge は不可逆であり、例外で呼び出し側から見えなくなると最も困る。
-   */
+  /** `forget.test.ts` の同名の describe と同じ理由（例外はこのメソッドの外へは投げない）。1件目の purge は不可逆なので、例外で呼び出し側から見えなくなると最も困る。 */
   it("2件目の再読で get が投げても [purged, failed, not_attempted]・例外は伝播しない", async () => {
     const { runtime, stores } = buildRuntime();
     const m1 = await stores.memoryStore.createMemory(ctx, newMemory({ status: "forgotten" }));
@@ -1052,13 +1023,9 @@ describe("runtime.purge — ループ前の一括読み（getMany）が失敗す
 });
 
 /**
- * [ADR 0375](../../../../docs/decisions/0375-purge-scope-widened.md)（Issue #994・#995・
- * #1207）: `runtime.purge` は `memoryStore.purgeMemory` をそのまま呼ぶだけで、広げた範囲
- * （`tags`/`attributes`/`claimKey`・label の紐付け・`recalls.index_band`）はすべて
- * `MemoryStore.purgeMemory` 側の契約——ここでは `FakeMemoryStore`（`runtime-fakes.ts`）が
- * `@mnemora/postgres`/`@mnemora/testkit` と同じ範囲を実装していることを、`Runtime.purge`
- * 経由で end-to-end に確かめる（Issue #994 本文の再現方法と同じ形——fake ストアに対する
- * 一時テストだった実測を、恒久の歯として持ち込む）。
+ * `runtime.purge` は `memoryStore.purgeMemory` をそのまま呼ぶだけで、広げた範囲（`tags`/`attributes`/`claimKey`・label の紐付け・
+ * `recalls.index_band`）はすべて `MemoryStore.purgeMemory` 側の契約。ここでは `FakeMemoryStore` が
+ * `@mnemora/postgres`/`@mnemora/testkit` と同じ範囲を実装していることを、`Runtime.purge` 経由で end-to-end に確かめる。
  */
 describe("runtime.purge — ADR 0375: 広げた範囲（tags・attributes・claim key・labels・recalls の目次帯）", () => {
   it("purge は tags・attributes・claim key を空にする", async () => {

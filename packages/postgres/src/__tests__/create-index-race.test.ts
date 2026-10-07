@@ -4,8 +4,6 @@ import {
   isOwnIndexNameCollision,
 } from "../create-index-race.js";
 
-/** ADR 0464: 吸収する範囲の線（DB を使わない）。 */
-
 function collision(name: string, constraint = "pg_class_relname_nsp_index", code = "23505") {
   return Object.assign(new Error("duplicate key value violates unique constraint"), {
     code,

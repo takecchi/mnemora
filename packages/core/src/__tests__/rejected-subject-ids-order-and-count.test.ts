@@ -4,11 +4,6 @@ import type { LLMProvider, StructuredRequest } from "../interfaces/llm-provider.
 import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * Issue #1746: `ObserveResult.rejectedSubjectIds` は「弾いた順、`ExtractCandidatesResult.rejectedSubjectIds` の写し」
- * （runtime.ts の TSDoc）。以前の歯は弾く値が1件の形しか見ておらず、重複を除く・先頭だけに切る変異が素通りした。
- * ここでは、弾いた候補ごとに1件ずつ（重複もそのまま）、弾いた順に並ぶことを縛る。
- */
 const ctx: Ctx = { tenantId: "tenant-1" };
 
 type Cand = {
@@ -50,7 +45,7 @@ describe("ObserveResult.rejectedSubjectIds は、弾いた候補ごとに1件ず
         { content: "一覧外その1", provenanceKind: "stated", subjectId: "user:y" },
         { content: "主題なし", provenanceKind: "stated", subjectId: null },
         { content: "一覧外その2", provenanceKind: "stated", subjectId: "user:x" },
-        // ADR 0304: 一覧に無い文字列 "null" は弾かずに主題なしとして読む。
+        // 一覧に無い文字列 "null" は弾かずに主題なしとして読む。
         { content: "文字列の null", provenanceKind: "stated", subjectId: "null" },
         { content: "一覧外その3（その1と同じ値）", provenanceKind: "stated", subjectId: "user:y" },
         { content: "主題の指定なし", provenanceKind: "stated" },

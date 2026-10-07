@@ -5,18 +5,6 @@ import { sql } from "drizzle-orm";
 import { PostgresMemoryStore } from "../memory-store.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
-/**
- * ADR 0456（ADR 0436・0439 の続き）: `MemoryStore` の書き込み口のうち、呼び出し側が `NewMemoryEvent`（`memoryId` を
- * 持つ）を渡すものは、そのイベントが指す記憶が `ctx` のテナントの記憶であることを、書く前に確かめる。
- *
- * 直す前は、どの口も `event.memoryId` を確かめずに `memory_events` へ書いた。`memory_events.memory_id` の外部キーは
- * `tenant_id` を含まないので、A の `ctx` で B の記憶を指すイベントが、A の行として書けた（実測: 6口で再現。群・作成の一括挿入も、直す前の歯が赤になった）。
- *
- * 各 `it` は次を見る。(1) 別テナント B の記憶を指す `event.memoryId` は `memory not found for tenant` で断られる。
- * (2) B の記憶に `memory_events` の行が1件も増えない。(3) A の対象は、同じ呼び出しの status の更新ごと戻る（イベントと
- * status は同値、という口の不変条件）。(4) 陽性対照: 自分の id を指すイベントは通る。
- */
-
 const A: Ctx = { tenantId: "event-target-a" };
 const B: Ctx = { tenantId: "event-target-b" };
 
@@ -202,7 +190,6 @@ describe("event.memoryId が別テナントの記憶なら、書かずに断る"
       ),
     ).rejects.toThrow(NOT_FOUND);
     expect(await eventCount(b.id)).toBe(0);
-    // 陽性対照: 作った記憶自身を指す created は通る。
     const ok = await mem.createMemoriesWithOutboxAndEvents!(
       A,
       [{ input: fresh("c2"), jobKinds: [] }],
@@ -212,8 +199,7 @@ describe("event.memoryId が別テナントの記憶なら、書かずに断る"
     expect(await eventCount(ok.written[0]!.memory.id)).toBe(1);
   });
 
-  // ADR 0469: uuid の大文字小文字。`checkedRef` が小文字にそろえて比べるので、大文字の uuid は自テナントの記憶として通り、
-  // 積まれたイベントは uuid 列の正規形（小文字）で読み戻る。別テナントの記憶なら、大文字でも断る。
+  // `checkedRef` が小文字にそろえて比べるので、大文字の uuid は自テナントの記憶として通り、uuid 列の正規形（小文字）で読み戻る。別テナントの記憶なら、大文字でも断る。
   it("event.memoryId が大文字の uuid でも、自テナントの記憶なら通り（小文字で読み戻る）、別テナントなら断る", async () => {
     const { mem, make, ev, eventCount } = await setup();
     const b = await make(B);

@@ -11,16 +11,15 @@ import {
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
 /**
- * `PostgresTrigramLexicalStore`（opt-in の語彙 store。ADR 0319・0175・0553）の、前の確かめ直しで
- * すり抜けた4点の歯（Issue #1775 の #738）。
+ * `PostgresTrigramLexicalStore`（opt-in の語彙 store）の4点の歯。
  *
- * - E1: 同点（`coverage`・`rank` が同じ）の並びは `recorded_at DESC`、同時刻では `id` 昇順（ADR 0175）。
- * - G1: `create({ threshold })` は `[0, 1]` の有限数だけを受ける（上限・下限・非有限数を拒む。ADR 0319 §5）。
- * - I: `create()` は索引を作らない（決定5。`createOptionalTrigramIndex` で初めて作る）。
- * - S: `rank` に `word_similarity` が入る（クラスの doc・ADR 0553）。`coverage` が同じ2行で、
+ * - E1: 同点（`coverage`・`rank` が同じ）の並びは `recorded_at DESC`、同時刻では `id` 昇順。
+ * - G1: `create({ threshold })` は `[0, 1]` の有限数だけを受ける（上限・下限・非有限数を拒む）。
+ * - I: `create()` は索引を作らない（`createOptionalTrigramIndex` で初めて作る）。
+ * - S: `rank` に `word_similarity` が入る。`coverage` が同じ2行で、
  *   `word_similarity` の高いほうが、`recorded_at` が古くても先に来る。
  *
- * SQL_ASCII のクラスタでは `create()` が拒むので、その場合は何も確かめずに戻る（他の trigram の歯と同じ）。
+ * SQL_ASCII のクラスタでは `create()` が拒むので、その場合は何も確かめずに戻る。
  */
 
 const ctx: Ctx = { tenantId: "trigram-teeth" };

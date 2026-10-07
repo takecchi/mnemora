@@ -9,13 +9,13 @@ import { registerEmbeddingSpace } from "../vector-space.js";
 import { captureClientQuery, closeTestClient, getTestClient } from "./test-db.js";
 
 /**
- * #932 の確かめ直し（#1774）。`searchMany()` が統計のある場面の枝（`buildStatsPresentBranches`、
- * `ANALYZE` 済みの表で選ばれる）でも、`filter` を `search()` と同じに効かせることを縛る。
+ * `searchMany()` が統計のある場面の枝（`buildStatsPresentBranches`、`ANALYZE` 済みの表で選ばれる）でも、
+ * `filter` を `search()` と同じに効かせることを縛る。
  *
  * `vector-store-search-many.postgres.test.ts` の歯2（`subjectId`・`attributes`）と
- * `vector-search-many-diff.postgres.test.ts` は、統計の無い場面（候補D の枝）でしか走っていなかった
+ * `vector-search-many-diff.postgres.test.ts` は、統計の無い場面（候補D の枝）でしか走らない
  * （`ANALYZE` していない表では `StatsPresenceGate` が候補D を選ぶ）。統計のある枝で `filter` を
- * `tenantId` だけに絞る実装は、全部の既存の歯をすり抜けた。
+ * `tenantId` だけに絞る実装は、それらをすり抜ける。
  *
  * 新しい `PostgresVectorStore` を使い（`StatsPresenceGate` はインスタンスごと）、`ANALYZE` 済みで統計のある枝が
  * 選ばれたこと（送った SQL に候補D 特有の `OFFSET 0` が無いこと）を、検算として見る。

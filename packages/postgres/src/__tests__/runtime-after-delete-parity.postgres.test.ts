@@ -34,10 +34,9 @@ import {
 } from "./test-db.js";
 
 /**
- * ADR 0522（ADR 0493 §9「測っていないこと」の実測）: Runtime 層の「消した後の参照」と `purgeExpiredEvents` の後の `EventStore` の参照、
- * `LexicalFilter` に無い `decayFloor*After` を渡したときの結果を、**実 Postgres と InMemory の両方**で `EXPECTED` に突き合わせる。
- * core の Fake の側は `packages/core/src/__tests__/fake-runtime-after-delete-parity.test.ts` が同じ `EXPECTED` を縛る。
- * 割れは見つからなかった（3者が一致）。大文字の uuid の id は含めない（ADR 0469・0521）。
+ * Runtime 層の「消した後の参照」と `purgeExpiredEvents` の後の `EventStore` の参照、`LexicalFilter` に無い `decayFloor*After` を渡したときの結果を、
+ * 実 Postgres と InMemory の両方で `EXPECTED` に突き合わせる。core の Fake の側は `packages/core/src/__tests__/fake-runtime-after-delete-parity.test.ts` が同じ `EXPECTED` を縛る。
+ * 大文字の uuid の id は含めない。
  */
 
 interface Env {
@@ -54,9 +53,8 @@ interface Outcomes {
 }
 
 /**
- * 同じ操作列を、実装ごとの組み立て（`Env`）に流し、結果を平らなデータにする。core の Fake の歯
- * （`fake-runtime-after-delete-parity.test.ts`）と、InMemory・Postgres の歯
- * （`packages/postgres/src/__tests__/runtime-after-delete-parity.postgres.test.ts`）が、同じ `EXPECTED` に突き合わせる。
+ * 同じ操作列を、実装ごとの組み立て（`Env`）に流し、結果を平らなデータにする。core の Fake の歯（`fake-runtime-after-delete-parity.test.ts`）と、
+ * InMemory・Postgres の歯（このファイル）が、同じ `EXPECTED` に突き合わせる。
  */
 async function scenario(env: Env): Promise<Record<string, unknown>> {
   const { runtime, mem, lex, ev, mk, ctx } = env;

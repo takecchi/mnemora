@@ -5,15 +5,6 @@ import { PostgresMemoryStore } from "../memory-store.js";
 import { PostgresEventStore } from "../event-store.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
-/**
- * `purgeExpiredEvents` が積む `events_purged` の `at`（[ADR 0427](../../../../docs/decisions/0427-events-purged-at-millisecond.md)）。
- *
- * `EventStore.list` の `since`/`until` は両端を含む（`packages/core/src/interfaces/event-store.ts`）。
- * 読み戻した `at` をそのまま `until` に渡せば、その行自身が返らなければならない。
- * 直す前の `at` は SQL の `now()`（マイクロ秒）で、読み戻すとミリ秒に切り捨てられるため、
- * `until: marker.at` の比較（`at <= until`）にその行自身が当たらなかった。
- */
-
 const NOW = new Date("2026-09-27T00:00:00.000Z");
 const DAY_MS = 86_400_000;
 
@@ -59,7 +50,6 @@ describe("events_purged の at は、読み戻した値で since/until の両端
       expect(sinceHits.map((e) => e.id)).toContain(marker.id);
     }
 
-    // 列に入っている値そのものがミリ秒で揃っている（他の書き込みの口と同じ `toPgTimestamp`）。
     const raw = await db.execute(sql`
       SELECT count(*)::int AS n FROM memory_events
       WHERE tenant_id = ${ctx.tenantId} AND kind = 'events_purged'

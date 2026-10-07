@@ -6,16 +6,10 @@ import { PostgresMemoryStore } from "../memory-store.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
 /**
- * ADR 0511（ADR 0476 の負債1・2）: 記憶をまたぐ `labels` の行ロックの順と、`purgeMemory`/`scrubPurged` の
- * `UPDATE labels … FROM counted` の更新順が、並行する書き込みと 40P01（`deadlock detected`）を起こさないこと。
- *
- * 歯の作り方（確実に起こす）: `labels` に「1行を更新（または挿入）するたびに 0.2 秒眠る」トリガを、
- * このテストの間だけ付ける。行ロックは眠っている間も掴んだままなので、
- * 「最初の1行を掴んで眠る → もう一方も別の1行を掴んで眠る → 互いの行を欲しがる」が、タイミングの運に
- * 頼らず毎回起こる。トリガは AFTER ROW なので、`INSERT … ON CONFLICT DO UPDATE` が行ロックを取った後に眠る。
- * 実装の SQL は一切変えない（歯は外から呼ぶだけ）。
- *
- * 見たいのは「落ちないこと」。直す前は赤である（ADR 0511 の「測ったこと」に実測を書く）。
+ * 歯の作り方（確実に起こす）: `labels` に「1行を更新（または挿入）するたびに 0.2 秒眠る」トリガを、このテストの間だけ付ける。
+ * 行ロックは眠っている間も掴んだままなので、「最初の1行を掴んで眠る → もう一方も別の1行を掴んで眠る → 互いの行を欲しがる」が、タイミングの運に頼らず毎回起こる。
+ * トリガは AFTER ROW なので、`INSERT … ON CONFLICT DO UPDATE` が行ロックを取った後に眠る。実装の SQL は変えない。
+ * 見たいのは「落ちないこと」。
  */
 const SLEEP_FN = "adr0511_label_sleep";
 const SLEEP_TRIGGER = "adr0511_label_sleep_trg";
@@ -71,7 +65,6 @@ describe("記憶をまたぐ upsertProposedLabels の順（ADR 0511 負債1）",
         content: hash,
         tags: [tag],
       });
-    // 先に両方のラベルを作っておく（眠るトリガを入れる前。行ロックの取り合いだけを見る）。
     await store.createMemory(
       ctx,
       buildNewMemoryFixture({
@@ -152,8 +145,7 @@ describe("記憶をまたぐ upsertProposedLabels の順（ADR 0511 負債1）",
     await installSleepTrigger();
     const results = await Promise.allSettled([call(0, "a", "b"), call(1, "b", "a")]);
     expect(failureCodes(results)).toEqual([]);
-    // ⚠ この口は候補ごとの SAVEPOINT で失敗を `dropped` に積む。deadlock は raw の例外ではなく
-    // 「候補が黙って落ちる」形で現れうる（ADR 0511 の「測ったこと」）。
+    // ⚠ この口は候補ごとの SAVEPOINT で失敗を `dropped` に積む。deadlock は raw の例外ではなく「候補が黙って落ちる」形で現れうる。
     const dropped = results.flatMap((r) => (r.status === "fulfilled" ? r.value.dropped : []));
     expect(
       dropped.map((d) => (d.error as { cause?: { code?: string } }).cause?.code ?? "(no code)"),
@@ -204,10 +196,9 @@ describe("purgeMemory・scrubPurged の UPDATE labels FROM counted の更新順�
 
   /**
    * 隣り合う2語 `[n_k, n_{k+1}]` を持つ記憶の作成を5本。作成は名前順に `n_k` → `n_{k+1}` と掴む。
-   * purge/scrub の `UPDATE labels … FROM counted` の更新順は名前順ではない（ハッシュ集約の順で、行の id
-   * 次第。実測では `n0,n4,n5,n1,n2,n3` のような並びになる）。並びが昇順でない限り、値が隣り合う
-   * どこかの組 `k, k+1` で purge の順が逆になるので、その組の作成と互いの行を欲しがる
-   * （1/720 の確率で並びが昇順になれば起きないが、その回は赤にならない＝偽陰性側）。
+   * purge/scrub の `UPDATE labels … FROM counted` の更新順は名前順ではない（ハッシュ集約の順で行の id 次第）。
+   * 並びが昇順でない限り、隣り合うどこかの組 `k, k+1` で purge の順が逆になり、その組の作成と互いの行を欲しがる
+   * （並びがたまたま昇順になれば起きないが、その回は赤にならない＝偽陰性側）。
    */
   function creates(store: PostgresMemoryStore, ctx: Ctx) {
     // purge/scrub が先に最初の行を掴んで眠っている間に作成が入るよう、100ms 遅らせて始める
@@ -227,9 +218,8 @@ describe("purgeMemory・scrubPurged の UPDATE labels FROM counted の更新順�
   }
 
   async function seedForgottenWithAllLabels(store: PostgresMemoryStore, ctx: Ctx) {
-    // テナントに語彙が多い状況にする。`labels` が小さいと、プランナは `idx_labels_by_status` の索引順（名前順）で
-    // 行を更新し、作成の名前順と偶然そろって deadlock しない（実測: 6行だけのとき n0..n5 の昇順）。
-    // 3000 行 + ANALYZE だと Hash Join になり、更新順はハッシュ順（実測: z01000,z00010,z02500,… で昇順でない）。
+    // テナントに語彙が多い状況にする。`labels` が小さいと、プランナは索引順（名前順）で行を更新し、作成の名前順と偶然そろって deadlock しない。
+    // 3000 行 + ANALYZE だと Hash Join になり、更新順はハッシュ順で昇順でない。
     const { pool } = await getTestClient();
     await pool.query(
       `INSERT INTO labels (id, tenant_id, name, status, proposed_count)
@@ -273,8 +263,7 @@ describe("purgeMemory・scrubPurged の UPDATE labels FROM counted の更新順�
     const store = new PostgresMemoryStore(db);
     const ctx: Ctx = { tenantId: "adr0511-scrub" };
     const old = await seedForgottenWithAllLabels(store, ctx);
-    // `scrubPurged` は purged 済みで memory_labels が残っている行だけを対象にする。
-    // purged_at だけを立て、memory_labels と tags は残す（purge の途中状態の再現）。
+    // `scrubPurged` は purged 済みで memory_labels が残っている行だけを対象にする。purged_at だけを立て、memory_labels と tags は残す。
     await db.execute(
       sql`UPDATE memories SET purged_at = now() WHERE tenant_id = ${ctx.tenantId} AND id = ${old.id}`,
     );
@@ -301,9 +290,7 @@ describe("purgeMemory・scrubPurged の UPDATE labels FROM counted の更新順�
       }),
     );
     await installSleepTrigger();
-    // purge は 6 行 x 0.2 秒眠り、その間 6 行の行ロックを持つ。無関係な既存ラベル（purge の対象外）の
-    // 行ロックは、待たずに取れる。時間ではなくロックで見る: 作成の upsert が取るのと同じ行ロックを
-    // `SET LOCAL lock_timeout`（短い値）つきで取りにいき、ロック待ちで 55P03 にならず成功すること。
+    // 時間ではなくロックで見る: 作成の upsert が取るのと同じ行ロックを `SET LOCAL lock_timeout`（短い値）つきで取りにいき、55P03 にならず成功すること。
     // 待たされるなら（purge が全ラベルを掴んでいるなら）、負荷に関わらず 55P03 になる。
     const purge = store.purgeMemory(
       ctx,

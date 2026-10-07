@@ -21,7 +21,6 @@ describe("defaultScoringStrategy", () => {
   it("similarity が無い場合は score.similarity が undefined で total に中立の 1 として掛かる", () => {
     const score = defaultScoringStrategy(baseInput());
     expect(score.similarity).toBeUndefined();
-    // decay=1, tagMatch=1(queryTags空), freshness=1, strength=1 のとき total=1
     expect(score.total).toBeCloseTo(1, 10);
   });
 
@@ -105,19 +104,6 @@ describe("defaultScoringStrategy", () => {
   });
 });
 
-/**
- * `ScoreBreakdown.affinityMeasured`（Issue #548 方向1、ADR 0282）の歯。
- *
- * 連想枠（段3.5）は `similarity`/`lexicalMatch` のどちらも渡さずに
- * `defaultScoringStrategy` を呼ぶため、`affinity` が中立の `1` に退化する
- * （`strategies/scoring.ts` 冒頭 doc）。この退化が起きたかどうかを、
- * 呼び出し側が `similarity`/`lexicalMatch` の undefined 判定を自分で
- * 再現しなくても分かるようにするための欄——**両方が undefined のときだけ `false`**、
- * それ以外は `true` になる。`defaultScoringStrategy` は常にこの欄を埋める
- * （`similarity`/`lexicalMatch` と違い、値がある場合だけ足す形にはしない——
- * 「欄が無い」を「独自の ScoringStrategy が埋めていない」の専用の合図として
- * 残すため。ADR 0282「引き受けた負債」参照）。
- */
 describe("defaultScoringStrategy: affinityMeasured（Issue #548 方向1、ADR 0282）", () => {
   it("similarity も lexicalMatch も無いとき affinityMeasured は false（affinity が中立の1に退化した合図）", () => {
     const score = defaultScoringStrategy(baseInput());
@@ -152,12 +138,7 @@ describe("defaultScoringStrategy: affinityMeasured（Issue #548 方向1、ADR 02
 });
 
 /**
- * docs/memory-model.md §3「三つの時計」の中心的な要求:
- * **鮮度は `occurred_at ?? recorded_at` を使い、減衰は `last_reinforced_at` を使う。**
- * この2つを混ぜると「昔起きたが最近よく使う記憶」と「最近起きたが一度も使われていない記憶」を
- * 区別できなくなる——文書が名指しで禁じている取り違えである。
- *
- * 下の2本は、その混同が起きたときに実際に赤くなるための歯である。
+ * 鮮度は `occurred_at ?? recorded_at` を使い、減衰は `last_reinforced_at` を使う（docs/memory-model.md §3）。
  * 3つの時刻をすべて異なる値にしないと、混同しても値が一致してしまい検出できない。
  */
 describe("defaultScoringStrategy: 鮮度と減衰は別の時計を使う（docs/memory-model.md §3）", () => {
@@ -179,29 +160,22 @@ describe("defaultScoringStrategy: 鮮度と減衰は別の時計を使う（docs
 
   it("freshness は occurredAt を起点にする（lastReinforcedAt にも recordedAt にも寄らない）", () => {
     const score = defaultScoringStrategy(input);
-    // occurredAt 起点なら elapsed=96h = 4 half-life -> 0.0625
     expect(score.freshness).toBeCloseTo(Math.pow(0.5, 4), 10);
-    // lastReinforcedAt 起点(elapsed=24h -> 0.5) でも recordedAt 起点(elapsed=72h -> 0.125) でもない
     expect(score.freshness).not.toBeCloseTo(0.5, 5);
     expect(score.freshness).not.toBeCloseTo(0.125, 5);
   });
 
   it("decay は lastReinforcedAt を起点にする（occurredAt にも寄らない）", () => {
     const score = defaultScoringStrategy(input);
-    // lastReinforcedAt 起点なら elapsed=24h = 1 half-life -> 0.5
     expect(score.decay).toBeCloseTo(0.5, 10);
-    // occurredAt 起点(0.0625) でも recordedAt 起点(0.125) でもない
     expect(score.decay).not.toBeCloseTo(Math.pow(0.5, 4), 5);
     expect(score.decay).not.toBeCloseTo(0.125, 5);
   });
 });
 
 describe("defaultScoringStrategy: freshness は 1 で頭打ちにする（ADR 0036）", () => {
-  // `occurredAt` は docs/memory-model.md §3 の定義上ふつうに未来になる（「来月、京都へ出張する」）。
-  // 減衰式は経過時間が負のとき 1 を超え、上限を持たない。
-  //
-  // ⚠ 未来側だけを見ると「常に 1 を返す」実装も通ってしまう。過去側が1ミリも動いていない
-  // ことを、上限を入れる前に実測した値そのもので押さえる。
+  // `occurredAt` は定義上ふつうに未来になる（「来月、京都へ出張する」）。減衰式は経過時間が負のとき 1 を超え、上限を持たない。
+  // 未来側だけを見ると「常に 1 を返す」実装も通ってしまうので、過去側が動いていないことも押さえる。
   const NOW = new Date("2026-09-06T00:00:00.000Z");
   const DAY = 24 * HOUR;
 
@@ -219,7 +193,6 @@ describe("defaultScoringStrategy: freshness は 1 で頭打ちにする（ADR 00
   }
 
   it("未来の occurredAt では freshness がちょうど 1 になる（+30日 / +365日 / +10年）", () => {
-    // 上限が無ければ順に 2 / 4597.6 / 4.22e36 だった（本 PR 前に実測した値）。
     expect(freshnessFor(new Date(NOW.getTime() + 30 * DAY))).toBe(1);
     expect(freshnessFor(new Date(NOW.getTime() + 365 * DAY))).toBe(1);
     expect(freshnessFor(new Date(NOW.getTime() + 3650 * DAY))).toBe(1);
@@ -233,13 +206,11 @@ describe("defaultScoringStrategy: freshness は 1 で頭打ちにする（ADR 00
 
   it("occurredAt === now ちょうどでも 1（境界で1つずれていないこと）", () => {
     expect(freshnessFor(NOW)).toBe(1);
-    // 1ミリ秒だけ過去は 1 未満、1ミリ秒だけ未来は 1。
     expect(freshnessFor(new Date(NOW.getTime() - 1))).toBeLessThan(1);
     expect(freshnessFor(new Date(NOW.getTime() + 1))).toBe(1);
   });
 
   it("occurredAt が無い記憶（いまのリポジトリの全件）では、上限に当たらず何も変わらない", () => {
-    // recordedAt 起点になり、now === recordedAt なので 1。上限の有無に依らない。
     expect(freshnessFor(null)).toBe(1);
     const past = defaultScoringStrategy({
       now: NOW,
@@ -274,13 +245,9 @@ describe("defaultScoringStrategy: freshness は 1 で頭打ちにする（ADR 00
 });
 
 /**
- * `computeDecay`（`strategies/scoring.ts`、非 export）の歯——`defaultScoringStrategy` 越しに
- * `score.decay` だけを見て検査する（[ADR 0165](../../../docs/decisions/0165-decay-activity-clock.md)
- * 決めたこと12）。
- *
- * 壁時計側は「1 half-life 経過 → 0.5」（halfLifeHours=24, elapsed=24h）に固定し、
- * 活動時計側はそれとは違う値（0.25 or 0.933...）になるよう別の half-life を選ぶ——
- * 2つの時計の値が偶然一致すると「どちらが使われたか」を判別できない歯になる。
+ * `computeDecay`（`strategies/scoring.ts`、非 export）を、`defaultScoringStrategy` 越しに `score.decay` だけを見て検査する。
+ * 壁時計側は「1 half-life 経過 → 0.5」に固定し、活動時計側は別の値になる half-life を選ぶ。
+ * 2つの時計の値が偶然一致すると「どちらが使われたか」を判別できなくなるため。
  */
 describe("defaultScoringStrategy: computeDecay の時計選択（ADR 0165 決めたこと12）", () => {
   const recordedAt = new Date("2026-01-01T00:00:00.000Z");
@@ -336,7 +303,6 @@ describe("defaultScoringStrategy: computeDecay の時計選択（ADR 0165 決め
     const score = defaultScoringStrategy({
       ...baseWallInput(),
       decayClock: "activity",
-      // nowSeq を渡さない = 'wall' のテナント、または activity_seq を読んでいない状態。
       decayBaseSeq: 0,
       halfLifeRecalls: 10,
     });
@@ -388,15 +354,10 @@ describe("defaultScoringStrategy: computeDecay の時計選択（ADR 0165 決め
 });
 
 describe("defaultScoringStrategy: freshness の下限側は clamp が無く、十分古いと厳密に0になる（docs/recall.md §7.2、Issue #939）", () => {
-  // `freshness = Math.min(MAX_FRESHNESS, 0.5 ** (elapsed / halfLifeHours))`
-  // （`packages/core/src/strategies/scoring.ts` の `computeFreshness`）。下限には clamp が無い
-  // ——`elapsed / halfLifeHours` が十分大きいと `0.5 ** x` が IEEE 754 倍精度の下限を割り込み、
-  // 丸めで厳密に `0` になる。境界の具体的な整数（docs/recall.md §7.2 の実測では「約1075」）は
-  // V8 の丸めに依存するため、このファイルには焼き込まず、`0.5 ** N === 0` になる最小の整数 N を
-  // 実行時に探す。
+  // 下限には clamp が無い: `elapsed / halfLifeHours` が十分大きいと `0.5 ** x` が IEEE 754 倍精度の下限を割り込み、丸めで厳密に `0` になる。
+  // 境界の具体的な整数は V8 の丸めに依存するため焼き込まず、`0.5 ** N === 0` になる最小の整数 N を実行時に探す。
   const NOW = new Date("2026-09-06T00:00:00.000Z");
 
-  /** `0.5 ** N === 0` になる最小の整数 N を実行時に探す（1075 をこのテストに焼き込まない）。 */
   function minNWhereHalvesToZero(): number {
     let n = 1;
     while (Math.pow(0.5, n) !== 0) {

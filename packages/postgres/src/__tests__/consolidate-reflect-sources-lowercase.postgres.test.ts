@@ -20,14 +20,6 @@ import { PostgresTenantSettingsStore } from "../tenant-settings-store.js";
 import { PostgresRelationStore } from "../relation-store.js";
 import { getTestClient, resetTestDatabase, TEST_EMBEDDING_SPACE } from "./test-db.js";
 
-/**
- * ADR 0527: `consolidate`・`reflect` が積む `created` イベントの `meta.sources` は、渡された `memoryIds`・`seedMemoryId`（大文字でもよい）の
- * 綴りではなく、store が返した行の id（小文字の正規形）で書く。3 実装（Postgres・testkit の InMemory・core の Fake）で、
- * 大文字で渡したときの `created` の `meta.sources` が、小文字で渡したときと同じ（小文字）になることを突き合わせる。
- * 作られた記憶の `provenance.sources`・`superseded` イベントの `memoryId` は元から正規形（それも見る）。
- * conformance suite には何も足していない（ADR 0434 決定5）。
- */
-
 const ctx = { tenantId: "tenant-1" };
 const emb: any = {
   space: TEST_EMBEDDING_SPACE,

@@ -30,12 +30,10 @@ import {
 } from "./test-db.js";
 
 /**
- * `ResolveOrphanedContestedEligibility` の `"opposite_not_orphaned"` は、対向が `archived` のときにもなる
- * （TSDoc の 2026-09-28 訂正）。実装は対向が `"forgotten"` かどうかだけを見ている。今の振る舞いを
- * Postgres と testkit の fixture の2実装で縛る。振る舞いは変えていない。
+ * `ResolveOrphanedContestedEligibility` の `"opposite_not_orphaned"` は、対向が `archived` のときにもなる。
+ * 実装は対向が `"forgotten"` かどうかだけを見ている。今の振る舞いを Postgres と testkit の fixture の2実装で縛る。
  *
- * `Runtime` の口には `contested` な記憶を `archived` にするものが無いので、対向は store の `updateStatus` で
- * 直接 `archived` にする。
+ * `Runtime` の口には `contested` な記憶を `archived` にするものが無いので、対向は store の `updateStatus` で直接 `archived` にする。
  */
 
 interface Kit {

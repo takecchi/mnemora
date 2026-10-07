@@ -7,12 +7,9 @@ import {
 } from "../trigram-lexical-store.js";
 
 /**
- * [Issue #892](https://github.com/takecchi/mnemora/issues/892) の歯。
- *
  * ⚠ **DB を要求しない。** `probeTrigramLexicalSupport`/`PostgresTrigramLexicalStore.create`
  * が呼ぶ `db.execute` を、呼び出し順で応答を切り替える偽の `Db`（型だけ満たすスタブ、
- * 本物の接続を一切持たない）で差し替える——
- * `memory-store-contested-write-guard.test.ts` と同じ理由・同じ形。
+ * 本物の接続を一切持たない）で差し替える。
  *
  * 検査していること: `CREATE EXTENSION IF NOT EXISTS pg_trgm` の発行（`db.execute` の
  * 4回目の呼び出し）が失敗したとき、
@@ -27,7 +24,7 @@ import {
  */
 
 type FakeDbOptions = {
-  /** 4回目の呼び出し（CREATE EXTENSION。1回目は ADR 0430 の advisory lock）で投げるエラー。省略すると全呼び出しが成功する。 */
+  /** 4回目の呼び出し（CREATE EXTENSION。1回目は advisory lock）で投げるエラー。省略すると全呼び出しが成功する。 */
   extensionCreateError?: Error;
 };
 
@@ -36,7 +33,7 @@ function createFakeDb(opts: FakeDbOptions = {}): Db {
   const execute = async (): Promise<{ rows: unknown[] }> => {
     call += 1;
     if (call === 1) {
-      // pg_advisory_xact_lock（ADR 0430。`create()`/probe は EXTENSION_LOCK_KEY の lock を先頭で取る）
+      // pg_advisory_xact_lock（`create()`/probe は EXTENSION_LOCK_KEY の lock を先頭で取る）
       return { rows: [] };
     }
     if (call === 2) {

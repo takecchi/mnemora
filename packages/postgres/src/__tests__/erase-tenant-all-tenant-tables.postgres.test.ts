@@ -14,17 +14,9 @@ import {
 } from "./erase-tenant-test-helpers.js";
 
 /**
- * Issue #1207 / [ADR 0383](../../../../docs/decisions/0383-erase-tenant.md):
- *
- * `information_schema.columns` で `current_schema()` の中の `tenant_id` 列を持つ表を
- * **全部数え上げ**（表名を焼き込まない）、全表にそのテナントの行を1行以上入れたことを
- * 確かめた上で、`eraseTenant` の後に全表0行であることを縛る。
- *
- * ⚠ **「行を入れられなかった表」を名指しで失敗させる**——後から表が増えても
- * （例: `memory_relations`）、この歯がその表への行の入れ方を知らなければ、
- * 「その表だけ0行のままだった」ではなく「その表に行を入れる手段が無かった」ことが
- * 分かる形で失敗する（`seedAllTablesForTenant` が知っている表の集合と、実際に
- * 列挙された表の集合を突き合わせる）。
+ * 表名を焼き込まず、`information_schema.columns` で `tenant_id` 列を持つ表を全部数え上げる。
+ * 「行を入れられなかった表」は名指しで失敗させる。後から表が増えても、その表への行の入れ方を知らなければ、
+ * 「その表だけ0行のままだった」ではなく「その表に行を入れる手段が無かった」と分かる形で失敗する。
  */
 
 afterAll(async () => {
@@ -72,9 +64,7 @@ describe("eraseTenant は tenant_id を持つ全表からこのテナントの�
     const tenantSettingsStore = new PostgresTenantSettingsStore(db);
     await seedAllTablesForTenant(runtime, tenantSettingsStore, T, S);
     await seedAllTablesForTenant(runtime, tenantSettingsStore, OTHER, S);
-    // memory_relations（Issue #207/#933 PR2、migration 0026）。seed の補助関数は runtime の
-    // 経路だけで行を作るが、関係の行は claim key 衝突検出を on にしないと張られないため、
-    // ここで `RelationStore.link` を直接呼んで両テナントに1組ずつ張る。
+    // 関係の行は claim key 衝突検出を on にしないと張られないので、`RelationStore.link` を直接呼んで両テナントに1組ずつ張る。
     const relationStore = new PostgresRelationStore(db);
     for (const tenantId of [T, OTHER]) {
       const { rows: ids } = await pool.query<{ id: string }>(
@@ -89,10 +79,8 @@ describe("eraseTenant は tenant_id を持つ全表からこのテナントの�
     const tables = await listTenantScopedTables(pool);
     expect(tables.length).toBeGreaterThan(0);
 
-    // 埋め込み空間の表は、並行して走る他のテストファイルも同じスキーマに作る
-    // （CI で `memory_embeddings_test_*` 等を3本拾って落ちた）。`listEmbeddingSpaceTables`
-    // （`deleteAcrossSpaces`/`eraseTenant?` と同じ列挙）が返す表には、次元を読んで
-    // 両テナントとも行を入れる——それ以外の知らない表は、下で名指しで落ちるまま。
+    // 埋め込み空間の表は、並行して走る他のテストファイルも同じスキーマに作る。`listEmbeddingSpaceTables` が返す表には、
+    // 次元を読んで両テナントとも行を入れる。それ以外の知らない表は、下で名指しで落ちるまま。
     const spaceTables = new Set((await listEmbeddingSpaceTables(db)).map((e) => e.table));
     for (const table of tables.filter((t) => spaceTables.has(t))) {
       for (const tenantId of [T, OTHER]) {
@@ -111,7 +99,6 @@ describe("eraseTenant は tenant_id を持つ全表からこのテナントの�
       }
     }
 
-    // 全表に1行以上入っていることを確認する——1行も入れられなかった表を名指しで報告する。
     const notSeeded: string[] = [];
     for (const table of tables) {
       const n = await countForTenant(pool, table, T);
@@ -142,7 +129,6 @@ describe("eraseTenant は tenant_id を持つ全表からこのテナントの�
     }
     expect(outcome.kind).toBe("executed");
 
-    // 消し切った後——1行でも残っている表を名指しで報告する。
     const stillHasRows: Array<{ table: string; n: number }> = [];
     for (const table of tables) {
       const n = await countForTenant(pool, table, T);
@@ -152,7 +138,6 @@ describe("eraseTenant は tenant_id を持つ全表からこのテナントの�
     }
     expect(stillHasRows).toEqual([]);
 
-    // 別テナントは無傷。
     const otherAfter: Record<string, number> = {};
     for (const table of tables) {
       otherAfter[table] = await countForTenant(pool, table, OTHER);

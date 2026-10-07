@@ -18,17 +18,12 @@ import {
 } from "./test-db.js";
 
 /**
- * roadmap.md 段階4「想起」・段階5「説明」の完了条件を、擬似物ではなく本物の
- * Postgres + pgvector に対して検査する（PR 本文「守る線」: 擬似物のほうが本物より
- * 偶然厳しいことがある、必ず本物に通す）。
+ * 段階4「想起」・段階5「説明」の完了条件を、擬似物ではなく本物の Postgres + pgvector に対して検査する（擬似物のほうが本物より偶然厳しいことがあるので、必ず本物に通す）。
  *
  * ここで検査すること:
- * - 段1の ANN クエリが実際に HNSW 索引を使うこと（`runtime.recall()` の実行経路そのものを
- *   EXPLAIN する。`vector-search-hnsw.test.ts` は `PostgresVectorStore.search` 単体を
- *   検査しているが、ここでは recall() 全体の配線が同じクエリ形を保っていることを確認する）。
- * - 被覆不変条件（groups の総和 == totalInScope）が、単一クエリ由来であること
- *   （構造的な検査: aggregateScope が1回の SQL 往復で完結すること）と、
- *   並行して書き込みが起きている最中でも成立すること。
+ * - 段1の ANN クエリが実際に HNSW 索引を使うこと（`runtime.recall()` の実行経路そのものを EXPLAIN する。
+ *   `vector-search-hnsw.test.ts` は `PostgresVectorStore.search` 単体を検査しているが、ここでは recall() 全体の配線が同じクエリ形を保っていることを確認する）。
+ * - 被覆不変条件（groups の総和 == totalInScope）が、単一クエリ由来であること（構造的な検査: aggregateScope が1回の SQL 往復で完結すること）と、並行して書き込みが起きている最中でも成立すること。
  * - omitted の各 kind が実データに対して実際に発生すること。
  */
 
@@ -62,7 +57,6 @@ async function buildTestRuntime(opts: { embeddingShouldFail?: boolean } = {}) {
   const vectorStore = new PostgresVectorStore(db);
   const runtime = createRuntime({
     memoryStore,
-    // observe()/tick() 関連の依存は recall のテストでは使わないため、ダミーで埋める。
     outboxStore: {
       claimBatch: async () => [],
       complete: async () => {},
@@ -89,11 +83,7 @@ async function buildTestRuntime(opts: { embeddingShouldFail?: boolean } = {}) {
     embeddingProvider: makeEmbeddingProvider({ shouldFail: opts.embeddingShouldFail }),
     hashContent: (content: string) => `sha256(${content})`,
     // buildNewMemoryFixture の既定 recordedAt（2026-01-01）に固定する。
-    // 実時計（systemClock）のままだと、既定の halfLifeHours（720h=30日、
-    // buildNewMemoryFixture の既定値）に対して経過時間が何倍にもなり、
-    // decay で score.total がほぼ0まで落ちて below_threshold に化けてしまう
-    // （実際にこの食い違いで検査が赤くなった。テスト設計上の固定であり、
-    // recall() 本体の挙動には影響しない）。
+    // 実時計のままだと、既定の halfLifeHours（720h=30日）に対して経過時間が何倍にもなり、decay で score.total がほぼ0まで落ちて below_threshold に化けてしまう。
     clock: { now: () => new Date("2026-01-01T00:00:00.000Z") },
   });
   return { runtime, memoryStore, vectorStore };
@@ -140,17 +130,10 @@ describe("runtime.recall() — 本物の Postgres + pgvector（roadmap.md 段階
       () => runtime.recall(ctx, { vector: [0.5, 0.5, 0.5], limit: 10 }),
     );
 
-    // 本番と同じ transaction の文脈（ADR 0284 の SET LOCAL）で EXPLAIN する
-    // （test-db.ts の explainCaptured の doc コメント参照）。
+    // 本番と同じ transaction の文脈で EXPLAIN する（test-db.ts の explainCaptured の doc コメント参照）。
     const plan = await explainCaptured(pool, captured);
-    // ⚠ この2行はプランナの選択を assert している——版・統計・データ規模に依存する。
-    //  測った版: **分からない**（この歯を足した PR #5 の本文は「PostgreSQL 18.6 + pgvector 0.8.6
-    //    *相当*の環境」と書くのみで、この assert を通した CI run 番号も確定した版も記載が無い）。
-    //    言えるのは「CI（`pgvector/pgvector:pg17`）では通っている」までである（配線から読める事実）。
-    //  赤くなったら疑うもの: (1) 自分の変更 (2) 実行中の Postgres のメジャー版
-    //    (3) ANALYZE / 統計情報。⟹ まず `origin/main` で対照を取ること。
-    //  見直す合図: **当たる ADR は無い**。この歯は roadmap.md 段階4/5 の線を守っているだけで、
-    //    崩れたときに見直すべき決定が特定されていない。⟹ 崩れたら、まずそれを決める必要が在る。
+    // ⚠ この2行はプランナの選択を assert している。版・統計・データ規模に依存する。
+    // 赤くなったら疑うもの: (1) 自分の変更 (2) 実行中の Postgres のメジャー版 (3) ANALYZE / 統計情報。まず `origin/main` で対照を取ること。
     expect(plan).toMatch(/Index Scan.*using idx_memory_embeddings_hnsw/);
     expect(plan).not.toMatch(/Seq Scan/);
   }, 60_000);
@@ -198,18 +181,15 @@ describe("runtime.recall() — 本物の Postgres + pgvector（roadmap.md 段階
     const ctx: Ctx = { tenantId: TENANT };
 
     // in-scope(active/contested かつ period 内)を2件(どちらも ready)にしておく。
-    // not_indexed の FILTER 条件が壊れて逆転しても(例: <> と = を取り違えても)
-    // in-scope の ready/pending が 1:1 のままだと件数が偶然一致してしまい、
-    // 検査として機能しない(実際にこの対称性で1度赤くならなかった。歯の規律の実例)。
+    // not_indexed の FILTER 条件が壊れて逆転しても(例: <> と = を取り違えても)、in-scope の ready/pending が 1:1 のままだと件数が偶然一致してしまい、検査として機能しない。
     await createEmbeddedMemory(memoryStore, vectorStore, ctx, [1, 0, 0], { status: "active" });
     await createEmbeddedMemory(memoryStore, vectorStore, ctx, [0.9, 0.1, 0], { status: "active" });
     await memoryStore.createMemory(
       ctx,
       buildNewMemoryFixture({ tenantId: TENANT, status: "archived" }),
     );
-    // superseded と forgotten を非対称の件数にする（ADR 0027、2件と1件）。
-    // 1件ずつだと、取り違え（superseded/forgotten を入れ替えて数える）も
-    // 束ねたまま（両方を1つの filtered omission に合算する）も見抜けない。
+    // superseded と forgotten を非対称の件数にする（2件と1件）。
+    // 1件ずつだと、取り違え（superseded/forgotten を入れ替えて数える）も束ねたまま（両方を1つの filtered omission に合算する）も見抜けない。
     await memoryStore.createMemory(
       ctx,
       buildNewMemoryFixture({ tenantId: TENANT, status: "superseded" }),
@@ -267,7 +247,6 @@ describe("runtime.recall() — 本物の Postgres + pgvector（roadmap.md 段階
       count: 1,
       countKind: "exact",
     });
-    // not_indexed(pending) の1件 + occurredAt が古い1件のうち、pending の1件だけが not_indexed。
     expect(result.omitted).toContainEqual({
       kind: "not_indexed",
       reason: "pending",
@@ -277,15 +256,11 @@ describe("runtime.recall() — 本物の Postgres + pgvector（roadmap.md 段階
   });
 
   it("⚠ ゼロベクトルの候補は scoreThreshold を 0 にしても返らない（ADR 0040）", async () => {
-    // **契約: ゼロベクトルが絡む候補は recall() の結果に出ない。**
+    // 契約: ゼロベクトルが絡む候補は recall() の結果に出ない。
     //
-    // 既定の scoreThreshold（0.1）では「similarity 0（in-memory の旧実装）」でも
-    // 「NaN（Postgres）」でも落ちるので、**差が観測できるのは閾値を 0 以下にしたときだけ**である
-    //（ADR 0040 でそう特定した）。⟹ ここは 0 で測る。
+    // 既定の scoreThreshold（0.1）では「similarity 0（in-memory）」でも「NaN（Postgres）」でも落ちるので、差が観測できるのは閾値を 0 以下にしたときだけである。ここは 0 で測る。
     //
-    // フィクスチャは非対称: ゼロベクトル1件に対して正常な候補2件を、
-    // **互いに違う距離**で置く。正常な候補が返ることを同時に見ないと、
-    // 「閾値0では何も返らない」実装でも緑になる。
+    // フィクスチャは非対称: ゼロベクトル1件に対して正常な候補2件を、互いに違う距離で置く。正常な候補が返ることを同時に見ないと、「閾値0では何も返らない」実装でも緑になる。
     const ctx: Ctx = { tenantId: `tenant-zero-vector-${randomUUID()}` };
     const { runtime, memoryStore, vectorStore } = await buildTestRuntime();
     const zero = await createEmbeddedMemory(memoryStore, vectorStore, ctx, [0, 0, 0], {
@@ -308,20 +283,15 @@ describe("runtime.recall() — 本物の Postgres + pgvector（roadmap.md 段階
     });
     const ids = result.memories.map((m) => m.memoryId);
 
-    // 前提: 正常な候補は2件とも返っている（0件なら「ゼロが返らない」は無意味な緑）。
     expect(ids).toContain(near.id);
     expect(ids).toContain(far.id);
-    // 本題: ゼロベクトルの候補は返らない。
     expect(ids).not.toContain(zero.id);
   });
 
   it("omitted: score_not_comparable（ゼロベクトルの候補、ADR 0044）", async () => {
-    // **本物の pgvector で NaN を作る唯一の実用的な経路がゼロベクトルである**
-    // （ADR 0040 / 0044。`<=>` はゼロベクトルに対してエラーではなく NaN を返す）。
+    // 本物の pgvector で NaN を作る唯一の実用的な経路がゼロベクトルである（`<=>` はゼロベクトルに対してエラーではなく NaN を返す）。
     //
-    // ⚠ `scoreThreshold: 0` で測る。既定の 0.1 では、直す前も
-    // 「返らない」ところまでは同じだったので差が観測できない
-    // ——**直す前は `omitted` が空配列だった**（「取りこぼしは無い」と誤答していた）。
+    // ⚠ `scoreThreshold: 0` で測る。既定の 0.1 では「返らない」ところまでは同じなので、`omitted` に出るかどうかの差が観測できない。
     const ctx: Ctx = { tenantId: `tenant-not-comparable-${randomUUID()}` };
     const { runtime, memoryStore, vectorStore } = await buildTestRuntime();
     // ⚠ 件数を 1 対 2 と違える。
@@ -341,19 +311,16 @@ describe("runtime.recall() — 本物の Postgres + pgvector（roadmap.md 段階
     const result = await runtime.recall(ctx, { vector: [1, 0, 0], limit: 10, scoreThreshold: 0 });
     const ids = result.memories.map((m) => m.memoryId);
 
-    // 前提: 正常な2件は返っている（0件なら「ゼロが落ちた」は無意味な緑）。
     expect(ids).toContain(near.id);
     expect(ids).toContain(far.id);
     expect(ids).not.toContain(zero.id);
 
-    // 本題: 落ちたことが omitted に出る。**直す前はここが空配列だった。**
     expect(result.omitted).toContainEqual({
       kind: "score_not_comparable",
       count: 1,
       countKind: "exact",
     });
 
-    // 網羅の不変条件を、本物の Postgres 経路でも見る。
     const rescore = result.explain.stages.find((st) => st.stage === "rescore");
     const detail = rescore?.detail as { scored: number; passedThreshold: number } | undefined;
     const below = result.omitted.find((o) => o.kind === "below_threshold")?.count ?? 0;
@@ -386,7 +353,6 @@ describe("runtime.recall() — 本物の Postgres + pgvector（roadmap.md 段階
     const { runtime, memoryStore, vectorStore } = await buildTestRuntime();
     const ctx: Ctx = { tenantId: TENANT };
 
-    // 直交ベクトル -> similarity=0 -> total=0 (< 既定閾値0.1) -> below_threshold
     await createEmbeddedMemory(memoryStore, vectorStore, ctx, [0, 1, 0]);
 
     const result = await runtime.recall(ctx, { vector: [1, 0, 0] });
@@ -400,21 +366,16 @@ describe("runtime.recall() — 本物の Postgres + pgvector（roadmap.md 段階
     const ctx: Ctx = { tenantId: TENANT };
 
     // クエリに近い候補を4件用意する。limit=1, overFetchFactor=3 -> k'=3。
-    // ANN は4件中3件しか返さない(ann_truncated) が、返った3件はいずれも閾値を超えるため
-    // limit=1 を超えた2件が over_limit になる。
+    // ANN は4件中3件しか返さない(ann_truncated) が、返った3件はいずれも閾値を超えるため limit=1 を超えた2件が over_limit になる。
     await createEmbeddedMemory(memoryStore, vectorStore, ctx, [1, 0, 0]);
     await createEmbeddedMemory(memoryStore, vectorStore, ctx, [0.99, 0.01, 0]);
     await createEmbeddedMemory(memoryStore, vectorStore, ctx, [0.98, 0.02, 0]);
     await createEmbeddedMemory(memoryStore, vectorStore, ctx, [0.97, 0.03, 0]);
 
-    // **ADR 0069 以降、`ann_truncated` は「窓が埋まった」だけでは鳴らない**——
-    // 「窓の外が top-k へ入りえたか」まで判定してから鳴る。この歯の主題は
-    // **「2つの omission が同時に出うる」ことであって `ann_truncated` の鳴り方ではない**ので、
-    // 鳴る側になる形（どの候補も持たないタグをクエリへ足し、上界を 1.1 倍にする）で作る。
-    // association: null — 連想枠は既定 on（ADR 0337）。この歯は over_limit と
-    // ann_truncated が同時に発生しうることだけを検査する。limit の外に押し出された
-    // 3件はアンカーとの類似度が高いままなので連想の対象になりうる——この歯の対象外の
-    // 効果を持ち込まないよう明示的に止める。
+    // `ann_truncated` は「窓が埋まった」だけでは鳴らない。「窓の外が top-k へ入りえたか」まで判定してから鳴る。
+    // この歯の主題は「2つの omission が同時に出うる」ことであって `ann_truncated` の鳴り方ではないので、鳴る側になる形（どの候補も持たないタグをクエリへ足し、上界を 1.1 倍にする）で作る。
+    // association: null — 連想枠は既定 on。この歯は over_limit と ann_truncated が同時に発生しうることだけを検査する。
+    // limit の外に押し出された3件はアンカーとの類似度が高いままなので連想の対象になりうる。この歯の対象外の効果を持ち込まないよう明示的に止める。
     const result = await runtime.recall(ctx, {
       vector: [1, 0, 0],
       limit: 1,
@@ -442,11 +403,8 @@ describe("runtime.recall() — 本物の Postgres + pgvector（roadmap.md 段階
     const { runtime, memoryStore, vectorStore } = await buildTestRuntime();
     const ctx: Ctx = { tenantId: TENANT };
 
-    // ADR 0140（Issue #243続き）: `createMemory` は `status: 'contested'` を
-    // `contestedWithId` 無しでは作れなくなった（`ContestedWithoutCompanionError`）。
-    // `status: 'contested'` を正しく（両側 CAS・相互参照・同一トランザクション）書く
-    // 唯一の口は `markContestedPair`（ADR 0134）——まず両方を active で作り、
-    // それから相互に contested へ倒す。
+    // `createMemory` は `status: 'contested'` を `contestedWithId` 無しでは作れない（`ContestedWithoutCompanionError`）。
+    // `status: 'contested'` を正しく（両側 CAS・相互参照・同一トランザクション）書く唯一の口は `markContestedPair` なので、まず両方を active で作り、それから相互に contested へ倒す。
     const b = await memoryStore.createMemory(
       ctx,
       buildNewMemoryFixture({ tenantId: TENANT, digest: "B".repeat(30) }),
@@ -489,12 +447,8 @@ describe("runtime.recall() — 本物の Postgres + pgvector（roadmap.md 段階
     expect(companion?.companionOf).toBe(a.id);
     const indexA = withoutBudgetIds.indexOf(a.id);
     const indexB = withoutBudgetIds.indexOf(b.id);
-    // ⚠ Issue #293: `indexOf` は見つからないとき `-1` を返すため、片方だけが結果から
-    // 完全に消えた世界でも `Math.abs(indexA - indexB) === 1` が偶然成立しうる
-    // （例: a だけ残り b が消えると `Math.abs(0 - (-1)) === 1`）。上の `toContain` は
-    // 今日は先に落ちて守ってくれるが、隣接性の assert 自体は自立していなかった——
-    // 両方が実際に結果に含まれていること（`index >= 0`）を、この assert 自身の前提としても
-    // 先に assert する。
+    // ⚠ `indexOf` は見つからないとき `-1` を返すため、片方だけが結果から完全に消えた世界でも `Math.abs(indexA - indexB) === 1` が偶然成立しうる
+    // （例: a だけ残り b が消えると `Math.abs(0 - (-1)) === 1`）。両方が実際に結果に含まれていること（`index >= 0`）を、この assert 自身の前提としても先に assert する。
     expect(indexA).toBeGreaterThanOrEqual(0);
     expect(indexB).toBeGreaterThanOrEqual(0);
     expect(Math.abs(indexA - indexB)).toBe(1);
@@ -527,9 +481,7 @@ describe("runtime.recall() — 本物の Postgres + pgvector（roadmap.md 段階
     const owner = await createEmbeddedMemory(memoryStore, vectorStore, ctx, [1, 0, 0], {
       digest: "owner",
     });
-    // `createMemory` は contested を contestedWithId 無しでは作れない
-    // （`ContestedWithoutCompanionError`、ADR 0140）ため、両方を active で作ってから
-    // `markContestedPair` で相互に contested へ倒す（上の「段3/段4」歯と同じ作法）。
+    // `createMemory` は contested を contestedWithId 無しでは作れない（`ContestedWithoutCompanionError`）ため、両方を active で作ってから `markContestedPair` で相互に contested へ倒す。
     await memoryStore.markContestedPair!(
       ctx,
       {
@@ -556,10 +508,8 @@ describe("runtime.recall() — 本物の Postgres + pgvector（roadmap.md 段階
       },
     );
 
-    // association: null — 連想枠は既定 on（ADR 0337）。この歯が検査したいのは段2の
-    // over_limit(stage:"rescore") と段3（必須の同伴取得）だけであり、連想が同じ候補を
-    // 独立に拾い直すと検証が段3.5の挙動と混ざる（本 PR の射程外、ADR 0203「引き受けた
-    // 負債」に残したまま）。
+    // association: null — 連想枠は既定 on。この歯が検査したいのは段2の over_limit(stage:"rescore") と段3（必須の同伴取得）だけであり、
+    // 連想が同じ候補を独立に拾い直すと検証が段3.5の挙動と混ざる。
     const result = await runtime.recall(ctx, {
       vector: [1, 0, 0],
       limit: 1,
@@ -574,8 +524,6 @@ describe("runtime.recall() — 本物の Postgres + pgvector（roadmap.md 段階
     expect(returnedOwner).toBeDefined();
     expect(result.memories).toHaveLength(2);
 
-    // 修正後の期待: over_limit(stage:"rescore") の対象はこの1件（companion）だけ
-    // だったので、below_threshold と同じ作法で Omission 自体が配列から消える。
     const overLimit = result.omitted.find((o) => o.kind === "over_limit" && o.stage === "rescore");
     expect(overLimit).toBeUndefined();
   });
@@ -588,16 +536,12 @@ describe("runtime.recall() — 本物の Postgres + pgvector（roadmap.md 段階
     const a = await createEmbeddedMemory(memoryStore, vectorStore, ctx, [1, 0, 0], {
       digest: "A",
     });
-    // B: A にわずかに劣るだけ。limit=1 なので段2で over_limit(stage:"rescore") へ回る
-    // 一方、A への類似度が連想の minSimilarity（既定 0.5）を軽々超えるため、段3.5 の
-    // アンカー A から拾い直され、retrievedVia:"association" として finalMemories に
-    // 足される——上の Issue #823 の歯と違い、A/B は contested のペアではない
-    // （段3の必須同伴取得ではなく、段3.5 の連想だけを踏む構成）。
+    // B: A にわずかに劣るだけ。limit=1 なので段2で over_limit(stage:"rescore") へ回る一方、A への類似度が連想の minSimilarity（既定 0.5）を軽々超えるため、
+    // 段3.5 のアンカー A から拾い直され、retrievedVia:"association" として finalMemories に足される（A/B は contested のペアではない）。
     const b = await createEmbeddedMemory(memoryStore, vectorStore, ctx, [0.999, 0.001, 0], {
       digest: "B",
     });
 
-    // association を渡さない——既定 on（ADR 0337）のまま呼ぶ。
     const result = await runtime.recall(ctx, {
       vector: [1, 0, 0],
       limit: 1,
@@ -613,8 +557,6 @@ describe("runtime.recall() — 本物の Postgres + pgvector（roadmap.md 段階
     expect(returnedB?.retrievedVia).toBe("association");
     expect(returnedB?.associationOf).toBe(a.id);
 
-    // 修正後の期待: over_limit(stage:"rescore") の対象はこの1件（B）だけだったので、
-    // below_threshold と同じ作法で Omission 自体が配列から消える。
     const overLimitAssociation = result.omitted.find(
       (o) => o.kind === "over_limit" && o.stage === "rescore",
     );
@@ -639,9 +581,7 @@ describe("runtime.recall() — 本物の Postgres + pgvector（roadmap.md 段階
     const owner = await createEmbeddedMemory(memoryStore, vectorStore, ctx, [0.999, 0.0447, 0], {
       digest: "OWNER",
     });
-    // ADR 0140（Issue #243続き）: `createMemory` は `status: 'contested'` を
-    // `contestedWithId` 無しでは作れない——両方を active で作ってから
-    // `markContestedPair` で相互に contested へ倒す（上の Issue #823 の歯と同じ作法）。
+    // `createMemory` は `status: 'contested'` を `contestedWithId` 無しでは作れない。両方を active で作ってから `markContestedPair` で相互に contested へ倒す。
     await memoryStore.markContestedPair!(
       ctx,
       {
@@ -672,7 +612,6 @@ describe("runtime.recall() — 本物の Postgres + pgvector（roadmap.md 段階
       vector: [1, 0, 0],
       limit: 2,
       overFetchFactor: 10,
-      // 段3.5（連想、既定 on）を明示的に切る——本テストが検査したいのは段3と段4だけ。
       association: null,
       // cand1 の digest（1文字）しか収まらない予算。owner+companion の単位（隣接性の
       // 不変条件で分割できない、docs/recall.md §8）は丸ごと budget_dropped になる。
@@ -681,9 +620,6 @@ describe("runtime.recall() — 本物の Postgres + pgvector（roadmap.md 段階
 
     expect(result.memories.map((m) => m.memoryId)).toEqual([cand1.id]);
 
-    // 修正前は over_limit(stage:"rescore") の Omission が `{ count: 1, ... }` のまま
-    // 残っていた（Issue #940 の再現）。修正後は budget_dropped 側へ差し引かれ、
-    // Omission 自体が配列から消える。
     const overLimit = result.omitted.find((o) => o.kind === "over_limit" && o.stage === "rescore");
     expect(overLimit).toBeUndefined();
 
@@ -750,16 +686,11 @@ describe("runtime.recall() — 本物の Postgres + pgvector（roadmap.md 段階
     expect(returnedC1?.retrievedVia).toBe("association");
     expect(result.memories.some((m) => m.memoryId === t.id)).toBe(false);
 
-    // 修正前: over_limit(stage:"rescore") は C1 の分だけ既存処理（Issue #925）で
-    // 差し引かれ、T の分は残ったまま `{ count: 1, ... }` になる——同じ T が
-    // over_limit(stage:"association") にも数えられ、二重計上になっていた
-    // （Issue #949 の再現）。修正後は T の分も差し引かれ、Omission 自体が配列から消える。
     const overLimitRescore = result.omitted.find(
       (o) => o.kind === "over_limit" && o.stage === "rescore",
     );
     expect(overLimitRescore).toBeUndefined();
 
-    // T は over_limit(stage:"association") 側に1回だけ残る（席を競り負けた分）。
     const overLimitAssociation = result.omitted.find(
       (o) => o.kind === "over_limit" && o.stage === "association",
     );
@@ -815,8 +746,7 @@ describe("runtime.recall() — 本物の Postgres + pgvector（roadmap.md 段階
       pool.query = originalQuery;
     }
 
-    // この歯は「群カウントと totalInScope を別クエリにした」瞬間に赤くなるはずである
-    // （ADR 0011 と同じ理由。PR 本文参照）。
+    // この歯は「群カウントと totalInScope を別クエリにした」瞬間に赤くなるはずである。
     expect(queryCount).toBe(1);
   });
 
@@ -856,16 +786,10 @@ describe("runtime.recall() — 本物の Postgres + pgvector（roadmap.md 段階
   }, 60_000);
 
   it("Issue #857: vector: [] は Postgres でも Fake と同じ形の RecallResult になる（reject しない）", async () => {
-    // 実測（Issue #857）: 同じ入力 `{ vector: [] }` に対して、
-    // 修正前の Postgres は `toVectorLiteral([])` が `"[]"` を作り、`::vector` キャストが
-    // 「vector must have at least 1 dimension」で未捕捉の `DrizzleQueryError` になっていた
-    // （`runtime.recall()` の呼び出しそのものが reject される）。
-    // Fake（`@mnemora/testkit/fixtures` の `InMemoryVectorStore`、実体は
-    // `packages/testkit/src/__fixtures__/in-memory-vector-store.ts` の `cosineDistance`）は
-    // 短い方の配列を 0 で zero-pad してから長さを揃えるため、空配列は暗黙にゼロベクトルとして
-    // 扱われ、ADR 0040（ゼロベクトルは NaN 類似度になり候補に出ない）の経路にそのまま乗って
-    // 正常完走していた。この it は、その Fake の実際の挙動（reject しない・memories: []・
-    // omitted に score_not_comparable が候補の件数ぶん出る）を Postgres 側でも実測で確かめる。
+    // 同じ入力 `{ vector: [] }` に対して、Postgres は `toVectorLiteral([])` が `"[]"` を作り、`::vector` キャストが「vector must have at least 1 dimension」で落ちうる。
+    // Fake（`@mnemora/testkit/fixtures` の `InMemoryVectorStore`）は短い方の配列を 0 で zero-pad してから長さを揃えるため、空配列は暗黙にゼロベクトルとして扱われ、
+    // ゼロベクトルは NaN 類似度になり候補に出ない経路にそのまま乗って正常に完走する。
+    // この it は、その Fake の挙動（reject しない・memories: []・omitted に score_not_comparable が候補の件数ぶん出る）を Postgres 側でも確かめる。
     const ctx: Ctx = { tenantId: `tenant-857-${randomUUID()}` };
     const digest = "Issue #857 の再現データ";
     const contentHash = `issue-857-${randomUUID()}`;
@@ -922,8 +846,6 @@ describe("runtime.recall() — 本物の Postgres + pgvector（roadmap.md 段階
       clock: { now: () => new Date("2026-01-01T00:00:00.000Z") },
     });
 
-    // 前提: Fake は reject せず、Issue #857 本文どおりの形で完走する
-    // （memories: [] ・ omitted に score_not_comparable が候補1件ぶん出る）。
     const fakeResult = await fakeRuntime.recall(ctx, { vector: [] });
     expect(fakeResult.memories).toEqual([]);
     const fakeNotComparable = fakeResult.omitted.find((o) => o.kind === "score_not_comparable");
@@ -933,24 +855,17 @@ describe("runtime.recall() — 本物の Postgres + pgvector（roadmap.md 段階
       countKind: "exact",
     });
 
-    // 本題: Postgres も reject せず、Fake と同じ件数の score_not_comparable になる。
-    // ⚠ 修正前はここで `runtime.recall()` 自体が DrizzleQueryError で reject していた。
     const pgResult = await pgRuntime.recall(ctx, { vector: [] });
     expect(pgResult.memories).toEqual([]);
     const pgNotComparable = pgResult.omitted.find((o) => o.kind === "score_not_comparable");
     expect(pgNotComparable).toEqual(fakeNotComparable);
   });
 
-  // Issue #867 / 案B: `space.dimensions`（ここでは3）と長さが違うクエリベクトルは、
-  // 空配列（#857、上）と同じ形で「比較不能」として扱う——新しい throw は足さない。
+  // `space.dimensions`（ここでは3）と長さが違うクエリベクトルは、空配列と同じ形で「比較不能」として扱う（新しい throw は足さない）。
   //
-  // 【実測 Issue #867、pgvector 0.8.2 / PostgreSQL 17.9】直す前は、保存 `[1,0,0]` に対して
-  // `[1,2]`（短い）・`[1,2,3,4]`（長い）のどちらも pgvector の「different vector
-  // dimensions」で未捕捉の `DrizzleQueryError` になり `runtime.recall()` 自体が reject
-  // されていた。Fake は足りない側を `0` で zero-pad して計算を続け、意味の無い点数を
-  // 普通のヒットとして返していた（`omitted` にも何も残らない）——adapter 間で挙動が
-  // 割れていた。直した後は、どちらの adapter でも `memories: []` ・
-  // `omitted` に `score_not_comparable` が候補の件数ぶん出る。
+  // 保存 `[1,0,0]` に対して `[1,2]`（短い）・`[1,2,3,4]`（長い）は pgvector の「different vector dimensions」になりうる。
+  // Fake は足りない側を `0` で zero-pad して計算を続け、意味の無い点数を普通のヒットとして返しうるので、adapter 間で挙動が割れる。
+  // どちらの adapter でも `memories: []`・`omitted` に `score_not_comparable` が候補の件数ぶん出る。
   it.each([
     ["短い", [1, 2]],
     ["長い", [1, 2, 3, 4]],
@@ -1011,7 +926,6 @@ describe("runtime.recall() — 本物の Postgres + pgvector（roadmap.md 段階
         clock: { now: () => new Date("2026-01-01T00:00:00.000Z") },
       });
 
-      // 前提: Fake は reject せず、score_not_comparable が候補1件ぶん出る。
       const fakeResult = await fakeRuntime.recall(ctx, { vector: [...query] });
       expect(fakeResult.memories).toEqual([]);
       const fakeNotComparable = fakeResult.omitted.find((o) => o.kind === "score_not_comparable");
@@ -1021,8 +935,6 @@ describe("runtime.recall() — 本物の Postgres + pgvector（roadmap.md 段階
         countKind: "exact",
       });
 
-      // 本題: Postgres も reject せず、Fake と同じ件数の score_not_comparable になる。
-      // ⚠ 修正前はここで `runtime.recall()` 自体が DrizzleQueryError で reject していた。
       const pgResult = await pgRuntime.recall(ctx, { vector: [...query] });
       expect(pgResult.memories).toEqual([]);
       const pgNotComparable = pgResult.omitted.find((o) => o.kind === "score_not_comparable");
@@ -1031,8 +943,7 @@ describe("runtime.recall() — 本物の Postgres + pgvector（roadmap.md 段階
   );
 
   describe("runtime.recall() — RecalledMemory.basisLost（Issue #883、ADR 0342）本物の Postgres", () => {
-    // `memories_check`（0001_init.sql 68行）: `provenance_kind IN ('stated','inferred')`
-    // のときは `source_observation_id IS NOT NULL` を要求する（`observations` への FK）。
+    // `memories_check`: `provenance_kind IN ('stated','inferred')` のときは `source_observation_id IS NOT NULL` を要求する（`observations` への FK）。
     // `inferred` を作るにはまず本物の Observation を1件作っておく必要がある。
     async function createInferredMemory(
       memoryStore: PostgresMemoryStore,

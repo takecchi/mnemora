@@ -14,56 +14,43 @@ import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
 /**
  * 書き込み側の差分ファズの本体。seed を固定した操作列を2つの store 一式に同じ順で流し、
- * **1手ごとに**両方の状態を突き合わせる。recall の検査器（`recall-invariant-fuzz-harness.ts`、
- * #1030・#1047）が読む側を縛るのに対して、こちらは書く側を縛る。
+ * 1手ごとに両方の状態を突き合わせる。recall の検査器（`recall-invariant-fuzz-harness.ts`）が読む側を縛るのに対して、こちらは書く側を縛る。
  *
  * 使うところ:
- * - `write-diff-fuzz.test.ts`（core）: Fake と Fake を突き合わせて、検査器そのものが決定的に
- *   動くことを見る。陽性対照（片方の `reinforce` を壊すと食い違いが出る）もここに在る。
- * - `packages/postgres/src/__tests__/write-diff-fuzz.postgres.test.ts`: Postgres と Fake を
- *   突き合わせる。陽性対照も同じ形で置く。
+ * - `write-diff-fuzz.test.ts`（core）: Fake と Fake を突き合わせて、検査器そのものが決定的に動くことを見る。
+ *   陽性対照（片方の `reinforce` を壊すと食い違いが出る）もここに在る。
+ * - `packages/postgres/src/__tests__/write-diff-fuzz.postgres.test.ts`: Postgres と Fake を突き合わせる。陽性対照も同じ形で置く。
  *
  * ## 操作
- * observe（sync・deferred・`externalId` の重複あり）、usage の observe（`recordUsage` と
- * `reinforceMany`）、tick（extract・embed）、reextract、抽出器の出力を変える epoch の切り替え、
- * consolidate、reflect、forget、purge、restoreArchived、restoreSuperseded、reinforce
- * （store の口）、sweepArchive、時計を進める。LLM と埋め込みは、この下の決定的な偽物を使う。
+ * observe（sync・deferred・`externalId` の重複あり）、usage の observe（`recordUsage` と `reinforceMany`）、tick（extract・embed）、
+ * reextract、抽出器の出力を変える epoch の切り替え、consolidate、reflect、forget、purge、restoreArchived、restoreSuperseded、
+ * reinforce（store の口）、sweepArchive、時計を進める。LLM と埋め込みは、この下の決定的な偽物を使う。
  *
- * reextract の対象には、usage の Observation（使用報告）も入れる。使用報告は抽出器を通らない
- * ので、`reextract` は存在しない Observation と同じ種類の `Error` を投げる（Issue #1099）。
- * 戻り値の比較（`THROW <名前>: <文面>`）で、両方の実装が同じ例外を投げることを見る。
+ * reextract の対象には、usage の Observation（使用報告）も入れる。使用報告は抽出器を通らないので、`reextract` は存在しない Observation と
+ * 同じ種類の `Error` を投げる。戻り値の比較（`THROW <名前>: <文面>`）で、両方の実装が同じ例外を投げることを見る。
  *
  * ## 比べるもの
  * 1手ごとの、その手の戻り値（id を伏せた形）と、次の状態。
- * - 記憶: status・本文・digest・tags・subject・由来の Observation・抽出器の版・provenance・
- *   superseded_by・contested_with・埋め込みの状態・strength・半減期・lastReinforcedAt・
- *   decayFloorAt・purge 済みか。
- * - Observation（`externalId`）、outbox（kind・payload・attempts・完了/失敗/未処理）、
- *   イベント（記憶ごとの kind と meta）。
+ * - 記憶: status・本文・digest・tags・subject・由来の Observation・抽出器の版・provenance・superseded_by・contested_with・
+ *   埋め込みの状態・strength・半減期・lastReinforcedAt・decayFloorAt・purge 済みか。
+ * - Observation（`externalId`）、outbox（kind・payload・attempts・完了/失敗/未処理）、イベント（記憶ごとの kind と meta）。
  *
- * id は backend ごとに形が違う（Postgres は uuid、Fake は連番）ので、別名に置き換える。
- * Observation は observe が返した順、記憶はその手で初めて現れた順と安定なキー
- * （recordedAt・由来・版・content_hash・subject・由来の別名を入れた provenance）で別名を付け、
+ * id は backend ごとに形が違う（Postgres は uuid、Fake は連番）ので、別名に置き換える。Observation は observe が返した順、
+ * 記憶はその手で初めて現れた順と安定なキー（recordedAt・由来・版・content_hash・subject・由来の別名を入れた provenance）で別名を付け、
  * 一度付けた別名は変えない。
  *
  * ## 比べないもの（約束の外。どちらの結果も正しい）
- * - **id に落ちる同点の決着。** id の形が backend ごとに違うので、同点の並びは違ってよい。
- *   - `archiveDecayed` の `ORDER BY decay_floor_at, id` の切れ目: sweep の上限を十分に大きく
- *     して、切れ目が同点の間に来ないようにしている。
- *   - 近傍の recall の並びから来る `provenance.sources`（と `created` イベントの
- *     `meta.sources`）の順序: 先頭（種）と、残りを整列したものとで比べる。
+ * - id に落ちる同点の決着。id の形が backend ごとに違うので、同点の並びは違ってよい。
+ *   - `archiveDecayed` の `ORDER BY decay_floor_at, id` の切れ目: sweep の上限を十分に大きくして、切れ目が同点の間に来ないようにしている。
+ *   - 近傍の recall の並びから来る `provenance.sources`（と `created` イベントの `meta.sources`）の順序: 先頭（種）と、残りを整列したものとで比べる。
  *   - `reextract` の `skipped` の順序: 整列して比べる。
- * - **同じ tick の中の consolidate / reflect の自動ジョブ。** `claimBatch` の順序は
- *   `available_at`（同じトランザクションで積まれた行は同時刻）の同点で id に落ちるので、
- *   どちらが先に元を吸うかが backend で変わりうる。自動ジョブは積まない
- *   （`autoQueueConsolidateReflectOnExtract` を立てない）。consolidate / reflect の本体は、
- *   直接の操作として当てている。
- * - **境界の時刻。** 時計は1手ごとに1秒進み、`advance` で1時間〜400日進む。
- *   `decay_floor_at` と「いま」がちょうど一致する形はまず作れない。【実測】`archiveDecayed` の
- *   `<=` を `<` に壊す変異は、20シード × 60手で捕まらなかった。境界は、それぞれの口の歯が見る。
- * - **並行。** 操作は1本ずつ順に流す。リース切れの二重処理などは #1092 の範囲。
- * - 時計に依らない時刻（`updated_at` など、`Runtime`/`Clock` の管轄ではない列）。
- *   outbox の `created_at` / `available_at` とイベントの `at` は注入した時計に従う（ADR 0559）。
+ * - 同じ tick の中の consolidate / reflect の自動ジョブ。`claimBatch` の順序は `available_at`（同じトランザクションで積まれた行は同時刻）の
+ *   同点で id に落ちるので、どちらが先に元を吸うかが backend で変わりうる。自動ジョブは積まない（`autoQueueConsolidateReflectOnExtract` を立てない）。
+ *   consolidate / reflect の本体は、直接の操作として当てている。
+ * - 境界の時刻。時計は1手ごとに1秒進み、`advance` で1時間〜400日進むので、`decay_floor_at` と「いま」がちょうど一致する形はまず作れない。
+ *   境界は、それぞれの口の歯が見る。
+ * - 並行。操作は1本ずつ順に流す。
+ * - 時計に依らない時刻（`updated_at` など、`Runtime`/`Clock` の管轄ではない列）。outbox の `created_at` / `available_at` とイベントの `at` は注入した時計に従う。
  */
 
 export const WRITE_FUZZ_CTX: Ctx = { tenantId: "tenant-write-fuzz" };
@@ -248,7 +235,7 @@ export interface WriteRunOutcome {
 }
 
 export interface WriteRunOptions {
-  /** 時計の起点。歴史的な理由で実時刻より先に置いている（今は `available_at` も注入した時計に従う。ADR 0559）。 */
+  /** 時計の起点（ミリ秒）。 */
   t0: number;
   /** `stores.memoryStore` を差し替える（陽性対照が `reinforce` を壊すのに使う）。 */
   wrapMemoryStore?: (store: WriteFuzzStores["memoryStore"]) => WriteFuzzStores["memoryStore"];

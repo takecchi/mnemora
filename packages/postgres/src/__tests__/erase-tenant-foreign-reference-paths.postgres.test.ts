@@ -9,16 +9,7 @@ import {
   TEST_EMBEDDING_SPACE,
 } from "./test-db.js";
 
-/**
- * `MemoryStore.eraseTenant`（PR #1444、ADR 0383）は、他テナントの行がこのテナントの行を外部キーで
- * 参照しているとき、1行も消さずに `blocked_by_foreign_reference` で止まる。経路は外部キーを
- * `pg_constraint` から数え上げる（表名を焼き込まない）ので、**どの外部キーの経路でも**止まる。
- *
- * 既存の歯が実際に参照を作って確かめている経路は、`superseded_by_id`・埋め込みの表・
- * `memory_events` だけである。ここでは、tenant_id を持つ表どうしの単一列の外部キーを1本ずつ
- * 取り上げ、他テナントの行から参照を作り、止まること（`dryRun` でも）を縛る。数え上げた経路と
- * この歯が持つ経路の集合が一致しないとき（外部キーが増えたとき）は、名指しで落ちる。
- */
+/** 外部キーを `pg_constraint` から数え上げる（表名を焼き込まない）ので、数え上げた経路とこの歯が持つ経路の集合が一致しないとき（外部キーが増えたとき）は、名指しで落ちる。 */
 
 afterAll(async () => {
   await closeTestClient();

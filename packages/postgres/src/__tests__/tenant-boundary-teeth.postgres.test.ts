@@ -12,15 +12,13 @@ import {
 } from "./test-db.js";
 
 /**
- * [ADR 0438](../../../docs/decisions/0438-tenant-boundary-teeth-and-purge-uuid-case.md):
- * テナントで絞る `WHERE` / `JOIN` を外すと赤になる歯を、これまで歯の無かった口に足す。
+ * テナントで絞る `WHERE` / `JOIN` を外すと赤になる歯を、歯の無かった口に足す。
  *
  * どの it も「別テナント B に行を作り、テナント A の ctx（または A の行）から触って、B の行が変わらない」
  * を見る。そのうえで、A 自身の操作は通ること（歯が「常に拒む」実装で緑にならないこと）も同じ it の中で見る。
  *
- * B の行が A の id を指す、A の行が B の id を指す、という形は API からは作れない（既知の負債、
- * docs/memory-model.md §5 の #854/#1051 の追記）ので、その形の入力は生 SQL で作る。
- * `packages/testkit` の `*-conformance.ts` には足していない（ADR 0438）。
+ * B の行が A の id を指す、A の行が B の id を指す、という形は API からは作れないので、
+ * その形の入力は生 SQL で作る。
  */
 
 const A: Ctx = { tenantId: "teeth-tenant-a" };

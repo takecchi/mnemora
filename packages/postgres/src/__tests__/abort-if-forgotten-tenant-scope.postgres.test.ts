@@ -4,15 +4,6 @@ import { buildNewMemoryFixture } from "@mnemora/testkit";
 import { PostgresMemoryStore } from "../memory-store.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
-/**
- * `opts.abortIfForgotten`（`createMemoryWithOutbox`・`supersedeWithNewMemories`・
- * `createMemoriesWithOutboxAndEvents`）の見直しは、呼び出しの `ctx.tenantId` の記憶だけを見る
- * （`assertNotForgottenForUpdate` の doc:「`tenant_id` の絞り込みも同じ `WHERE` に含める——
- * 他テナントの同じ id を誤って見ない」）。
- *
- * 別のテナントの forgotten な記憶の id が混ざっていても、それを理由に自分のテナントの書き込みを打ち切らない
- * （他のテナントの状態が、このテナントの書き込みの成否に漏れない）。
- */
 describe("abortIfForgotten — 見直しは自分のテナントの行だけを見る", () => {
   afterAll(async () => {
     await closeTestClient();

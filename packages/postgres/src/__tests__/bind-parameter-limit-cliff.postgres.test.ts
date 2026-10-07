@@ -16,14 +16,6 @@ import {
   TEST_EMBEDDING_SPACE,
 } from "./test-db.js";
 
-/**
- * id・クエリの件数が Postgres のバインドパラメータの上限（65535）を超える呼び出しを縛る（ADR 0443）。
- *
- * 以前は `reinforceMany` が1行あたり5個のパラメータを `VALUES` に並べ（13107 件目で上限を超え）、
- * `searchMany` が1クエリあたり2個を `VALUES` に並べていた（32767 件目の前後で上限を超える）。
- * 上限を超えると、drizzle の `Failed query: ... params: <全部>` を message に持つ例外になり、
- * message が何 MB にもなった。崖の手前と奥の両方で、同じように動くこと。
- */
 const ctx: Ctx = { tenantId: "bind-limit-cliff" };
 const MESSAGE_MAX_CHARS = 2_000;
 
@@ -91,8 +83,7 @@ describe("reinforceMany — 件数の崖（ADR 0443）", () => {
 });
 
 describe("observe({ kind: 'memory_usage' }) — 件数の崖（ADR 0443）", () => {
-  // 13107 は強化（reinforceMany）の崖。33000 は、使用の記録（recall_usages の INSERT）が id を1件ずつ2か所に
-  // バインドする形に戻ったときの崖（2 × 33000 > 65535）を見る。
+  // 13107 は強化（reinforceMany）の崖。33000 は、使用の記録が id を1件ずつ2か所にバインドする形に戻ったときの崖（2 × 33000 > 65535）を見る。
   for (const n of [13_106, 13_107, 33_000]) {
     it(`${n} 件の使用報告: 例外にならず、全件を記録して強化する`, async () => {
       await resetTestDatabase();

@@ -7,31 +7,12 @@ import { createRuntime, groupSupersededCandidatesByOperation } from "../runtime.
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
 /**
- * Issue #765 項目3（ADR 0089「引き受けた負債」3、ADR 0074 の予言）の歯。
- *
- * `groupSupersededCandidatesByOperation`（`superseded-operation-grouping.test.ts`）は
- * `"consolidated"` / `"contested_resolved"` / それ以外（`"reextract_superseded"` を含む）
- * という**文字列リテラルを手で打った入力**で分岐を固定している。`memory_events.meta` は
- * `Record<string, unknown>` であり型で守られていないため（Issue #765 項目3）、この一致は
- * 実行時の規約でしかない——3つの書き手のどれかが将来リテラルを変えても、TypeScript は
- * 検出できない。
- *
- * 既存の歯を数え直すと:
- * - `consolidate.test.ts`（`superseded イベントの meta.reason === 'consolidated'`）と
- *   `resolve-contested.test.ts`（`meta.reason='contested_resolved'`）は、**それぞれ自分の
- *   書き手が積むリテラルだけ**を個別に固定している。`reextract` は実際の呼び出しで
- *   `meta.reason` を検査する歯が無い（`restore-superseded.test.ts` にある
- *   `"reextract_superseded"` は `eventStore.append` へ手で積んだ値であり、`reextract()` を
- *   呼んで確認したものではない）。
- * - どの歯も、実際の書き手が積んだ値を `groupSupersededCandidatesByOperation` へ
- *   流していない——「書き手のリテラル」と「grouping の分岐リテラル」を**1つの歯の中で**
- *   結びつけたものが無かった。
- *
- * この歯は3つの書き手を実際に呼び、書き込まれた `meta.reason` を
- * `groupSupersededCandidatesByOperation` へそのまま渡し、`boundaryConfidence` が
- * `runtime.ts` の doc コメントどおり（`"consolidated"` → `"structural"`、
- * `"contested_resolved"` → `"per_item"`、`"reextract_superseded"` → `"unknown"`）に
- * なることを確認する。**挙動は変えていない**——`runtime.ts` を1バイトも触っていない。
+ * `groupSupersededCandidatesByOperation` の分岐は文字列リテラルで固定されているが、`memory_events.meta` は
+ * `Record<string, unknown>` で型で守られていないので、書き手のリテラルとの一致は実行時の規約でしかない。
+ * 3つの書き手のどれかが将来リテラルを変えても、TypeScript は検出できない。
+ * この歯は3つの書き手を実際に呼び、書き込まれた `meta.reason` を `groupSupersededCandidatesByOperation` へそのまま渡して、
+ * `boundaryConfidence` が期待どおり（`"consolidated"` → `"structural"`、`"contested_resolved"` → `"per_item"`、
+ * `"reextract_superseded"` → `"unknown"`）になることを、「書き手のリテラル」と「grouping の分岐リテラル」を1つの歯の中で結びつけて確認する。
  */
 
 const ctx: Ctx = { tenantId: "tenant-1" };
@@ -150,10 +131,7 @@ describe("書き手が積む meta.reason と groupSupersededCandidatesByOperatio
     });
     expect(result.outcome.kind).toBe("resolved");
 
-    // 敗者（b）だけが kind: 'superseded' イベントを積む——勝者（a）は kind: 'updated'
-    // （`resolve-contested.test.ts` 参照）。`groupSupersededCandidatesByOperation` は
-    // `previewRestoreSupersededBy?` が返す「superseded になった候補」を受け取る関数なので、
-    // ここで結びつけるのも敗者側の reason だけでよい。
+    // 敗者（b）だけが kind: 'superseded' イベントを積む（勝者（a）は kind: 'updated'）ので、結びつけるのも敗者側の reason だけでよい。
     const reasonB = supersededReasonFor(stores, b.id);
     expect(reasonB).toBe("contested_resolved");
 
@@ -174,8 +152,7 @@ describe("書き手が積む meta.reason と groupSupersededCandidatesByOperatio
         throw new Error("simulated LLM outage");
       },
     });
-    // runtime2 は runtime1 と同じ stores を共有し、成功する LLM を持つ
-    // （`runtime.test.ts` の `buildReextractScenario` と同じ形——provider が復旧した後を模す）。
+    // runtime2 は runtime1 と同じ stores を共有し、成功する LLM を持つ（provider が復旧した後を模す）。
     const runtime2 = createRuntime({
       memoryStore: stores.memoryStore,
       outboxStore: stores.outboxStore,
@@ -196,7 +173,6 @@ describe("書き手が積む meta.reason と groupSupersededCandidatesByOperatio
       clock: { now: () => NOW },
     });
 
-    // LLM 障害時は全文フォールバックの Memory が1件残る（`runtime.observe` の既定挙動）。
     const observeResult = await runtime1.observe(ctx, {
       kind: "utterance",
       text: "障害時に取り込まれた発話",
@@ -210,9 +186,7 @@ describe("書き手が積む meta.reason と groupSupersededCandidatesByOperatio
     const reason = supersededReasonFor(stores, fallbackId);
     expect(reason).toBe("reextract_superseded");
 
-    // ⛔ 1件ずつには分割しない（`reextract` のアンカーは複数呼び出しで同じ候補を
-    // 共有しうるため、既存の情報だけでは操作単位に分割できない——`runtime.ts` の
-    // `onlyMemoryIds` doc コメント、ADR 0230 訂正4、ADR 0258）。
+    // 1件ずつには分割しない（`reextract` のアンカーは複数呼び出しで同じ候補を共有しうるため、既存の情報だけでは操作単位に分割できない）。
     const groups = groupSupersededCandidatesByOperation([
       { memoryId: fallbackId, supersededReason: reason },
     ]);

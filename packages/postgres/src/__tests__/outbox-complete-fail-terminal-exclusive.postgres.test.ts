@@ -11,26 +11,9 @@ import {
 } from "./test-db.js";
 
 /**
- * Issue #826（クローン miku の委譲先が書いた。オーナーではない）: `PostgresOutboxStore.complete`/
- * `fail` の CAS な `WHERE`（`packages/postgres/src/outbox-store.ts`）は `attempts` の一致
- * しか見ておらず、相手側の終端列（`completed_at`/`failed_at`）を見ていなかった。そのため
- * 同じ `attempts` のまま complete → fail（逐次でも、本物の2接続からの並行でも）を呼ぶと、
- * 両方の終端列が付いた——ADR 0142「確かめていないこと」が「本来ありえないはずの矛盾した
- * 終端状態」と呼んでいる状態（145-147 行）。再現手順そのものは枝
- * `test/outbox-cas-concurrency`（commit `377346f`）の
- * `outbox-complete-fail-cas-concurrency.postgres.test.ts` を土台にした
- * （このファイルはその修正後の期待——「先に付いた終端が勝つ」——を検査する）。
- *
- * 直し方（Issue #826 案2）: 先に付いた終端を勝たせる。相手側の終端列が既に付いていれば、
- * 後から来た complete/fail は行を変えない（例外も投げない）。`attempts` 不一致の CAS 衝突
- * や、行が無い場合の no-op はこれまで通り——`packages/core/src/interfaces/outbox-store.ts`
- * 61-62 行の「同じ worker が同じ claim に対して complete/fail を再度呼ぶことは冪等」を、
- * 種類が混ざった場合にも一貫させただけである。
- *
- * complete+complete / fail+fail の同種の歯（本物の並行での冪等の確認）は
- * `test/outbox-cas-concurrency` に既にあり、今回の修正で挙動が変わらないことは
- * `outbox-store-conformance.ts`（`conformance.postgres.test.ts` 経由）が既存の it で
- * 引き続き検査する——ここには複製しない。
+ * `complete`/`fail` の CAS な `WHERE` が `attempts` の一致しか見ないと、同じ `attempts` のまま complete → fail（逐次でも、本物の2接続からの並行でも）を呼ぶと両方の終端列が付く。
+ * 先に付いた終端を勝たせる。相手側の終端列が既に付いていれば、後から来た complete/fail は行を変えない（例外も投げない）。`attempts` 不一致の CAS 衝突や、行が無い場合の no-op はこれまで通り。
+ * complete+complete / fail+fail の歯は `outbox-store-conformance.ts`（`conformance.postgres.test.ts` 経由）が検査するので、ここには複製しない。
  */
 describe("PostgresOutboxStore.complete/fail — 相手側の終端が既に付いていたら、後から来た呼び出しは行を変えない（Issue #826）", () => {
   const TENANT = `outbox-terminal-exclusive-${randomUUID()}`;
@@ -55,14 +38,8 @@ describe("PostgresOutboxStore.complete/fail — 相手側の終端が既に付�
     const jobId = seeded.rows[0]?.id;
     if (jobId === undefined) throw new Error("seed 失敗");
     const store = new PostgresOutboxStore(db);
-    // ⚠ `now` は「十分先」の時刻にする——行の `available_at` は DB サーバの `now()`
-    // で決まり、この `claimBatch` の `now` は Node 側の `new Date()` である。
-    // アプリサーバと DB サーバの壁時計はわずかにずれうる（実測: 同一ホストでも
-    // ミリ秒単位のずれが起きうる）ため、`new Date()` をそのまま渡すと
-    // `available_at <= now` が偽になり claim が0件になることがある
-    // （この歯を10ラウンド回す中で実際に踏んだ）。このテストは claim の境界条件を
-    // 検査したいわけではなく、CAS な complete/fail の排他だけを見たいので、
-    // 余裕を持たせて回避する。
+    // ⚠ `now` は「十分先」の時刻にする。行の `available_at` は DB サーバの `now()` で決まり、この `claimBatch` の `now` は Node 側の `new Date()` なので、壁時計のわずかなずれで `available_at <= now` が偽になり claim が0件になることがある。
+    // このテストは claim の境界条件ではなく CAS な complete/fail の排他だけを見たいので、余裕を持たせて回避する。
     const claimed = await store.claimBatch(ctx, {
       limit: 10,
       now: new Date(Date.now() + 5_000),
@@ -181,10 +158,7 @@ describe("PostgresOutboxStore.complete/fail — 相手側の終端が既に付�
   });
 
   it("本物の2接続からの並行 complete+fail（同じ attempts）— 例外は投げず、どちらか一方の終端だけが付く（10ラウンド）", async () => {
-    // 【AGENTS.md】「出なかった」を根拠にするなら陽性対照が要る。この歯自体が固定した
-    // 修正前の挙動（このファイルの土台にした branch の3本目の it）が陽性対照——
-    // 修正前は毎ラウンド両方が付いた。ここでは10ラウンド繰り返し、毎回
-    // ちょうど一方だけが付くことを見る。
+    // 「出なかった」を根拠にするなら陽性対照が要る。10ラウンド繰り返し、毎回ちょうど一方だけが付くことを見る。
     const ROUNDS = 10;
     for (let round = 0; round < ROUNDS; round++) {
       const ctx: Ctx = { tenantId: `${TENANT}-round-${round}` };
@@ -195,16 +169,12 @@ describe("PostgresOutboxStore.complete/fail — 相手側の終端が既に付�
           storeA.complete(ctx, jobId, attempts),
           storeB.fail(ctx, jobId, `error-from-B-round-${round}`, attempts),
         ]);
-        // 相手側の終端に弾かれた呼び出しも、例外は投げない（no-op、CAS 衝突ではない）。
         expect(results.every((r) => r.status === "fulfilled")).toBe(true);
 
         const row = await readRow(jobId);
         const completed = row.completed_at !== null;
         const failed = row.failed_at !== null;
-        // 矛盾した終端状態（両方付く）が再現しないこと。
         expect(completed && failed).toBe(false);
-        // どちらか一方は必ず付く（complete/fail のどちらかは先着していて、行はまだ
-        // 未処理のまま放置されてはいない）。
         expect(completed || failed).toBe(true);
       } finally {
         await cleanup();

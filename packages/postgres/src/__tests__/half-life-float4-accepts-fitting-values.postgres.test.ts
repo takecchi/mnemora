@@ -5,13 +5,7 @@ import { PostgresMemoryStore } from "../memory-store.js";
 import { PostgresTenantSettingsStore } from "../tenant-settings-store.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
-/**
- * 半減期の float4 の検査（Issue #1734 の PR #1525 の確かめ直しで足した歯）。
- * 断るのは「float4 に収まらない値（`Math.fround` が `Infinity` か 0 になる値）」だけで、収まる値は、
- * float4 で正確に表せない値（`0.1` など）でも通す。収まらない値を断る歯は
- * `half-life-float4-explicit-reject.postgres.test.ts` と conformance にある。
- * `halfLifeRecalls: null`（省略と同じ、検査しない）も通る。
- */
+/** 断るのは「float4 に収まらない値（`Math.fround` が `Infinity` か 0 になる値）」だけで、収まる値は、float4 で正確に表せない値（`0.1` など）でも通す。 */
 const ctx: Ctx = { tenantId: "half-life-float4-accepts-fitting-values" };
 
 afterAll(async () => {

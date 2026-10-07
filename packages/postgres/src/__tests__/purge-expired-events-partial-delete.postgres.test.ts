@@ -8,19 +8,10 @@ import { PostgresTenantSettingsStore } from "../tenant-settings-store.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
 /**
- * `PostgresMemoryStore.purgeExpiredEvents` の、`purge-expired-events-count-and-range.postgres.test.ts` が持たない3つの向き。
- *
- * 1. **選んだ行の一部だけが実際に消えたとき、件数と期間は実際に消えた行から取る。**
- *    対象の SELECT は行を掴まないので、選んだ後・DELETE の前に、別の接続が選んだ行の一部を消すことがある。
- *    `PurgeExpiredEventsResult.purged` は「実際に削除された行数」、`events_purged` の `meta.purgedCount`・
- *    `oldestPurgedAt`・`newestPurgedAt` は実際に消した行の件数と期間である（`docs/memory-model.md` §9）。
- *    同じ `limit` の同時の掃除（上のファイルの歯）は、全部選ぶか何も選ばないかになり、この「一部だけ」の場面ができない。
- *    ここは、DELETE を発行する直前に別の接続で最も古い4行を消して、その場面を決定的に作る。
- * 2. **期間の最古・最新は、`RETURNING` が返す順に依らない。** `RETURNING` の順は規定されていない。
- *    ここは、行を `at` の新しい順に（主キーは `at` の古い順と逆に）置き、どの実行計画でも新しい順に返るようにする。
- * 3. **cutoff が下限より前でない限り、問い合わせて消す。** 下限（紀元前4714年）と紀元1年の間の cutoff でも消す
- *    （紀元前の `at` の行）。極大の保持日数では、cutoff は「`now` − 日数」のままで、表せる範囲に収まる日数
- *    （200万日 = 約5476年）を寄せない。
+ * 1. 選んだ行の一部だけが実際に消えたとき、件数と期間は実際に消えた行から取る。対象の SELECT は行を掴まないので、選んだ後・DELETE の前に別の接続が選んだ行の一部を消すことがある。
+ *    同じ `limit` の同時の掃除（`purge-expired-events-count-and-range`）は全部選ぶか何も選ばないかになり、この「一部だけ」の場面ができない。DELETE を発行する直前に別の接続で最も古い4行を消して、その場面を決定的に作る。
+ * 2. 期間の最古・最新は、`RETURNING` が返す順に依らない（順は規定されていない）。行を `at` の新しい順に（主キーは `at` の古い順と逆に）置き、どの実行計画でも新しい順に返るようにする。
+ * 3. cutoff が下限より前でない限り、問い合わせて消す。下限（紀元前4714年）と紀元1年の間の cutoff でも消す。極大の保持日数では、cutoff は「`now` − 日数」のままで、表せる範囲に収まる日数を寄せない。
  */
 
 const NOW = new Date("2026-09-27T00:00:00.000Z");
@@ -131,7 +122,6 @@ describe("purgeExpiredEvents: 選んだ行の一部だけが消えたときの�
     const { pool } = await getTestClient();
     const ctx: Ctx = { tenantId: "purge-returning-order" };
     const base = NOW.getTime() - 100 * DAY_MS;
-    // i が増えるほど at は古く、id は大きい。挿入順も i の昇順（物理の並びも at の新しい順）。
     for (let i = 1; i <= 20; i++) {
       await pool.query(
         `INSERT INTO memory_events (id, tenant_id, memory_id, kind, at, actor, meta)

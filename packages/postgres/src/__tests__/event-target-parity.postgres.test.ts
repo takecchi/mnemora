@@ -7,16 +7,6 @@ import { PostgresEventStore } from "../event-store.js";
 import { PostgresMemoryStore } from "../memory-store.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
-/**
- * ADR 0466: `NewMemoryEvent.memoryId` の検査（ADR 0456 の H4）を、`PostgresMemoryStore` と `InMemoryMemoryStore` に
- * **同じ入力**で流し、断る・通すが一致することを縛る。口 × 指し先の全組み合わせで、(1) 結果（通った／断られた。断られたときは
- * message をクラス名と id を伏せて比べる）、(2) 呼び出しのあとの status、(3) 別テナントの記憶に積まれたイベントの数、を2実装で比べる。
- *
- * 口: updateStatusWithEvent・purgeMemory・markContestedPair・resolveContestedPair・resolveOrphanedContested・
- * markContestedGroup・resolveContestedGroup・supersedeWithNewMemories（supersede の event・buildCreatedEvent）・
- * createMemoriesWithOutboxAndEvents。指し先: 別テナントの記憶・uuid でない/実在しない id・今更新した行・同じテナントの別の記憶・null。
- */
-
 const A: Ctx = { tenantId: "event-parity-a" };
 const B: Ctx = { tenantId: "event-parity-b" };
 
@@ -338,8 +328,6 @@ describe("PostgresMemoryStore と InMemoryMemoryStore は、NewMemoryEvent.memor
   }
 });
 
-// ADR 0475: `EventStore.append` の `event.memoryId` も、2実装で同じ入力を同じように断る・通す（大文字小文字を含む）。
-// （`FakeEventStore` は同じ表を `packages/core/src/__tests__/fake-event-target-belongs-to-ctx-tenant.test.ts` が縛る。）
 describe("PostgresEventStore.append と InMemoryEventStore.append は、event.memoryId で同じ入力を同じように断る・通す", () => {
   async function appendRun(kind: "pg" | "mem", target: string) {
     let store: MemoryStore;

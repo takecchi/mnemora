@@ -35,9 +35,8 @@ import {
 } from "./test-db.js";
 
 /**
- * ADR 0524: `consolidate`・`reflect`・`reextract`・`observe` の「消した後の参照」を、**実 Postgres と InMemory の両方**で `EXPECTED` に
- * 突き合わせる。core の Fake の側は `packages/core/src/__tests__/fake-runtime-llm-paths-after-delete-parity.test.ts` が同じ `EXPECTED` を縛る。
- * 3者が一致した（割れなし）。大文字の uuid の id は含めない（ADR 0446・0469・0521）。
+ * `consolidate`・`reflect`・`reextract`・`observe` の「消した後の参照」を、実 Postgres と InMemory の両方で `EXPECTED` に突き合わせる。
+ * core の Fake の側は `packages/core/src/__tests__/fake-runtime-llm-paths-after-delete-parity.test.ts` が同じ `EXPECTED` を縛る。大文字の uuid の id は含めない。
  */
 interface Env {
   runtime: Runtime;
@@ -55,10 +54,8 @@ interface Env {
 type Result = Record<string, unknown>;
 
 /**
- * ADR 0524（ADR 0522 の「測っていないこと」の実測）: `consolidate`・`reflect`・`reextract`・`observe` を、消した後
- * （forgotten・archived・superseded・purge 済み）の記憶や、消えた observation に当てた結果を、平らなデータにする。
- * 実装ごとの差が出るのは、操作の対象の `id` を大文字で渡したときだけで（ADR 0446・0469。ここには含めない）、
- * 小文字の id では3者が一致した。core の Fake の歯と、InMemory・Postgres の歯が、同じ `EXPECTED` に突き合わせる。
+ * `consolidate`・`reflect`・`reextract`・`observe` を、消した後（forgotten・archived・superseded・purge 済み）の記憶や、消えた observation に当てた結果を、平らなデータにする。
+ * core の Fake の歯と、InMemory・Postgres の歯が、同じ `EXPECTED` に突き合わせる。
  */
 async function scenario(env: Env): Promise<Result> {
   const { runtime, mem, ev, mk, obs, setExtracted } = env;
@@ -139,7 +136,6 @@ async function scenario(env: Env): Promise<Result> {
         await snap(ctx, [a, m]),
       ];
     }
-    // reextract: 1回目で作った記憶を状態 st にしてから、別の応答でもう1度 reextract する
     const ctx = fresh();
     const o = await obs(ctx, "ext-1");
     setExtracted("extracted fact");
@@ -157,7 +153,6 @@ async function scenario(env: Env): Promise<Result> {
       await snap(ctx, [prior]),
     ];
   }
-  // 消えた observation・実在しない observation
   let ctx = fresh();
   const gone = await obs(ctx, "ext-gone");
   await mem.eraseTenant!(ctx, { limit: 1000 });
@@ -187,7 +182,6 @@ async function scenario(env: Env): Promise<Result> {
     again.extraction,
     (await mem.get(ctx, x1.memoryIds[0]!))?.content,
   ];
-  // memory_usage: 消えた記憶を使ったと言う
   ctx = fresh();
   const um = await mk(ctx, "banana usage");
   const rc = await runtime.recall(ctx, { text: "banana", vector: [1, 0, 0], limit: 10 });

@@ -5,15 +5,7 @@ import { PostgresMemoryStore } from "../memory-store.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 import { insertRawMemory, newEvent } from "./contested-group-fixtures.js";
 
-/**
- * Issue #1449 PR1（ADR 0401）の歯2: `markContestedGroup` / `resolveContestedGroup` が
- * store の中で発行する文の数は、群の大きさ N に依らない。
- *
- * 【実測 Issue #1449 1-A】以前はメンバーごとに UPDATE と events の INSERT を出していたため、
- * mark は約 2N+5、resolve は約 2N+6 本（`pg` の `Client.query` を数える。BEGIN/COMMIT を含む）。
- * `restore-superseded-roundtrip-count.postgres.test.ts` と同じく、固定するのは
- * 「N を変えても数が等しい」ことだけで、数そのもの（実装の細部で動く値）は固定しない。
- */
+/** 固定するのは「N を変えても数が等しい」ことだけで、数そのもの（実装の細部で動く値）は固定しない。 */
 
 async function countClientQueries(fn: () => Promise<unknown>): Promise<number> {
   let count = 0;

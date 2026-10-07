@@ -7,15 +7,10 @@ import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
 import type { NewMemory } from "../memory.js";
 
-/**
- * Issue #969: `tick()` の `lastError` が `cause` の連鎖を辿ることの、Fake での歯。
- * 本物の drizzle/pg の包み方での歯は `packages/postgres` の
- * `tick-last-error-cause.postgres.test.ts` にある——ここでは連鎖の辿り方
- * （`code` の付け方・Error でない `cause`・循環）だけを測る。
- */
+// 本物の drizzle/pg の包み方での歯は `packages/postgres/src/__tests__/tick-last-error-cause.postgres.test.ts` にある。
+// ここでは連鎖の辿り方（`code` の付け方・Error でない `cause`・循環）だけを測る。
 
 const ctx: Ctx = { tenantId: "tenant-1" };
-// 以前の Fake は outbox 行の `availableAt` を実時刻で付けたため、runtime の時計を実時刻より後にしている。今の Fake は `opts.now` に従う（ADR 0555）ので、この置き方は必須ではない（組み替えは ADR 0555 の「残り」）。
 const LATER = new Date(Date.now() + 60_000);
 
 function newMemory(): NewMemory {

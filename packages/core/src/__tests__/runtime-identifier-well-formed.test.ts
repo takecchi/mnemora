@@ -4,14 +4,6 @@ import type { LLMProvider } from "../interfaces/llm-provider.js";
 import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * 保存の形で区別できない識別子を、runtime の入口で断る（ADR 0423）。
- *
- * 断る対象は、孤立サロゲートか NUL を含む `ctx.tenantId`・`ctx.subjectId` と、`observe` の入力の
- * `subjectId`・`externalId`。例外は `kind: "malformed_identifier"`（ADR 0418 の作法）で、message に
- * 入力値は入らない。本文（`text` など）には掛けない。
- */
-
 const notUsedLlm: LLMProvider = {
   complete: async () => {
     throw new Error("not used");

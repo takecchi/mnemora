@@ -224,7 +224,6 @@ describe("createOptionalTrigramIndexConcurrently: INVALID な索引を消すと�
     );
     expect((await indexState(pool, INDEX_NAME))?.valid).toBe(false);
 
-    // 未完了の書き込みで、DROP を最初の待ちに止める。
     const holder = await pool.connect();
     let build: Promise<void> | undefined;
     try {

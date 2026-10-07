@@ -7,8 +7,6 @@ import {
   WELL_FORMED_NEW_MEMORY_CASES,
 } from "./malformed-new-memory-cases.js";
 
-/** ADR 0630: 3つの実装が共有する検査関数（`assertWellFormedNewMemory`）そのものの歯。 */
-
 const base = (over: Partial<NewMemory>): NewMemory => ({
   tenantId: "t",
   subjectId: null,

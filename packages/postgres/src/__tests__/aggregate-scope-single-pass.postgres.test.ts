@@ -21,27 +21,10 @@ import {
 } from "./test-db.js";
 
 /**
- * Issue #355 / ADR 0307: `PostgresMemoryStore.aggregateScope` を
- * 「各行の述語を1回だけ計算し `GROUP BY subject_id` で1パスに畳む」形へ書き換えた
- * （`memory-store.ts` の doc コメント「単一パス書き換え」節）。この歯は、
- * **書き換え前の実装が返していたのとビット単位で同じ結果を、書き換え後の実装が
- * 返し続けること**を検査する——公開 API・返り値・既定挙動は1バイトも変えていない、
- * という主張の根拠である。
- *
- * `oracleAggregateScope` は、本 PR が分岐した時点（`f3b3516`）の
- * `PostgresMemoryStore.aggregateScope` の SQL を**そのまま書き写した**参照実装である。
- * ⛔ **この関数は書き換えない**——「旧実装が何を返していたか」の固定された記録として、
- * 新実装（`memory-store.ts`）の変更から独立に保つ。
- *
- * **⚠ 唯一の例外（2026-09-25、Issue #201 PR-B、
- * [ADR 0323](../../../docs/decisions/0323-taxonomy-recall-filter.md)）**:
- * `ScopeAggregate.filteredTaxonomy` が新設の**必須**フィールドになったため、
- * この関数の返り値もこの型を満たすには何かを書かなければ型検査が通らない。
- * **SQL・計算ロジックは1行も変えていない**——`filteredTaxonomy: { count: 0,
- * countKind: 'exact' }` を返り値の末尾に固定値として足しただけである。当時の実装は
- * taxonomy という概念自体を持たなかったので「0」以外の値を計算しようがない
- * （この歯のどのフィクスチャも `scope.labels` を渡さないため、新実装側の
- * `filteredTaxonomy.count` も常に0になり、比較は成立する）。
+ * `oracleAggregateScope` は、書き換え前の `aggregateScope` の SQL をそのまま書き写した参照実装である。
+ * ⛔ この関数は書き換えない。旧実装が何を返していたかの固定された記録として、新実装の変更から独立に保つ。
+ * 唯一の例外は、型を満たすために返り値の末尾へ足した固定値 `filteredTaxonomy: { count: 0, countKind: 'exact' }` で、
+ * どのフィクスチャも `scope.labels` を渡さないため、新実装側の `filteredTaxonomy.count` も常に0になり比較が成り立つ。
  */
 
 const TENANT = "agg-scope-oracle-tenant";
@@ -234,14 +217,13 @@ async function oracleAggregateScope(
     filteredExpired: { count: row.expired_filtered, countKind: "exact" },
     filteredNotYetValid: { count: row.not_yet_valid_filtered, countKind: "exact" },
     filteredDecayed: { count: row.decayed_filtered, countKind: "exact" },
-    // Issue #201 PR-B（ADR 0323）: クラス doc の「唯一の例外」参照。
     filteredTaxonomy: { count: 0, countKind: "exact" },
     digests,
     digestEligible,
   };
 }
 
-/** groups は順序不定（doc コメント参照）——比較の前に key で安定ソートする。 */
+/** groups は順序不定——比較の前に key で安定ソートする。 */
 function sortedGroups(groups: ScopeAggregate["groups"]): ScopeAggregate["groups"] {
   return [...groups].sort((a, b) => {
     const ak = a.key ?? "";
@@ -252,8 +234,7 @@ function sortedGroups(groups: ScopeAggregate["groups"]): ScopeAggregate["groups"
 
 function expectSameAggregate(actual: ScopeAggregate, oracle: ScopeAggregate): void {
   expect(sortedGroups(actual.groups)).toEqual(sortedGroups(oracle.groups));
-  // digests は決定的な順序（ORDER BY eff_time DESC, id DESC）そのものが契約なので、
-  // 配列全体を順序込みで比較する。
+  // digests は決定的な順序そのものが契約なので、配列全体を順序込みで比較する。
   expect(actual).toEqual({ ...oracle, groups: actual.groups });
 }
 
@@ -274,11 +255,7 @@ describe("aggregateScope: 単一パス書き換えの等価性（Issue #355、�
 
   const ctx: Ctx = { tenantId: TENANT };
 
-  /**
-   * 各 FILTER 枝・subject 有無・NULL subject・decay の各軸を踏むデータセットを作る。
-   * 返り値は、除外リストや contestedWithId に使う id を後段のテストが参照できるように、
-   * ラベル付きで返す。
-   */
+  /** 後段のテストが除外リストや contestedWithId に使う id を参照できるよう、ラベル付きで返す。 */
   async function seedMatrix(): Promise<Record<string, Memory>> {
     const created: Record<string, Memory> = {};
     const put = async (label: string, overrides: Parameters<typeof buildNewMemoryFixture>[0]) => {
@@ -290,7 +267,6 @@ describe("aggregateScope: 単一パス書き換えの等価性（Issue #355、�
 
     const t = (iso: string) => new Date(iso);
 
-    // --- subject s1: 通常の active、period 内、validity ゲート無し ---
     await put("s1-active-1", {
       subjectId: "s1",
       status: "active",
@@ -308,7 +284,6 @@ describe("aggregateScope: 単一パス書き換えの等価性（Issue #355、�
       embeddingStatus: "pending",
     });
 
-    // --- subject s2: embeddingStatus 3種 ---
     await put("s2-pending", {
       subjectId: "s2",
       status: "active",
@@ -331,11 +306,10 @@ describe("aggregateScope: 単一パス書き換えの等価性（Issue #355、�
       recordedAt: t("2026-01-07T00:00:00Z"),
     });
 
-    // --- subject s3: status 4分岐（archived/superseded/forgotten/contested） ---
     await put("s3-archived", { subjectId: "s3", status: "archived" });
     await put("s3-superseded", { subjectId: "s3", status: "superseded" });
     await put("s3-forgotten", { subjectId: "s3", status: "forgotten" });
-    // contested は companion（実在する memory）を要求する（FK・ADR 0140）。
+    // contested は companion（実在する memory）を要求する（FK）。
     await put("s3-companion", { subjectId: "s3", status: "active" });
     created["s3-contested"] = await memoryStore.createMemory(
       ctx,
@@ -347,7 +321,6 @@ describe("aggregateScope: 単一パス書き換えの等価性（Issue #355、�
       }),
     );
 
-    // --- NULL subject（主題なし） ---
     await put("null-subject-active", {
       subjectId: null,
       status: "active",
@@ -357,7 +330,6 @@ describe("aggregateScope: 単一パス書き換えの等価性（Issue #355、�
     });
     await put("null-subject-archived", { subjectId: null, status: "archived" });
 
-    // --- period: 窓の外（前・後） ---
     await put("s1-before-window", {
       subjectId: "s1",
       status: "active",
@@ -371,7 +343,6 @@ describe("aggregateScope: 単一パス書き換えの等価性（Issue #355、�
       recordedAt: t("2026-06-01T00:00:00Z"),
     });
 
-    // --- validity: expired / not_yet_valid / valid ---
     await put("s1-expired", {
       subjectId: "s1",
       status: "active",
@@ -396,7 +367,6 @@ describe("aggregateScope: 単一パス書き換えの等価性（Issue #355、�
       recordedAt: t("2026-01-10T00:00:00Z"),
     });
 
-    // --- decay: wall/activity 両軸、生存/減衰の組合せ ---
     await put("s4-wall-alive-seq-alive", {
       subjectId: "s4",
       status: "active",
@@ -438,7 +408,6 @@ describe("aggregateScope: 単一パス書き換えの等価性（Issue #355、�
       recordedAt: t("2026-01-10T00:00:00Z"),
     });
 
-    // --- digest tie: 同時刻（occurred_at 一致）で id DESC のタイブレークを踏む ---
     const tieTime = t("2026-01-11T00:00:00Z");
     await put("tie-a", {
       subjectId: "s1",
@@ -464,7 +433,6 @@ describe("aggregateScope: 単一パス書き換えの等価性（Issue #355、�
     const actual = await memoryStore.aggregateScope(ctx, scope);
     const oracle = await oracleAggregateScope(db, ctx, scope);
     expectSameAggregate(actual, oracle);
-    // 被覆不変条件そのものも、この歯の副産物として確認しておく。
     expect(actual.groups.reduce((sum, g) => sum + g.count, 0)).toBe(actual.totalInScope);
   });
 
@@ -492,8 +460,6 @@ describe("aggregateScope: 単一パス書き換えの等価性（Issue #355、�
     const actual = await memoryStore.aggregateScope(ctx, scope);
     const oracle = await oracleAggregateScope(db, ctx, scope);
     expectSameAggregate(actual, oracle);
-    // NULL subject の在る groups が実際に含まれることを確認する
-    // （書き換えが GROUP BY で NULL を別グループとして保つことの直接証拠）。
     expect(actual.groups.some((g) => g.key === null)).toBe(true);
   });
 
@@ -573,14 +539,8 @@ describe("aggregateScope: 単一パス書き換えの等価性（Issue #355、�
     expectSameAggregate(actual, oracle);
     expect(actual.digests.length).toBe(5);
     expect(actual.digests.some((d) => d.memoryId === rows["s1-active-2"]!.id)).toBe(false);
-    // tie-a/tie-b は occurred_at が同一 → id の降順で並ぶはず。オラクルと完全一致することで、
-    // 新実装が `memories` を直接引いても同じタイブレークを保っていることが分かる。
   });
 
-  // Issue #1775 の #721 の変異F: `digest_eligible_count` の引き算（除外 id の分）は、範囲内（status・period・
-  // validAt の絞りを通る）の除外 id だけを引く（ADR 0307 決定4「in_scope 条件を満たす件数を引く」）。
-  // 歯の除外 id は範囲内の記憶だけだったので、範囲外（archived・period の外・validAt の外）の除外 id も引く
-  // 変異が緑のままだった。範囲外の id を混ぜて渡し、旧実装のオラクルと一致する（引かれすぎない）ことを見る。
   it("digestBand の除外 id に範囲外（archived・period の外・validAt の外）の記憶を混ぜても、digestEligible は旧実装と一致する", async () => {
     const rows = await seedMatrix();
     const scope: RecallScope = {
@@ -611,8 +571,7 @@ describe("aggregateScope: 単一パス書き換えの等価性（Issue #355、�
     expect(actual.digestEligible.count).toBe(withoutExclusion.digestEligible.count - 1);
   });
 
-  // Issue #1775 の #721 の変異K: 集計は SQL 文が1本（PR 本文・ADR 0307 決定7。同じスナップショットを根拠にする、ADR 0011）。
-  // `recall.postgres.test.ts` の「単一の SQL 往復」の歯は `FROM memories` を含む文だけを数えるので、含まない別の文が
+  // `recall.postgres.test.ts` の単一の SQL 往復の検査は `FROM memories` を含む文だけを数えるので、含まない別の文が
   // 足されても赤くならない。ここでは `aggregateScope` の呼び出し中に DB へ流れた文を、すべて数える。
   it("aggregateScope の呼び出し中に DB へ流れる文は1本だけ（digestBand あり・なし）", async () => {
     await seedMatrix();
@@ -720,15 +679,7 @@ describe("aggregateScope: 単一パス書き換えの等価性（Issue #355、�
     }
   }, 60_000);
 
-  /**
-   * 赤→緑の記録（PR 本文参照）: 書き換え前の実装は `scoped` CTE を3回参照するため
-   * Postgres が実体化し、`EXPLAIN` に `CTE Scan on scoped` が複数回現れる
-   * （【実測】本 PR 分岐点 `f3b3516` の実装、`digestBand` を渡した呼び出しで
-   * 3箇所に出現。テスト行数の多寡に関わらず、CTE の参照回数だけで決まる
-   * planner の判断であることを、少数行のテストデータでも確認した）。
-   * 書き換え後は `scoped`/`agg` とも1回しか参照されないため、Postgres は既定で
-   * インライン化し、`CTE Scan` は1つも現れない。
-   */
+  /** `scoped`/`agg` を2回以上参照すると Postgres が実体化し、`EXPLAIN` に `CTE Scan` が現れる。1回だけの参照なら既定でインライン化される。 */
   it("構造的な検査: digestBand 込みでも `scoped`/`agg` を実体化しない（CTE Scan が無い）", async () => {
     const { pool } = await getTestClient();
     await seedMatrix();

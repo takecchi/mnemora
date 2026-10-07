@@ -14,16 +14,7 @@ import {
   TEST_EMBEDDING_SPACE,
 } from "./test-db.js";
 
-/**
- * ADR 0407: `observe({ extract: "sync" })` が積む extract のジョブは、observe が LLM を待っている間、
- * tick に claim されない（observe がリースを持った状態で作る）。
- *
- * 穴（D-1）: 以前は「すぐ claim できる状態」で作っていたため、observe が LLM を待つ間に tick が
- * 同じジョブを claim し、LLM が2回呼ばれ、中身の違う記憶が2件とも active で残り、observe は
- * `complete` が `OutboxLeaseConflictError` で落ちて `memoryIds` を返せなかった。
- *
- * 順序は時計と門（Promise）で決める。タイミングには頼らない。
- */
+/** `observe({ extract: "sync" })` が積む extract のジョブは、observe がリースを持った状態で作るので、observe が LLM を待っている間は tick に claim されない。順序は時計と門（Promise）で決め、タイミングには頼らない。 */
 
 let nowMs = 0;
 const clock = { now: () => new Date(nowMs) };

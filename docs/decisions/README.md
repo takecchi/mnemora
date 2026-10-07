@@ -681,6 +681,8 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0684](./0684-merged-0928-recheck-teeth-d.md) | 09/28 にマージされた D 群7本（#1305・#1306・#1312・#1314・#1323・#1328・#1333）の確かめ直しで見つかった穴に歯を足す（Issue #1827） | 採用 (2026-10) |
 | [0685](./0685-merged-0928-recheck-teeth-e.md) | 09/28 にマージされた E 群（#1339・#1382）の確かめ直しで見つかった穴に歯を足す（Issue #1827） | 採用 (2026-10) |
 | [0686](./0686-merged-0930-front-tail-c-recheck-teeth-1457-1546.md) | 09/30 マージの前半の残り（C 群の #1457・#1477・#1530・#1531・#1546）の確かめ直しで見つかった穴に歯を足す（Issue #1734） | 採用 (2026-10) |
+| [0687](./0687-merged-0930-front-tail-d-recheck-teeth-1459-1464.md) | 09/30 マージの前半の残り（D 群の #1459・#1464）の確かめ直しで見つかった穴に歯を足す（Issue #1734） | 採用 (2026-10) |
+| [0688](./0688-merged-0917-450-outbox-concurrent-claim-postgres-recheck-teeth.md) | 09/17 にマージされた #450（outbox の同時 claim の適合テスト）の Postgres 側の確かめ直しで見つかった穴に歯を足す（Issue #1812、まとまり G5 の Postgres 側） | 採用 (2026-10) |
 | [0690](./0690-merged-0916-recheck-teeth-core-recall-gates.md) | 09/16 にマージされた G2（core の recall ゲート・排他・型）12本の確かめ直しで見つかった穴に歯を足す（Issue #1815） | 採用 (2026-10) |
 
 <!-- ADR-INDEX:GENERATED:END -->
