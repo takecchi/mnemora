@@ -22,17 +22,6 @@ import {
   TEST_EMBEDDING_SPACE,
 } from "./test-db.js";
 
-/**
- * `consolidate` が何を統合元として選ぶかを、今の振る舞いのまま縛る（`ConsolidateTarget` の TSDoc の
- * 2026-09-27 追記）。約束を足すものではない。
- *
- * - `{ query }` は `recall()` の `memories` を `retrievedVia` によらず全部採る。連想枠（既定 on）で
- *   返った記憶も適格になり、`query.association: null` で外れる。
- * - どの形でも、いまの時点で有効期間の外にある記憶は統合元にしない（`expired`/`not_yet_valid`）。統合先は
- *   今どおり有効期間を持たない（Issue #1188。2026-09-29 に「有効期間を見ない」から変えた）。
- * 2実装（Postgres・testkit の InMemory）で同じ結果になることも見る。
- */
-
 interface Kit {
   runtime: Runtime;
   memoryStore: MemoryStore;
@@ -170,7 +159,6 @@ describe("consolidate の対象の選び方（今の振る舞い）", () => {
         const PAST = new Date("2026-01-01T00:00:00.000Z");
         const FUTURE = new Date("2027-01-01T00:00:00.000Z");
 
-        // { memoryIds }: 期限切れ E と有効な F。E を除くと1件なので統合しない。
         {
           const kit = await makeKit();
           const expired = await add(kit, [1, 0, 0], { validUntil: PAST } as Partial<NewMemory>);
@@ -192,10 +180,6 @@ describe("consolidate の対象の選び方（今の振る舞い）", () => {
           expect((await kit.memoryStore.get(ctx, current))?.status).toBe("active");
         }
 
-        // { memoryIds }: 未到来 U と有効な F・G。U を除いた2件を統合する。F・G はどちらも
-        // 有効期間を持たない（`add` はデフォルトで validFrom/validUntil を付けない）ので、
-        // 積（Issue #1188 残り、ADR 0368）も両方 null——非 null な積は
-        // `consolidate-reflect-carryover.postgres.test.ts` の専用の it が検査する。
         {
           const kit = await makeKit();
           const future = await add(kit, [1, 0, 0], { validFrom: FUTURE } as Partial<NewMemory>);
@@ -217,7 +201,6 @@ describe("consolidate の対象の選び方（今の振る舞い）", () => {
           expect((await kit.memoryStore.get(ctx, future))?.status).toBe("active");
         }
 
-        // { seedMemoryId }: 期限切れの種は recall() を通らずに候補に入るが、統合元にはしない。
         {
           const kit = await makeKit();
           const seed = await add(kit, [1, 0, 0], { validUntil: PAST } as Partial<NewMemory>);
@@ -235,7 +218,6 @@ describe("consolidate の対象の選び方（今の振る舞い）", () => {
           ]);
         }
 
-        // { query }: includeOutsideValidity で集めても、期限切れは統合元にしない。
         {
           const kit = await makeKit();
           const expired = await add(kit, [1, 0, 0], { validUntil: PAST } as Partial<NewMemory>);

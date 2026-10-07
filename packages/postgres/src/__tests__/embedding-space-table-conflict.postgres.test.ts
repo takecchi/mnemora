@@ -5,15 +5,6 @@ import { embeddingSpaceTableName } from "../embedding-space-table.js";
 import { registerEmbeddingSpace } from "../vector-space.js";
 import { closeTestClient, getTestClient } from "./test-db.js";
 
-/**
- * Issue #1151: `embeddingSpaceTableName` は単射ではなく、正規化の後に同じ綴りになる空間どうしは
- * 同じテーブルに潰れる。導出は変えず、`registerEmbeddingSpace` がテーブルのコメントに空間の組を
- * 記録し、別の組が同じテーブルを登録しようとしたら拒む。
- *
- * 【実測 2026-09-27、修正前】下の4組は、どれも2つ目の登録が黙って成功し、片方の空間の
- * `search` がもう片方のベクトルを返した。
- */
-
 const PAIRS: Array<[string, EmbeddingSpaceId, EmbeddingSpaceId]> = [
   [
     "区切りの位置が違う",
@@ -35,9 +26,8 @@ const PAIRS: Array<[string, EmbeddingSpaceId, EmbeddingSpaceId]> = [
     { provider: "x", model: "日本語モデル", dimensions: 3 },
     { provider: "x", model: "中文模型", dimensions: 3 },
   ],
-  // 上の4組は、どれも model の綴りか、大文字小文字以外の違いも持っている（そのため、組の比較が
-  // 大文字小文字を畳んでも、provider を見なくても、model の違いで拒めてしまう）。次の2組は、違う欄を
-  // provider の1つだけにしてあり、比較が provider を・大文字小文字を区別して見ていることを縛る。
+  // 上の4組は、どれも model の綴りか、大文字小文字以外の違いも持っているので、組の比較が大文字小文字を畳んでも provider を見なくても model の違いで拒めてしまう。
+  // 次の2組は、違う欄を provider の1つだけにしてあり、比較が provider を・大文字小文字を区別して見ていることを縛る。
   [
     "provider の大文字小文字だけが違う（model・dimensions は同じ）",
     { provider: "ZzProbe", model: "probe-model", dimensions: 3 },
@@ -151,7 +141,6 @@ describe("registerEmbeddingSpace は、同じテーブルに潰れる別の空�
       expect(rejected).toHaveLength(1);
       const reason = (settled[rejected[0]!] as PromiseRejectedResult).reason as Error;
       expect(reason.name).toBe("EmbeddingSpaceTableConflictError");
-      // 通った側の組が、テーブルの持ち主として記録されている（拒まれた側に上書きされていない）。
       const winner = fulfilled[0] === 0 ? first : second;
       expect(await commentOf(table)).toBe(
         `mnemora:embedding-space:${JSON.stringify({
@@ -164,10 +153,9 @@ describe("registerEmbeddingSpace は、同じテーブルに潰れる別の空�
   );
 
   it("1つ目が「コメントを読んでから書くまで」の間に止まっていても、2つ目はその間に割り込めず、拒まれる", async () => {
-    // 突き合わせ（読み）と記録（書き）が advisory lock の内側に一続きで在れば、1つ目が書き終えるまで
-    // 2つ目はロックを待つので、2つ目の読みは1つ目の記録を見る。lock の外に出ていると、2つ目は
-    // 1つ目の書きの前に「コメントが無い」と読んで自分の組を書き、後から来た1つ目がそれを上書きする
-    // （どちらも成功し、コメントは後から書いた側の組になる）。窓を測れる幅（400ms）にして、順序を固定する。
+    // 突き合わせ（読み）と記録（書き）が advisory lock の内側に一続きで在れば、2つ目の読みは1つ目の記録を見る。
+    // lock の外に出ていると、2つ目は1つ目の書きの前に「コメントが無い」と読んで自分の組を書き、後から来た1つ目がそれを上書きする（どちらも成功する）。
+    // 窓を測れる幅（400ms）にして、順序を固定する。
     const { pool } = await getTestClient();
     const [, first, second] = PAIRS[0]!;
     const table = embeddingSpaceTableName(first);

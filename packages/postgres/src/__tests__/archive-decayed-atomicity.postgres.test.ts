@@ -5,22 +5,12 @@ import { PostgresMemoryStore } from "../memory-store.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
 /**
- * ADR 0114: `archiveDecayed` の「`memories.status` の更新と `memory_events` への
- * `kind='archived'` の追記は同一トランザクションである」という主張を、
- * **実際に片方を失敗させて**検査する。
+ * 適合スイートの検査はすべて正常系で、`UPDATE ... RETURNING` と `INSERT` を別の文に割る変異は正常系では同じ結果を返す。
+ * そのため `memory_events` への INSERT を必ず失敗させるトリガーを一時的に作り、`archiveDecayed` が例外で終わったあとに
+ * `memories.status` が `active` のまま巻き戻っていることを見る。
  *
- * `requeue-embed-jobs-atomicity.postgres.test.ts`（ADR 0079）と同じ理由・同じ形——
- * 適合スイート（`packages/testkit/src/memory-store-conformance.ts`）の検査はすべて
- * 正常系であり、実装を「`UPDATE ... RETURNING` を打ってから、別の文で `INSERT`」の
- * 2文へ割る変異は正常系では同じ結果を返す。ここでは `memory_events` への INSERT を
- * 必ず失敗させるトリガーを一時的に作り、`archiveDecayed` が例外で終わったあとに
- * **`memories.status` が `active` のまま巻き戻っている**ことを見る。2文に割った実装なら
- * `UPDATE` だけがコミットされ、Memory は「archived になったのに、それを裏付ける
- * `archived` イベントが1件も無い」——`docs/memory-model.md` §9 が要求する
- * 「削除経路とジャーナルへの追記は同一トランザクション」の不変条件が破れた状態で残る。
- *
- * ⚠ トリガーは `finally` で必ず落とす（`resetTestDatabase()` はスキーマを作り直さない
- * ため、落とし忘れると同じプロセス内で後から走る他のテストファイルまで巻き込む）。
+ * ⚠ トリガーは `finally` で必ず落とす（`resetTestDatabase()` はスキーマを作り直さないため、落とし忘れると
+ * 同じプロセス内で後から走る他のテストファイルまで巻き込む）。
  */
 
 const TENANT = "archive-decayed-atomicity-tenant";
@@ -44,9 +34,8 @@ const DROP_FAILING_TRIGGER = `
 `;
 
 /**
- * `requeue-embed-jobs-atomicity.postgres.test.ts` の `messageChain` と同一。
- * drizzle の `db.execute()` が投げる例外は `Failed query: <SQL>` という別の `Error` で
- * 包まれ、元の PostgreSQL のメッセージは `cause` 側に入る。
+ * drizzle の `db.execute()` が投げる例外は `Failed query: <SQL>` という別の `Error` で包まれ、
+ * 元の PostgreSQL のメッセージは `cause` 側に入る。
  */
 function messageChain(error: unknown): string {
   const parts: string[] = [];
@@ -65,8 +54,7 @@ describe("archiveDecayed の原子性（ADR 0114）", () => {
 
   afterAll(async () => {
     const { pool } = await getTestClient();
-    // 念のためもう一度落とす（各 it の finally で落としているが、そこへ到達しないまま
-    // 落ちた場合に後続のテストファイルへ漏らさないため）。
+    // 各 it の finally で落としているが、そこへ到達しないまま落ちた場合に後続のテストファイルへ漏らさないため、念のためもう一度落とす。
     await pool.query(DROP_FAILING_TRIGGER);
     await closeTestClient();
   });
@@ -95,7 +83,6 @@ describe("archiveDecayed の原子性（ADR 0114）", () => {
         /archive-decayed-atomicity: memory_events insert blocked on purpose/,
       );
 
-      // 🔴 ここが本題。UPDATE だけがコミットされていたら status は 'archived' になっている。
       const after = await store.get(ctx, memory.id);
       const events = await pool.query(
         "SELECT count(*)::int AS n FROM memory_events WHERE tenant_id = $1 AND memory_id = $2",

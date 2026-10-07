@@ -19,10 +19,7 @@ import {
 
 const TABLE = embeddingSpaceTableName(TEST_EMBEDDING_SPACE);
 
-/**
- * `purge-during-embed-job.postgres.test.ts`（Issue #1035）と同じ型の障壁。
- * embed ジョブを決まった地点で止める。
- */
+/** embed ジョブを決まった地点で止める障壁。 */
 class Gate {
   private enteredResolve!: () => void;
   readonly entered = new Promise<void>((resolve) => {
@@ -61,19 +58,6 @@ class GatedEmbeddingProvider implements EmbeddingProvider {
   }
 }
 
-/**
- * Issue #1207 / [ADR 0383](../../../../docs/decisions/0383-erase-tenant.md):
- *
- * embed ジョブ（`tick()` の `processEmbedJob`）は Memory を読んでから provider を呼び、
- * その結果を `vectorStore.upsert` する。その間に `eraseTenant` が完了すると、
- * ジョブが「もう存在しないテナント」へ向けて書こうとする形になる——
- * `vectorStore.upsert` は `memory_id uuid NOT NULL REFERENCES memories(id) ON DELETE
- * CASCADE` を経由するため、`memories` 行が既に消えていれば `INSERT` 自体が外部キー
- * 違反（23503）で失敗する。
- *
- * ⟹ **`eraseTenant` が消し切った後、embed ジョブが後から書き込んでも、埋め込みの行は
- * 残らない**（書き込みそのものが失敗するため）。この歯はそれを実測する。
- */
 describe("eraseTenant している最中に embed ジョブが走っても、消し切った後に埋め込みの行は残らない（Issue #1207、本物の Postgres）", () => {
   beforeEach(async () => {
     await resetTestDatabase();
@@ -111,7 +95,6 @@ describe("eraseTenant している最中に embed ジョブが走っても、消
     const memoryId = observed.memoryIds[0]!;
 
     const tick = runtime.tick(ctx, { leaseMs: 60_000 });
-    // embed ジョブが Memory を読んだ後、provider の応答待ちで止まっている。
     await gate.entered;
 
     const deps = { memoryStore, vectorStore, outboxStore, tenantSettingsStore };
@@ -124,7 +107,6 @@ describe("eraseTenant している最中に embed ジョブが走っても、消
     }
     expect(outcome.kind).toBe("executed");
 
-    // このテナントの memories はもう無い。
     expect(await memoryStore.get(ctx, memoryId)).toBeNull();
 
     gate.release();
@@ -138,7 +120,6 @@ describe("eraseTenant している最中に embed ジョブが走っても、消
     );
     expect((rows.rows[0] as { n: number }).n).toBe(0);
 
-    // pool 側からも二重に確認する（`db`/`pool` が同じ接続プールを指すことの確認込み）。
     const poolRows = await pool.query<{ n: number }>(
       `SELECT count(*)::int AS n FROM ${TABLE} WHERE tenant_id = $1`,
       [T],

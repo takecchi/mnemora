@@ -8,18 +8,10 @@ import { PostgresMemoryStore } from "../memory-store.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
 /**
- * ADR 0435 の「名前の無い 54000」（`index row requires N bytes, maximum size is 8191`）を `ClaimKeyIndexLimitError` に
- * 包む条件のうち、冪等の索引（`uq_memories_extraction`: tenantId・sourceObservationId・extractorVersion・contentHash）の項を縛る。
- * 項は tenantId・extractorVersion・contentHash の3つで、3つの合計が btree の上限（2704 バイト）を超えたら包まない
- * （冪等の索引の行が原因かもしれないので、claim key のせいとは言えない）。
- *
- * - 本物の Postgres: claimKey が小さく、extractorVersion か contentHash だけが1万字のとき、名前の無い 54000 が出て、
- *   包まれずに生の例外のまま出る（`uq_memories_extraction` は sourceObservationId があるときだけ効く partial 索引）。
- * - 合成した 54000: 3つの項のそれぞれが、合計に入っている（1つだけ外すと包んでしまう入力）。tenantId は本物の索引の行が
- *   8191 バイトに届く大きさにすると `tenantId + subjectId` の項が先に弾くので、本物では縛れず、ここで縛る。
- * - 境界: 合計がちょうど 2704 バイトなら包み、2705 バイトなら包まない。
- *
- * 縛らないもの: 例外の型（`RangeError` かどうか）、`cause` に pg の欄を全部写すかどうか。
+ * 冪等の索引（`uq_memories_extraction`）の項は tenantId・extractorVersion・contentHash の3つで、3つの合計が
+ * btree の上限（2704 バイト）を超えたら包まない（冪等の索引の行が原因かもしれないので、claim key のせいとは言えない）。
+ * tenantId は、本物の索引の行が 8191 バイトに届く大きさにすると `tenantId + subjectId` の項が先に弾くので、
+ * 本物の Postgres では縛れず、合成した 54000 で縛る。
  */
 
 afterAll(async () => {
@@ -85,7 +77,6 @@ describe("名前の無い 54000: 冪等の索引の項（本物の Postgres）",
       );
       expect(error, name).toBeInstanceOf(Error);
       expect(isClaimKeyIndexLimitError(error), name).toBe(false);
-      // 名前の無い形の 54000 そのもの（drizzle の例外の cause の連鎖のどこかに在る）。
       let found = false;
       let current: unknown = error;
       while (typeof current === "object" && current !== null) {
@@ -111,7 +102,6 @@ describe("createMemoriesWithOutboxAndEvents: 全候補が落ちたときは最�
       contentHash: "limit-failure",
       claimKey: { subject: "s", predicate: incompressibleHex("p", 10000) },
     });
-  // 値域の外（23514）。ClaimKeyIndexLimitError とは別の形で落ちる。
   const checkFailure = () =>
     buildNewMemoryFixture({
       tenantId: "claim-key-first-error",

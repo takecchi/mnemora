@@ -12,21 +12,11 @@ import {
 } from "./test-db.js";
 
 /**
- * `listActiveClaimPredicates` が `idx_memories_claim_predicates`
- * （`migrations/0029_memories_claim_predicates_index.sql`、ADR 0329 の 2026-09-30 追記）で
- * **Index Only Scan** になること、と索引の定義。`claim-key-index.postgres.test.ts`（汎用の
- * `idx_memories_claim_key` の歯）と同じ形で、期待値は時間ではなく計画の形で書く。
- *
- * ## なぜ EXPLAIN の歯にしたか（定義の確認だけにしなかった）
- *
- * 索引の存在と定義だけを見る歯なら、プランナが選ばなくなっても緑のままになる（索引が
- * 飾りになる）。`status` を部分索引の述語へ移した理由は「問い合わせの `WHERE` と同じ形なので
- * プランナが述語を導ける」ことなので、選ばれることまで見る。プランナ依存で不安定になりうるので、
- * 行数（60,000）・統計（`VACUUM ANALYZE`。visibility map を all-visible にして Index Only Scan
- * を選ばせる）を揃え、Index Only Scan を選ぶほど十分に偏りのあるデータ（対象 subject の
- * active な claim key 行は全体の一部）にしてある。⚠ 版・統計・データ規模に依存する
- * （`trigram-lexical-store-index.postgres.test.ts` と同じ留保）。索引の定義は別の `it` で
- * `pg_get_indexdef` を見る（EXPLAIN が不安定になったときも定義の歯は残る）。
+ * 索引の存在と定義だけを見る歯では、プランナが選ばなくなっても緑のままになる（索引が飾りになる）ので、
+ * Index Only Scan が選ばれることまで EXPLAIN で見る。期待値は時間ではなく計画の形で書く。
+ * プランナ依存で不安定になりうるので、行数（60,000）・統計（`VACUUM ANALYZE`）を揃え、対象 subject の
+ * active な claim key 行が全体の一部になる偏りのあるデータにしてある。⚠ 版・統計・データ規模に依存する。
+ * 索引の定義は別の `it` で `pg_get_indexdef` を見る（EXPLAIN が不安定になったときも定義の歯は残る）。
  */
 
 const TENANT = "claim-predicates-index";
@@ -36,8 +26,6 @@ const STATUSES = ["active", "superseded", "contested", "archived", "forgotten"];
 
 async function seed(pool: Pool): Promise<void> {
   const ids = Array.from({ length: ROWS }, () => randomUUID());
-  // status は i % 10 で active 6割・他4種が各1割。claim key は3行に1行。subject は
-  // 's1'..'s99'、i % 100 = 0 の行は subject なし。predicate は 200 種。
   await pool.query(
     `INSERT INTO memories (id, tenant_id, subject_id, content, content_hash, digest, digest_source,
         provenance_kind, provenance, status, tags, recorded_at, strength, half_life_hours,

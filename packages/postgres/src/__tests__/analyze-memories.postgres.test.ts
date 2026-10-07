@@ -9,32 +9,8 @@ import { runAnalyzeMemories, runMigrations } from "../migrate.js";
 import { requireDatabaseUrl } from "./test-db.js";
 
 /**
- * `runAnalyzeMemories`（`../migrate.ts`）と、それを配線する CLI フラグ
- * `mnemora-postgres-migrate --analyze-memories`（`../bin/migrate.ts` /
- * `../bin/cli-options.ts`）を検査する歯（Issue #234 / ADR 0143）。
- *
- * ## この歯が実際に検出する不具合
- *
- * `docs/decisions/0062-contested-with-id-fk-index.md` (d)(ii) が実測したとおり、
- * `migrations/0005_analyze_memories.sql` は新規インストールでは何もしない
- * （マイグレーションはデータが入る前に適用されるため）。⟹ 行を投入しただけでは
- * `pg_class.reltuples` は更新されない——これを**まず実際に再現**（下の
- * 「行を入れただけでは reltuples が動かないこと」）し、次に `runAnalyzeMemories`/
- * `--analyze-memories` を呼ぶと実際に更新されることを確認する。
- *
- * ## なぜ専用スキーマを使うか
- *
- * `getTestClient()`（共有クライアント）が指す `public.memories` は他のテスト
- * ファイルと共有されており、行数・統計情報が競合しうる（`run-db-tests.mjs` 冒頭の
- * doc コメントが指摘する「TRUNCATE の競合」と同種の危険）。ここでは
- * `migrate-cli-schema.postgres.test.ts` と同じ形で、このファイル専用のスキーマを
- * `runMigrations({ schema })` で独立に用意し、他のテストと行を共有しない。
- *
- * ## 測っていないこと（この歯の外側）
- *
- * `ANALYZE` の実行時間・ロックの実際の挙動（公式文書からの引用であり実測ではない、
- * `runAnalyzeMemories` の doc コメント参照）はこの歯では検査しない——ここで検査するのは
- * 「統計が実際に更新されるか」という結果だけである。
+ * 共有の `public.memories` は他のテストファイルと行数・統計が競合しうるので、このファイル専用のスキーマを
+ * `runMigrations({ schema })` で用意し、他のテストと行を共有しない。
  */
 
 const execFileAsync = promisify(execFile);
@@ -55,10 +31,8 @@ async function dropAllSchemas(pool: Pool): Promise<void> {
 }
 
 /**
- * `schema` の `memories` に、必須列だけを埋めた行を `count` 件バルク投入する
- * （`contested-with-index.test.ts` の `seedContestedMemories` と同じ `unnest` の形。
- * **ここでは意図的に `ANALYZE` を呼ばない**——「投入しただけでは統計が動かないこと」を
- * 検査するのがこのファイルの前提であるため）。
+ * `schema` の `memories` に、必須列だけを埋めた行を `count` 件バルク投入する。
+ * 意図的に `ANALYZE` を呼ばない（投入しただけでは統計が動かないことを検査するため）。
  */
 async function seedBareMemories(pool: Pool, schema: string, count: number): Promise<void> {
   const ids: string[] = Array.from({ length: count }, () => randomUUID());
@@ -159,16 +133,11 @@ describe("runAnalyzeMemories と --analyze-memories（DB 必須、Issue #234 / A
       const pool = adminPool!;
       await runMigrations(pool, undefined, { schema: SCHEMA_LIB });
 
-      // 0005_analyze_memories.sql は空テーブルに対して適用済みなので、この時点で
-      // reltuples は 0（「一度 ANALYZE された空テーブル」）——ADR 0062 (d)(i) の表の
-      // 1行目と同じ状態。
       const beforeInsert = await reltuplesFor(pool, SCHEMA_LIB);
       expect(beforeInsert, "マイグレーション直後、reltuples は 0").toBe(0);
 
       await seedBareMemories(pool, SCHEMA_LIB, ROW_COUNT);
 
-      // 🔴 ここが本 Issue の核心の再現: 行を入れただけでは reltuples は動かない
-      // （ANALYZE を自分では一切呼んでいない）。
       const afterInsertBeforeAnalyze = await reltuplesFor(pool, SCHEMA_LIB);
       expect(
         afterInsertBeforeAnalyze,
@@ -187,8 +156,7 @@ describe("runAnalyzeMemories と --analyze-memories（DB 必須、Issue #234 / A
 
   it("schema 省略時は素の table 名（`memories`）を返す", async () => {
     const pool = adminPool!;
-    // public には既に他のテストが memories を持っているはずなので、成功することだけを見る
-    // （行数の assert はしない——他ファイルとの共有領域であるため、このファイルの責務ではない）。
+    // public は他のテストと共有なので、成功することだけを見て、行数は assert しない。
     const result = await runAnalyzeMemories(pool);
     expect(result.table).toBe("memories");
   });
@@ -200,7 +168,6 @@ describe("runAnalyzeMemories と --analyze-memories（DB 必須、Issue #234 / A
     async () => {
       const pool = adminPool!;
 
-      // 1回目: マイグレーションだけ当てる（--analyze-memories を渡さない）。
       const first = await runCli(["--schema", SCHEMA_CLI], { DATABASE_URL: requireDatabaseUrl() });
       expect(first.exitCode).toBe(0);
       expect(first.stdout).not.toContain("ANALYZE を実行しました");
@@ -211,8 +178,6 @@ describe("runAnalyzeMemories と --analyze-memories（DB 必須、Issue #234 / A
         0,
       );
 
-      // 2回目: 今度は --analyze-memories を渡す。マイグレーションの適用対象は既に無いが、
-      // ANALYZE は独立して実行されるはず。
       const second = await runCli(["--schema", SCHEMA_CLI, "--analyze-memories"], {
         DATABASE_URL: requireDatabaseUrl(),
       });

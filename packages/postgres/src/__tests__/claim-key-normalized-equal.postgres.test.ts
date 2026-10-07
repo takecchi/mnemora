@@ -13,15 +13,6 @@ import {
   TEST_EMBEDDING_SPACE,
 } from "./test-db.js";
 
-/**
- * 穴 O-3（ADR 0424）を `@mnemora/postgres` で縛る——core の Fake での同じ歯は
- * `packages/core/src/__tests__/claim-key-normalized-equal-not-contested.test.ts`。
- *
- * `findActiveByClaimKey?` は生の `content_hash <> …` だけで同じ内容を除くので、NFC と NFD の
- * 違いや末尾の空白1つだけで別の行として返る。`Runtime.detectClaimKeyContested` が
- * `content` を NFC + trim で比べて除く（SQL 側には入れない——`normalize()` は SQL_ASCII で使えない）。
- */
-
 const ctx: Ctx = { tenantId: "claim-key-normalized-equal-o3" };
 
 function sameKeyLlm(contents: string[]): LLMProvider {

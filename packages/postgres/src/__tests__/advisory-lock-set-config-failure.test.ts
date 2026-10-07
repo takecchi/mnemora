@@ -3,9 +3,8 @@ import type { Pool, PoolClient } from "pg";
 import { acquireAdvisoryLock, type AdvisoryLockErrorFactories } from "../advisory-lock.js";
 
 /**
- * ADR 0596（ADR 0571 の B1）: `acquireAdvisoryLock` の TSDoc は「`lock_timeout` の設定に失敗したときは `unavailable`」と約束している
- * （`timeout` は `pg_advisory_lock` が `55P03` で中断されたときだけ）。`set_config` を実際に失敗させる経路は DB の側には無いので、
- * `pool.connect()` が返す接続の `query` が `set_config` で reject する、最小の偽の pool を渡す（DB には繋がない）。
+ * `set_config` を実際に失敗させる経路は DB の側には無いので、`pool.connect()` が返す接続の `query` が
+ * `set_config` で reject する最小の偽の pool を渡す（DB には繋がない）。
  */
 
 class SetConfigFailure extends Error {}

@@ -4,22 +4,10 @@ import { afterAll, describe, expect, it } from "vitest";
 import { closeTestClient, getTestClient } from "./test-db.js";
 
 /**
- * ADR 0339 が塞いだ穴（`pool.connect()` で借り切った checked-out client に `error`
- * リスナーが無いと、接続が外部要因で失われたときプロセス全体が uncaught exception で
- * 落ちる）は `migrate.ts`/`advisory-lock.ts` **自身**の `pool.connect()` 呼び出しに
- * 対策された。
- *
- * だが `db.transaction()`（drizzle-orm の `NodePgSession.transaction`、
- * `node_modules/drizzle-orm/node-postgres/session.js`）も**同じ形で**
- * `pool.connect()` を呼んでいる——`await this.client.connect()` で checked-out
- * client を借り、`finally` で `release()` するが、**`error` リスナーは一切付けない。**
- * `memory-store.ts`/`vector-store.ts`/`trigram-lexical-store.ts` の全ての
- * `db.transaction()` 呼び出しがこの経路を通る。
- *
- * この歯は `db.transaction()` を直接叩いて（`MemoryStore` 等を経由せず）、
- * トランザクション本体の実行中に接続を強制終了し、`db.transaction()` が返す
- * Promise が reject する（プロセスを落とさない）ことを確かめる。
- * `migrate-connection-loss.test.ts` と同じ `pg_terminate_backend` の手口を使う。
+ * `db.transaction()`（drizzle-orm の `NodePgSession.transaction`）は `pool.connect()` で借りた client に `error` リスナーを付けないので、
+ * 接続が外部要因で失われるとプロセス全体が uncaught exception で落ちうる。
+ * `MemoryStore` 等を経由せず `db.transaction()` を直接叩き、実行中に `pg_terminate_backend` で接続を強制終了して、
+ * 返る Promise が reject する（プロセスを落とさない）ことを確かめる。
  */
 describe("db.transaction(): 接続が外部要因で失われたとき", () => {
   afterAll(async () => {

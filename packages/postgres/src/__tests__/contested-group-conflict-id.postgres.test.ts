@@ -6,18 +6,7 @@ import { PostgresMemoryStore } from "../memory-store.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 import { insertRawMemory, newEvent } from "./contested-group-fixtures.js";
 
-/**
- * Issue #1449 PR1（ADR 0401）の歯3: `markContestedGroup` / `resolveContestedGroup` の
- * 「どの id で落ちたか」と、返り値の並び（members は入力順、events は入力順）は、
- * メンバーごとの UPDATE / INSERT を定数個の文へまとめても変わらない。
- *
- * **これは既存の振る舞いの固定であり、実装前から緑になる**（赤を見せる歯ではない）。
- * 効くかどうかは変異試験で確かめる（PR 本文）。
- *
- * 入力の並び（`ids`）は uuid の昇順（`FOR UPDATE` の順）と**わざと違う**並びにする——
- * 「入力順で最初に条件を満たさなかった id」を指すのか「uuid 昇順で最初の id」を指すのかを
- * 区別するため。
- */
+/** 入力の並び（`ids`）は uuid の昇順（`FOR UPDATE` の順）とわざと違う並びにする。「入力順で最初に条件を満たさなかった id」と「uuid 昇順で最初の id」を区別するため。 */
 
 const none = { validFrom: null, validUntil: null };
 const asc = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
@@ -70,7 +59,6 @@ describe("markContestedGroup: 落ちる id と返り値の並び", () => {
     expect(e.memoryId).toBe(highBad);
     expect(e.expectedStatus).toBe("active");
     expect(e.observedStatus).toBe("superseded");
-    // 何も書かれていない。
     expect(await rowCounts(pool, tenantId)).toEqual({ rel: 0, ev: 0 });
     expect(await statuses(pool, good)).toEqual(["active", "active", "active"]);
   });
@@ -83,7 +71,6 @@ describe("markContestedGroup: 落ちる id と返り値の並び", () => {
     const ids: MemoryId[] = [];
     for (let i = 0; i < 5; i++) ids.push(await insertRawMemory(pool, tenantId, `m${i}`, none));
     const outsider = await insertRawMemory(pool, tenantId, "outsider", none);
-    // ids[3] は群の外の memory と contested の相方関係にある。
     await pool.query(`UPDATE memories SET status='contested', contested_with_id=$2 WHERE id=$1`, [
       ids[3],
       outsider,

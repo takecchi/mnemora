@@ -28,21 +28,6 @@ import {
   TEST_EMBEDDING_SPACE,
 } from "./test-db.js";
 
-/**
- * `Runtime.applyCorrection`・`buildCorrectionReason` の2つの穴（ADR 0446、穴探し21巡目）の歯。
- *
- * 1. `supersede` の `winnerId` が2つの id のどちらでもないとき、`resolveContested` の `RangeError` は
- *    `markContested` が書いた**後**に投げられ、例外で終わったのに対（`contested` 2件 + `updated` 2件）が残っていた。
- *    ⟹ 書き込む前に落とす。
- * 2. `correctedId` が候補の id と大文字小文字だけ違うとき、`@mnemora/postgres` では `markContested` は受け付けるのに
- *    `applyCorrection` だけが `not_a_candidate` にしていた（文字列の完全一致）。⟹ store が同じ記憶と言えば候補として扱う。
- * 3. `buildCorrectionReason` は `winnerId === correctingId` の完全一致だけで `winner=correcting` を決めていた。
- *    大文字の `winnerId`（`@mnemora/postgres` の `resolveContested` は勝者として受け付ける）では、実際に勝ったのが訂正する側でも
- *    `winner=corrected` と書いていた。
- *
- * testkit の fixture の id も、ADR 0521 以降は大文字小文字を区別しない（それまでは区別し、2 は fixture では `not_a_candidate` だった。
- * fixture の leg の `caseInsensitive` を `true` にした。`false` の側の分岐は、いまは通らない）。
- */
 afterAll(async () => {
   await closeTestClient();
 });

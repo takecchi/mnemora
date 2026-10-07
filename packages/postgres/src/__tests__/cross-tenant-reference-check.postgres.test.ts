@@ -9,22 +9,8 @@ import { PostgresVectorStore } from "../vector-store.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
 /**
- * ADR 0439: `MemoryStore` の書き込み口は、参照先（`recall_usages` の recall・memory、`memories.source_observation_id`・
- * `contested_with_id`・`superseded_by_id`）が `ctx.tenantId` の行であることを、書く前に確かめる。
- *
- * これらの列の外部キーは `recalls(id)`・`memories(id)`・`observations(id)` だけでテナントを含まないので、検査が無いと
- * A の ctx で B の id を指す行が A の行として書けた。その行が B の `purgeExpiredRecalls`（生の外部キー違反 23503）と
- * B の `eraseTenant`（`blocked_by_foreign_reference`）を止めた（被害側の消去の権利と保持期間の掃除を止められる）。
- *
- * この歯が縛るもの:
- * - 口ごとに、別テナントの参照は**行を書かずに**「… not found for tenant」で投げる（生 SQL で行を数える）。
- * - C1 の経路: 別テナントを指す行が書けないので、B の `purgeExpiredRecalls` は落ちず、B の `eraseTenant` は止まらない。
- * - 自テナントの正しい参照は通る（断りすぎていない）。大文字の uuid は自テナントの同じ行として通る。
- * - uuid でない id は、DB へ投げる前に同じ message で弾く（生の `Failed query` を見せない）。
- * - ADR 0439「引き受けた負債」に書いた検出 SQL が、食い違い無しで0行、仕込んだ1行で1行を数える。
- *
- * 適合テスト（`describeMemoryStoreConformance`）にも同じ契約の it があるが、store の口からは「行が書かれていない」
- * ことまでは見えない。行の有無と、被害側の eraseTenant・purgeExpiredRecalls は、このファイルだけが見る。
+ * 適合テスト（`describeMemoryStoreConformance`）にも同じ契約の it があるが、store の口からは「行が書かれていない」ことまでは見えない。
+ * 行の有無（生 SQL で数える）と、被害側の `eraseTenant`・`purgeExpiredRecalls` は、このファイルだけが見る。
  */
 
 afterAll(async () => {
@@ -146,7 +132,6 @@ describe("別テナントの参照は、口ごとに行を書かずに拒む（A
     );
     expect(await count(pool, "SELECT 1 FROM recall_usages")).toBe(0);
 
-    // 断りすぎていない: 自テナントの recall・memory なら書ける（大文字の uuid も同じ行として通る）。
     expect((await mem.recordUsage(A, aRecall, [a1.id])).insertedMemoryIds).toEqual([a1.id]);
     expect((await mem.recordUsage(A, aRecall, [a1.id.toUpperCase()])).insertedMemoryIds).toEqual(
       [],
@@ -192,7 +177,6 @@ describe("別テナントの参照は、口ごとに行を書かずに拒む（A
     expect(await count(pool, "SELECT 1 FROM memories WHERE tenant_id = $1", [TA])).toBe(1);
     expect(await count(pool, "SELECT 1 FROM outbox WHERE tenant_id = $1", [TA])).toBe(0);
 
-    // 断りすぎていない。
     const ok1 = await make(A, "ok-src", { sourceObservationId: aObs.id });
     const ok2 = await make(A, "ok-contested", { status: "contested", contestedWithId: a1.id });
     const ok3 = await make(A, "ok-superseded", { status: "superseded", supersededById: a1.id });
@@ -201,7 +185,6 @@ describe("別テナントの参照は、口ごとに行を書かずに拒む（A
       a1.id,
       a1.id,
     ]);
-    // 大文字の uuid は自テナントの同じ行を指す。
     const upper = await make(A, "ok-upper", { sourceObservationId: aObs.id.toUpperCase() });
     expect(upper.sourceObservationId).toBe(aObs.id);
   });
@@ -225,7 +208,6 @@ describe("別テナントの参照は、口ごとに行を書かずに拒む（A
     expect(await foreignReferenceCount(pool)).toBe(0);
     expect(await count(pool, "SELECT 1 FROM memory_events WHERE tenant_id = $1", [TA])).toBe(0);
 
-    // 断りすぎていない（expectedStatus の衝突は、参照が正しいときだけ MemoryStatusConflictError になる）。
     expect(
       (await mem.updateStatus(A, a1.id, "superseded", { supersededById: a2.id })).supersededById,
     ).toBe(a2.id);
@@ -303,7 +285,6 @@ describe("別テナントの参照は、口ごとに行を書かずに拒む（A
     );
     expect(ok.first.supersededById).toBe(a2.id);
 
-    // 群
     const g = [await make(A, "g1"), await make(A, "g2"), await make(A, "g3")];
     await mem.markContestedGroup!(
       A,
@@ -374,11 +355,9 @@ describe("C1 の経路: A が B を参照する行を書けないので、B の�
     );
     expect(await foreignReferenceCount(pool)).toBe(0);
 
-    // 修正前: A の usage 行が B の recall を指していて、purge は生の外部キー違反（23503）で落ちた。
     const purged = await mem.purgeExpiredRecalls!(B, PURGE_ALL);
     expect(purged.purged).toBe(1);
 
-    // 修正前: `{ kind: "blocked_by_foreign_reference" }` で止まった。
     const outcome = await eraseTenant(B, deps, { confirmTenantId: TB, limit: 100_000 });
     expect(outcome.kind).toBe("executed");
     expect(await count(pool, "SELECT 1 FROM memories WHERE tenant_id = $1", [TB])).toBe(0);
@@ -388,9 +367,7 @@ describe("C1 の経路: A が B を参照する行を書けないので、B の�
   });
 });
 
-/**
- * ADR 0439「引き受けた負債」に書いた検出 SQL（読み取りだけ）。ADR の文面と同じものを実行して縛る。
- */
+/** ADR 0439「引き受けた負債」に書いた検出 SQL（読み取りだけ）。ADR の文面と同じものを実行して縛る。 */
 const DETECTION_SQL: Record<string, string> = {
   recall_usages: `SELECT u.tenant_id, u.recall_id, u.memory_id, r.tenant_id AS recall_tenant_id, m.tenant_id AS memory_tenant_id
 FROM recall_usages u
@@ -451,8 +428,7 @@ describe("ADR 0439 の検出 SQL: 食い違いが無ければ0行、仕込んだ
 
 describe("別テナントを指す行（ADR 0439 より前に書かれた形。生 SQL で仕込む）に、restoreSupersededBy は触れない", () => {
   it("B の行が A の anchor を superseded_by_id に持っていても、A の restore・preview は A の行だけを扱う", async () => {
-    // 適合テスト（`restoreSupersededBy は別テナントの行を巻き込まない`）は、この形を API で作っていた。
-    // ADR 0439 で API からは作れなくなったので、テナントで絞る歯は、生 SQL で形を作るここが持つ。
+    // 適合テストの同種の歯はこの形を API で作っていたが、API からは作れなくなったので、テナントで絞る歯は生 SQL で形を作るここが持つ。
     const { pool, mem, make } = await setup();
     const anchorA = await make(A, "anchor-a");
     const anchorB = await make(B, "anchor-b");

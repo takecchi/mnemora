@@ -8,16 +8,7 @@ import { PostgresTenantSettingsStore } from "../tenant-settings-store.js";
 import { buildTrigramLexicalSearchSelect } from "../trigram-lexical-store.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
-/**
- * `docs/architecture.md` に書かれた既定値・上限が、実装と一致することを縛る。
- * **doc の値は `docs/architecture.md` を実行時に読んで取り**、**実装の値は振る舞いから取る**
- * （語彙クエリの切り詰めの結果、trigram の store が組み立てる SQL に渡る値、行の無いテナントに
- * `PostgresTenantSettingsStore` が返す値、`tenant_settings` の列の既定、`floorAt`・
- * `heuristicTokenCounter` の結果）。どちらか片方だけを直すと赤くなる。
- *
- * core の純関数（`floorAt`・`heuristicTokenCounter`）もここで見るのは、1つの文書につき歯を1本に
- * まとめるためである（`@mnemora/postgres` は `@mnemora/core` に依存しているので、ここから両方に届く）。
- */
+/** doc の値は `docs/architecture.md` を実行時に読んで取り、実装の値は振る舞いから取る。どちらか片方だけを直すと赤くなる。 */
 
 const ARCHITECTURE_DOC = readFileSync(
   fileURLToPath(new URL("../../../../docs/architecture.md", import.meta.url)),

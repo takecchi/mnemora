@@ -11,14 +11,9 @@ import { registerEmbeddingSpace } from "../vector-space.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
 /**
- * 埋め込み空間の表の列挙（`listEmbeddingSpaceTables` と migration 0027 の DO ブロック、PR #1444 の
- * ADR 0383）は、同じ条件を TypeScript と SQL に2回書いている。既存の一致の歯は、本物の空間の表と、
- * 外部キーを持たない decoy 1つしか見ないので、条件のうち1つを緩めても（片側だけでも）緑のまま通る。
- *
- * ここでは、条件を1つずつだけ満たさない decoy を作り、どちらの列挙にも現れないことを見る。
+ * 列挙の条件は TypeScript と SQL に2回書かれていて、既存の一致の歯は本物の空間の表と decoy 1つしか見ないので、条件のうち1つを緩めても緑のまま通る。
+ * そこで、条件を1つずつだけ満たさない decoy を作り、どちらの列挙にも現れないことを見る。
  * decoy は `vector_store.eraseTenant` が行を消す対象になりうる表（`tenant_id` 列を持つ）として作る。
- *
- * あわせて、DO ブロックが遡って作る索引が `(memory_id)` の単一列・部分索引ではないことを見る。
  */
 
 afterAll(async () => {
@@ -55,19 +50,12 @@ const DO_BLOCK_SQL = doBlock(MIGRATION_SQL);
 const SPACE: EmbeddingSpaceId = { provider: "enum-probe", model: "space", dimensions: 3 };
 
 const DECOYS = [
-  // 条件: 同じスキーマ
   "decoy_schema.memory_embeddings_decoy_other_schema",
-  // 条件: テーブル名の接頭辞
   "decoy_not_prefixed",
-  // 条件: FK の列が memory_id
   "memory_embeddings_decoy_other_column",
-  // 条件: 参照先が memories
   "memory_embeddings_decoy_other_parent",
-  // 条件: 参照先が同じスキーマの memories
   "memory_embeddings_decoy_cross_schema_parent",
-  // 条件: 参照先の列が id
   "memory_embeddings_decoy_non_id_target",
-  // 条件: 単一列の外部キー
   "memory_embeddings_decoy_composite",
 ];
 

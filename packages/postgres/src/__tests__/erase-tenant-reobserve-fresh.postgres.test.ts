@@ -12,19 +12,9 @@ import {
 } from "./erase-tenant-test-helpers.js";
 
 /**
- * Issue #1207 / [ADR 0383](../../../../docs/decisions/0383-erase-tenant.md):
- *
- * 消した後に同じ `tenantId` で observe → tick すると、新しいテナントとして一から
- * 始まる——旧い記憶・設定・activity が見えない、`getEventRetention` は `unset`、
- * activity seq は初期値（0）に戻る。
- *
- * ⚠ **同テナント再 observe が特に確かめたいのは冪等キーの衝突である**——
- * `memories` の一意索引 `uq_memories_extraction (tenant_id, source_observation_id,
- * extractor_version, content_hash) NULLS NOT DISTINCT` は、古い行が消えていなければ
- * 同じ `content_hash` の再抽出を「既に作成済み」として弾く（冪等）。`eraseTenant` が
- * `memories` 行そのものを物理削除しているため、消去後は同じ `content_hash` でも
- * 新しい行が作られる——これは「テナントを消した後は台帳が空になる」ことの、
- * 冪等キーというアプリケーション可視の形での確認である。
+ * ⚠ 同テナント再 observe が確かめたいのは冪等キーの衝突である。`memories` の一意索引 `uq_memories_extraction` は、
+ * 古い行が消えていなければ同じ `content_hash` の再抽出を「既に作成済み」として弾く。
+ * `eraseTenant` が `memories` 行そのものを物理削除しているので、消去後は同じ `content_hash` でも新しい行が作られる。
  */
 
 afterAll(async () => {
@@ -43,7 +33,6 @@ describe("eraseTenant の後、同じ tenantId で再び observe すると新し
     const tenantSettingsStore = new PostgresTenantSettingsStore(db);
     await seedAllTablesForTenant(runtime1, tenantSettingsStore, T, S);
 
-    // 消去前: 設定・activity が実際に存在することを確認する。
     const retentionBefore = await tenantSettingsStore.getEventRetention(ctx);
     expect(retentionBefore.kind).not.toBe("unset");
     const activitySeqBefore = await tenantSettingsStore.getActivitySeq(ctx);
@@ -66,7 +55,6 @@ describe("eraseTenant の後、同じ tenantId で再び observe すると新し
     }
     expect(outcome.kind).toBe("executed");
 
-    // 消去後: 設定は unset、activity は初期値（0）。
     const retentionAfter = await tenantSettingsStore.getEventRetention(ctx);
     expect(retentionAfter).toEqual({ kind: "unset" });
     const activitySeqAfter = await tenantSettingsStore.getActivitySeq(ctx);
@@ -74,8 +62,6 @@ describe("eraseTenant の後、同じ tenantId で再び observe すると新し
     const hasSubjectActivity = await tenantSettingsStore.hasSubjectActivityCounters?.(ctx);
     expect(hasSubjectActivity).toBe(false);
 
-    // 冪等キーの衝突確認: 消去前と全く同じ content_hash で observe → tick すると、
-    // 「既に作成済み」として弾かれず、新しい Memory が作られる。
     const runtime2 = buildEraseTenantTestRuntime(db, S);
     const observed = await runtime2.observe(ctx, {
       kind: "utterance",
@@ -93,7 +79,6 @@ describe("eraseTenant の後、同じ tenantId で再び observe すると新し
       if (r.processed === 0) break;
     }
 
-    // このテナントの memories が実際に1件以上存在する（新規に作られた）。
     const { pool } = await getTestClient();
     const memoriesAfterReobserve = await pool.query<{ n: number }>(
       "SELECT count(*)::int AS n FROM memories WHERE tenant_id = $1",
@@ -101,9 +86,6 @@ describe("eraseTenant の後、同じ tenantId で再び observe すると新し
     );
     expect(memoriesAfterReobserve.rows[0]!.n).toBeGreaterThan(0);
 
-    // 新しく作られた記憶の内容には、消去前の目印がそのまま使われている
-    // （内容そのものの再利用は禁じていない——禁じられるのは「作成済みとして弾かれる」
-    // ことだけ）。
     const contentRows = await pool.query<{ content: string }>(
       "SELECT content FROM memories WHERE tenant_id = $1",
       [T],
