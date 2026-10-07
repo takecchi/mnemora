@@ -1,47 +1,21 @@
 import { assertSafeIdentifier } from "./embedding-space-table.js";
 
 /**
- * 専用スキーマ（namespace）対応の共通部品（feat/dedicated-schema）。
+ * 専用スキーマ（namespace）対応の共通部品。共有 DB の中に他システムが同名テーブルを持っていても衝突しないよう、
+ * 使う側が専用の PostgreSQL スキーマを指定できる。
  *
- * ## 背景
+ * DML は裸のテーブル名のままにして `search_path`（`createPostgresClient` が先頭を `<schema>` にする）に任せ、
+ * DDL と存在検査は `qualify` / `qualifiedLiteral` で明示修飾する。存在検査を `search_path` 任せにしてはならない。
+ * `to_regclass('_mnemora_migrations')` は `search_path` 全体を探すので、`public` に台帳が在ると
+ * `<schema>` に台帳が無くても「在る」と誤判定する。`CREATE TABLE IF NOT EXISTS` の可視性判定も同じ危険を持つ。
  *
- * 共有 DB の中に他システムが同名テーブル（`memories` 等の裸の名前）を持っていても
- * 衝突しないように、`@mnemora/postgres` の使う側が専用の PostgreSQL スキーマを
- * 指定できるようにする。設計は決まっている——採った形は
- * 「DML は `search_path` に任せ、DDL と存在検査は明示修飾する」。
- *
- * - DML（`memory-store.ts` / `vector-store.ts` / `event-store.ts` / `outbox-store.ts` /
- *   `tenant-settings-store.ts` の生 SQL）は裸のテーブル名しか使わない。接続の
- *   `search_path` の先頭を `<schema>` にすれば、これらは1行も変えずに正しいスキーマを
- *   指す（`./client.ts` の `createPostgresClient` が担う）。
- * - DDL（マイグレーション・`registerEmbeddingSpace`）と存在検査（`to_regclass` 等）は
- *   `search_path` に頼らず、この `qualify` / `qualifiedLiteral` でスキーマ修飾する。
- *   `to_regclass('_mnemora_migrations')` は `search_path` 全体を探すため、`public` に
- *   台帳が在ると `<schema>` の台帳が無くても「在る」と誤判定する
- *   （`migrate-ledger-handover.test.ts` の doc が記録している実害そのもの）。
- *   `CREATE TABLE IF NOT EXISTS` の可視性判定も同じ危険を持つ。
- *
- * ## `schema` を指定しない既定の経路
- *
- * **発行される SQL 文字列が今日と1バイトも変わらないこと**を最優先の線として引いてある。
- * このファイルの関数はすべて `schema === undefined` を特別扱いし、そのときは
- * 何も付け足さずに素通しする。新しい振る舞い（`SET search_path` / `CREATE SCHEMA` /
- * `CREATE EXTENSION` の事前実行）は、`schema` が実際に指定されたときだけ起きる。
- *
- * ⚠ **`./resolve-current-schema.ts` の `resolveCurrentSchema` だけはこの線の外に在る**
- * （Issue #779）。DDL/DML の発行内容には触れないが、`schema` 未指定かつ advisory lock の
- * `lockKey` 上書きが無いときに限り、`runMigrations` / `registerEmbeddingSpace` から
- * `SELECT current_schema()` が1回増える——目的が「未指定が実際にどのスキーマを指しているか」
- * を読むことそのものであるため、`schema === undefined` を素通しでは代替できない。**別ファイル
- * に切り出してあり、`index.ts` からは export しない**（advisory lock のキー選びのためだけの
- * 内部 helper であり、公開 API の一部にしない）。詳細は同関数の doc と
- * ADR 0331 の追記（Issue #779）を参照。
+ * `schema` を指定しない経路は、発行される SQL 文字列を変えない。このファイルの関数は `schema === undefined` を
+ * 素通しにする。
  */
 
 /**
- * `schema` を指定したときに、拡張（`vector` / `btree_gin` / `pgcrypto`）を置く
- * 既定のスキーマ。PostgreSQL 自体の既定と揃えてあり、`schema` の指定が無ければ
- * 一切参照されない（`extensionSchema` は `schema` を指定したときだけ効く）。
+ * `schema` を指定したときに、拡張（`vector` / `btree_gin` / `pgcrypto`）を置く既定のスキーマ。
+ * `schema` を指定しなければ参照されない。
  */
 export const DEFAULT_EXTENSION_SCHEMA = "public";
 
@@ -51,40 +25,27 @@ export const DEFAULT_EXTENSION_SCHEMA = "public";
  */
 export interface SchemaNamespaceOptions {
   /**
-   * mnemora のテーブル・索引・マイグレーション台帳を置くスキーマ。
-   * **省略時は接続の `search_path` 任せ**（＝今日どおりの振る舞い。既定では
-   * `SET search_path` も `CREATE SCHEMA` も一切発行しない）。
-   */
+  /** mnemora のテーブル・索引・マイグレーション台帳を置くスキーマ。省略時は接続の `search_path` 任せ（`SET search_path` も `CREATE SCHEMA` も発行しない）。 */
   schema?: string | undefined;
   /**
-   * `vector` / `btree_gin` / `pgcrypto` を置くスキーマ。**`schema` を指定したときだけ効く。**
+   * `vector` / `btree_gin` / `pgcrypto` を置くスキーマ。`schema` を指定したときだけ効く。
    * 既定は {@link DEFAULT_EXTENSION_SCHEMA}。
    */
   extensionSchema?: string | undefined;
 }
 
-/** PostgreSQL の識別子の上限（NAMEDATALEN - 1）。`embedding-space-table.ts` の
- * `MAX_IDENTIFIER_BYTES` と同じ根拠だが、あちらは private なのでここで定義し直す。 */
+/** PostgreSQL の識別子の上限（NAMEDATALEN - 1）。`embedding-space-table.ts` のものは private なので定義し直す。 */
 const MAX_SCHEMA_NAME_BYTES = 63;
 
 /**
  * スキーマ名として安全であることを検査する。
  *
- * 文字種の検査（`^[a-z_][a-z0-9_]*$`）は `embedding-space-table.ts` の
- * `assertSafeIdentifier` を**そのまま呼んで**行う——正規表現を書き写すと、片方だけ
- * 直して他方を直し忘れるということが起き得るため（このリポジトリの規律、
- * `AGENTS.md` 「正典と実装が食い違ったら」と同じ理由）。
+ * 文字種の検査は `assertSafeIdentifier` をそのまま呼ぶ（正規表現を書き写すと、片方だけ直して食い違うため）。
+ * それに加えて、UTF-8 で 63 バイトを超えたら投げる。文字種の失敗と長さの失敗はメッセージで区別できる。
  *
- * それに加えて、ここでは **UTF-8 で 63 バイトを超えたら投げる**。PostgreSQL の
- * 識別子は NAMEDATALEN（既定 64）から終端文字を引いた 63 バイトまでしか保持しない
- * ——`assertSafeIdentifier` はテーブル名・索引名向けの検査で文字種しか見ないため、
- * スキーマ名専用にここで長さも見る。文字種の失敗と長さの失敗はメッセージで
- * 区別できるようにしてある（呼び出し側が原因を取り違えないように）。
- *
- * ⚠ **見るのは文字種と長さだけで、PostgreSQL がスキーマ名として受け付けるかは見ない**（今の振る舞い）。
- * `pg_` で始まる名前（例: `pg_mnemora`）はこの検査を通るが、PostgreSQL はその接頭辞を予約しているので、
- * `runMigrations` の `CREATE SCHEMA` が DB の例外（`unacceptable schema name "pg_mnemora"`）で失敗する
- * 【実測 2026-09-28、PostgreSQL 17】。この関数はそこで投げない。
+ * 見るのは文字種と長さだけで、PostgreSQL がスキーマ名として受け付けるかは見ない。`pg_` で始まる名前
+ * （例: `pg_mnemora`）はこの検査を通るが、PostgreSQL が接頭辞を予約しているので、`runMigrations` の
+ * `CREATE SCHEMA` が DB の例外（`unacceptable schema name`）で失敗する。
  */
 export function assertSafeSchemaName(schema: string): void {
   assertSafeIdentifier(schema);
@@ -98,15 +59,10 @@ export function assertSafeSchemaName(schema: string): void {
 
 /**
  * SQL 文の中で使う、スキーマ修飾済みの識別子を組み立てる。
+ * `schema === undefined` なら `name` をそのまま返し、それ以外は `"<schema>"."<name>"` にする。
  *
- * `schema === undefined` のときは `name` をそのまま返す——**既定経路が今日と
- * 1バイトも変わらないことは、この分岐そのものが担っている。** それ以外では
- * `"<schema>"."<name>"` と両方を二重引用符で囲む。
- *
- * ⚠ **使い方の約束: この関数は、名前の検査も引用文字のエスケープもしない。`schema` には
- * `assertSafeSchemaName`、`name` には `assertSafeIdentifier` を通した名前だけを渡すこと。**
- * 同梱の呼び出し（`runMigrations`・`registerEmbeddingSpace`・`createPostgresClient` など）は、
- * どれも先に検査を通してから呼んでいる。
+ * 名前の検査も引用文字のエスケープもしない。`schema` には `assertSafeSchemaName`、`name` には
+ * `assertSafeIdentifier` を通した名前だけを渡すこと。
  */
 export function qualify(schema: string | undefined, name: string): string {
   if (schema === undefined) {
@@ -116,40 +72,22 @@ export function qualify(schema: string | undefined, name: string): string {
 }
 
 /**
- * `to_regclass('...')` のようにシングルクォート文字列の**中に置く**識別子を組み立てる。
- *
- * **`qualify` をそのまま使い回している。** 理由: シングルクォート文字列の中に置く
- * 相手は二重引用符付き識別子（`"s"."t"` / `t`）であり、`to_regclass` はこの形式を
- * そのまま受け付ける（`to_regclass('"s"."t"')` は正しく動く——`assertSafeSchemaName` /
- * `assertSafeIdentifier` を通した名前しか渡さない前提なので、名前自体に
- * シングルクォートが混じる心配は無い）。実体が同じであるため、別関数として
- * 実装を複製せず、意図を示す別名としてだけ用意する。
- *
- * ⚠ **使い方の約束: この関数は、名前の検査も引用文字のエスケープもしない（`qualify` と同じ）。
- * `schema` には `assertSafeSchemaName`、`name` には `assertSafeIdentifier` を通した名前だけを
- * 渡すこと。**
+ * `to_regclass('...')` のようにシングルクォート文字列の中に置く識別子を組み立てる。
+ * `to_regclass` は二重引用符付き識別子（`"s"."t"`）をそのまま受け付けるので、`qualify` を使い回し、意図を示す別名として置く。
+ * 検査もエスケープもしない点は `qualify` と同じ。
  */
 export function qualifiedLiteral(schema: string | undefined, name: string): string {
   return qualify(schema, name);
 }
 
 /**
- * libpq の startup parameter `options`（`-c search_path=...`）および
- * セッション内の `SET search_path` の両方で使える値を返す。
+ * libpq の startup parameter `options`（`-c search_path=...`）とセッション内の `SET search_path` の両方で使える値を返す。
  *
- * **引用符を付けない。** `schema` / `extensionSchema` は呼び出し側で
- * `assertSafeSchemaName` を通した後の値である前提であり、`^[a-z_][a-z0-9_]*$` に
- * 収まる（空白・記号・大文字を含まない）ことが分かっている。`options` の startup
- * parameter の中では、値の中の空白がパラメータの区切りとして解釈されるため、
- * クォートやエスケープを別途持ち込むと `options` 全体の組み立てが厄介になる
- * （`client.ts` 側で既存の `options` 文字列に空白区切りで追記する形と噛み合わせる
- * 必要もある）。識別子を検証済みという前提の上で、引用符を持ち込まない方を選んだ。
+ * 引用符を付けない。`options` の中では値の空白がパラメータの区切りになるので、引用やエスケープを持ち込むと
+ * 組み立てが厄介になる。検証済みの識別子（`^[a-z_][a-z0-9_]*$`）という前提に頼る。
+ * `schema === extensionSchema` のときは重複を落として1つだけ返す。
  *
- * `schema === extensionSchema` のときは重複を落として1つだけ返す
- * （`search_path=s,s` のような冗長な値にしない）。
- *
- * ⚠ **使い方の約束: この関数は、名前の検査も引用文字のエスケープもしない。`schema`・
- * `extensionSchema` には、`assertSafeSchemaName` を通した名前だけを渡すこと。**
+ * `schema`・`extensionSchema` には、`assertSafeSchemaName` を通した名前だけを渡すこと。
  */
 export function searchPathFor(schema: string, extensionSchema: string): string {
   if (schema === extensionSchema) {
