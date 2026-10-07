@@ -7,33 +7,7 @@ import { validateBaseline, validateMeasured } from "../identifier-probe-summary-
 import { blankOutWorkflowComments } from "../workflow-comment-blank-lib.mjs";
 import { spawnSyncWithDeadline } from "./spawn-with-deadline.mjs";
 
-/**
- * ⭐ **この歯が測っているもの（消す前に読むこと）**
- *
- * **`.github/workflows/ci.yml` の `identifier-probes` ジョブが、実際に
- * `scripts/identifier-probe-summary.mjs` へ、`--measured` と `--baseline` の
- * 両方を渡して配線されていること。**
- *
- * ⚠ **これは `identifier-probe-summary.test.mjs` /
- * `identifier-probe-summary-lib.test.mjs` の重複ではない**
- * （`ci-yml-retrieval-wiring.test.mjs` の docstring と同じ理由）。その2本は
- * **入力を自分で作って**要約の中身と exit code を測る——**どちらも `ci.yml` を
- * 1バイトも読まない。**⟹ 誰かが `ci.yml` から `--baseline` を落としても、
- * パスを打ち間違えても、`MNEMORA_IDENTIFIER_PROBE_JSON` の書き先と `--measured` の
- * 読み先をずらしても、**その2本は緑のまま通る。**
- *
- * 🔑 **そして「基準値を読まない要約」は、この PR で実際に一度起きた**
- * （ADR 0094 §8。基準値ファイルはコミットされているのに誰も比べておらず、
- * ADR 0088 §3 が名指しした「値を残すだけで読まれない」形の再発だった）。
- * ⟹ **輪が閉じていることを、配線の側で固定する。**
- *
- * ⚠ **YAML は構造として解析していない（文字列で見ている）。**
- * `ci-yml-retrieval-wiring.test.mjs` / `publish-yml-dry-run-wiring.test.mjs` と
- * 同じ判断で、歯のために YAML パーサの依存を足していない（依存追加はオーナー専権。
- * `docs/autonomy.md`）。**だからこの歯は書き方の変更に弱い。**壊れたときは
- * 「配線が変わった」か「書き方が変わった」かを見て、**配線が変わっていないなら
- * 取り出し方のほうを直すこと（歯を消さないこと）。**
- */
+/** YAML は構造として解析せず文字列で見る（依存追加はオーナー専権）。壊れたときは、配線が変わったのか書き方が変わったのかを見て、配線が変わっていないなら取り出し方を直す。 */
 
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
 const workflowPath = fileURLToPath(new URL("../../.github/workflows/ci.yml", import.meta.url));
@@ -42,8 +16,6 @@ const workflow = readFileSync(workflowPath, "utf8");
 const JOB_ID = "identifier-probes";
 
 /**
- * `jobs:` の下の1ジョブ（`  <id>:` から、次の同じ深さの `  <id>:` まで）を切り出す。
- *
  * @param {string} yaml
  * @param {string} jobId
  */
@@ -67,9 +39,6 @@ function extractJob(yaml, jobId) {
 }
 
 /**
- * `steps:` を段へ切り分け、各段の `name` / `env` / `run` だけを取り出す
- * （`ci-yml-retrieval-wiring.test.mjs` の `parseSteps` と同じ形）。
- *
  * @param {string} jobBlock
  * @returns {{ name: string, env: Record<string, string>, run: string }[]}
  */
@@ -148,33 +117,12 @@ const benchStep = steps.find((step) => step.env.MNEMORA_IDENTIFIER_PROBE_JSON !=
 const summaryStep = steps.find((step) => step.run.includes("identifier-probe-summary.mjs"));
 const artifactStep = steps.find((step) => step.name.includes("成果物として残す"));
 
-/**
- * このファイル内で `extractStepBlock` が `blankOutWorkflowComments` を通した結果、
- * 「扱えない」と名乗った箇所をすべて集める（呼び出し側がこれを無視できないようにするため
- * ——下の describe("コメント潰しが …") が空であることを固定する。
- * `ci-yml-consolidation-wiring.test.mjs` と同じ形）。
- *
- * @type {{ stepName: string, unhandled: { lineNumber: number, reason: string, line: string }[] }[]}
- */
+/** @type {{ stepName: string, unhandled: { lineNumber: number, reason: string, line: string }[] }[]} */
 const stepBlockCommentUnhandled = [];
 
 /**
- * ある段の生テキスト（`- name: <name>` から次の段の `- name:` まで）を切り出す。
- * `parseSteps` は `if:`/`uses:`/`with:` を読まないので、それらを検査したいときは
- * こちらを使う。
- *
- * 🔴 **返す前にコメントを空白へ潰す。**この summary 段（`実測値と基準値の差分、または
- * 「重みが取得できなかった」ことを Job Summary に残す（⛔ 門ではない）`）は、実キー
- * `if: always()` のすぐ上の地の文コメントが同じ文字列 `` `if: always()` `` を
- * 引用している——素朴な `toContain` は、実キーを `if: success()` へ変異させても
- * コメントの引用にだけ一致して緑のまま通ってしまう（`ci-yml-consolidation-wiring
- * .test.mjs` の `extractStepBlock` docstring が実測した欠陥と同じ形。段0の変異H）。
- * この直しは PR #176 が採った形（`blankOutWorkflowComments` を照合専用に通す）を
- * そのまま踏襲する——独自設計をしない。
- *
- * ⛔ **この関数は照合専用であり、実行はしない。**`jobBlock`/`parseSteps` 側
- * （`summaryStep.run` → `runSummaryStepFromWorkflow` が子プロセスで実際に走らせる）には
- * 適用しない——実行するテキストからコメントを潰すと歯の意味が変わる。
+ * 返す前にコメントを空白へ潰す。要約の段のコメントが実キーと同じ `if: always()` を引用しており、実キーを壊しても `toContain` が緑のまま通った。
+ * 照合専用で、実行するテキストには適用しない（コメントを潰すと歯の意味が変わる）。
  *
  * @param {string} stepName
  * @returns {string | undefined}
@@ -201,13 +149,8 @@ function extractStepBlock(stepName) {
 }
 
 /**
- * コメントを潰した段の生テキストに、実キーとしての `if: always()` が在るか。
- *
- * ⚠ **ただの `toContain("if: always()")` で終わらせない。**判定を「`if:` キーの行として
- * 現れているか」という正規表現に切り出すことで、下の
- * describe("blockDeclaresAlways: …") の陽性／陰性対照が書ける——素朴な部分文字列一致では
- * 「実キーを壊す変異」と「ふるまいを変えないコメントの書き換え」を区別する歯を
- * 別途書けない。
+ * ただの `toContain("if: always()")` にせず、`if:` キーの行として現れているかを正規表現に切り出す。
+ * 素朴な部分文字列一致では、実キーを壊す変異と、ふるまいを変えないコメントの書き換えを区別する歯を書けない。
  *
  * @param {string} blankedBlock コメントを潰した段の生テキスト（`extractStepBlock` の返り値）
  * @returns {boolean}
@@ -217,9 +160,6 @@ function blockDeclaresAlways(blankedBlock) {
 }
 
 /**
- * `${{ github.workspace }}` を実際の場所に置き換える。GitHub Actions がやることを、
- * この歯の中で同じように行う（他の式が現れたら気づけるよう、残ったら例外にする）。
- *
  * @param {string} text
  * @param {string} workspace
  */
@@ -234,11 +174,7 @@ function substituteWorkspace(text, workspace) {
   return replaced;
 }
 
-/**
- * bench が JSON を書く先（`MNEMORA_IDENTIFIER_PROBE_JSON`）を yml から読む。
- * **この歯はパスを自分では書かない**——書き写すと、yml 側が変わったときに
- * 歯のほうが古いまま緑になる。
- */
+/** この歯はパスを自分では書かない。書き写すと、yml 側が変わったときに歯のほうが古いまま緑になる。 */
 function benchStepMeasuredPath() {
   if (!benchStep) {
     throw new Error(
@@ -249,15 +185,12 @@ function benchStepMeasuredPath() {
   return benchStep.env.MNEMORA_IDENTIFIER_PROBE_JSON;
 }
 
-/** `--baseline <path>` を yml から読む（引用符あり・なしの両方を拾う）。 */
 function summaryStepBaselinePath() {
   const matched = /--baseline\s+(?:"([^"]+)"|([^\s\\]+))/.exec(summaryStep?.run ?? "");
   return matched ? (matched[1] ?? matched[2]) : undefined;
 }
 
 /**
- * yml から取り出した要約の段を、実際に走らせる。
- *
  * @param {unknown} measured `--measured` が読むファイルに書き込む中身
  * @returns {{ status: number, summary: string, stderr: string }}
  */
@@ -294,14 +227,9 @@ function runSummaryStepFromWorkflow(measured) {
   }
 }
 
-/** 基準値ファイル（本物）。差分の有無を作り分けるための土台に使う。 */
 const baselineRelativePath = "examples/chat/identifier-probe-baseline.json";
 const baseline = JSON.parse(readFileSync(join(repoRoot, baselineRelativePath), "utf8"));
 
-/**
- * 本物の基準値ファイルから、実測 JSON（`status: "measured"`）を組み立てる。
- * **群の名前（`group`）でキーを作る**——順番に依存しない。
- */
 function measuredFromBaseline() {
   const byGroup = Object.fromEntries(
     baseline.groups.map((group) => {
@@ -322,23 +250,19 @@ function measuredFromBaseline() {
 
 describe("ci.yml の identifier-probes ジョブの配線", () => {
   it("⭐ bench が JSON を書く先と、要約が読む先が同じ場所を指している", () => {
-    // ⚠ `${{ github.workspace }}` は中に空白を含みうるので、空白で切ってはいけない。
+    // `${{ github.workspace }}` は中に空白を含みうるので、空白で切らない。
     const measuredFlag = /--measured\s+(?:"([^"]+)"|([^\s\\]+))/.exec(summaryStep?.run ?? "");
     expect(measuredFlag, "要約の段に --measured の指定が無い").not.toBeNull();
     expect(measuredFlag?.[1] ?? measuredFlag?.[2]).toBe(benchStepMeasuredPath());
   });
 
   it("🔴 要約の段が --baseline をコミット済みの基準値ファイルへ渡している（ADR 0094 §8）", () => {
-    // ⭐ **これが「輪が閉じている」ことの固定点。**この行が消えると、値が動いても
-    // 誰も気づかず、誰も基準値を更新せず、新しい値が PR の diff に現れなくなる。
     expect(summaryStepBaselinePath(), "要約の段に --baseline の指定が無い").toBe(
       baselineRelativePath,
     );
   });
 
   it("🔴 --baseline が指すファイルが、実際に validateBaseline を通る", () => {
-    // パスが合っていても中身が要約の期待する形でなければ、CI では
-    // 「基準値 JSON が使えない」で非0になる——それは repo に置いてある時点で分かる。
     const result = validateBaseline(baseline);
     expect(result.ok, result.ok ? "" : result.error).toBe(true);
   });
@@ -349,10 +273,6 @@ describe("ci.yml の identifier-probes ジョブの配線", () => {
   });
 
   it("⭐ 各群の label が、その群自身の条件（llm・provider/model/dimensions・haystack）を落としていない", () => {
-    // 🔴 この repo は「条件を落とした数字」を3度壊している（ADR 0068 / ADR 0081 §3.2）。
-    // label は条件を文字列に埋めたものなので、**label だけが条件を落とす**ことも
-    // 同じ壊れ方である。実際にこの PR の作業中、`japanese` 群の label が
-    // `haystack=` を落としており、基準値ファイルの label と食い違っていた。
     for (const group of baseline.groups) {
       expect(group.label, `${group.group} の label`).toContain(`llm=${group.llmMode}`);
       expect(group.label, `${group.group} の label`).toContain(group.embeddingSpace.provider);
@@ -366,9 +286,7 @@ describe("ci.yml の identifier-probes ジョブの配線", () => {
 
   it("🔴 基準値と相違しても緑のまま（⛔ このジョブは門ではない。標本が小さい。ADR 0033 §3）", () => {
     const measured = measuredFromBaseline();
-    // japanese の hit@1 を 5 から 1 へ落とす——「想起の質が大きく劣化した」に相当。
-    // **それでも落ちてはいけない。**落ちるようになったら、この repo は probe 7件の
-    // 標本で偽陽性を出す門を持ってしまったことになる。
+    // 想起の質が大きく劣化しても落ちない。probe 7件の標本で偽陽性を出す門にしない。
     measured.japanese.hit1Count = 1;
     measured.japanese.mrrOverall = 0.2;
     const result = runSummaryStepFromWorkflow(measured);
@@ -395,10 +313,6 @@ describe("ci.yml の identifier-probes ジョブの配線", () => {
   });
 
   it("🔴 weights_unavailable のときは、Job Summary に比較が1つも出ない（緑のまま）", () => {
-    // ⭐ オーナー代理の逐語: 「私が怖いのはジョブが落ちることではありません。
-    // 『HF から取れなかった』が『想起の質が下がった』に見えることです。」
-    // ⚠ measure の段自体は非0で落ちる仕様だが、この要約の段は `if: always()` で走り、
-    // **測っていないことを測っていないと言う。**
     const result = runSummaryStepFromWorkflow({
       schemaVersion: 2,
       status: "weights_unavailable",
@@ -426,7 +340,6 @@ describe("ci.yml の identifier-probes ジョブの配線", () => {
       .split("\n")
       .find((line) => line.includes(dense.label) && line.includes("|"));
     expect(row, "identifiersDense の行が Job Summary に無い").toBeDefined();
-    // **同じ行**に、その群の条件と数字が揃っていること（ADR 0068 ②）。
     expect(row).toContain(dense.llmMode);
     expect(row).toContain(dense.embeddingSpace.provider);
     expect(row).toContain(dense.embeddingSpace.model);
@@ -446,43 +359,16 @@ describe("ci.yml の identifier-probes ジョブの配線", () => {
     expect(jobBlock).toMatch(/^ {4}timeout-minutes: \d+$/m);
   });
 
-  /**
-   * 🔴 **この歯が在る理由（この PR で実際に一度起きた形）**
-   *
-   * #127 が `ci.yml` の action を node24 の版へ上げたとき、この
-   * `identifier-probes` ジョブは**まだ存在していなかった。**⟹ 両方が載ると
-   * 「既存は v6・このジョブだけ v4(node20)」になる。
-   *
-   * ⚠ **これは何も鳴らない形の欠陥である:** 足した行が既存行と違うので git は
-   * 衝突を報告せず（`mergeStateStatus` は `CLEAN` のまま）、GitHub Actions が
-   * runner から Node 20 を削除する **2026-09-23** までは CI も緑である。
-   * ⟹ **期限の日に、このジョブだけが壊れる。**
-   * ⟹ 「両方が載った状態」を誰も検査していなかった。**そこを固定する。**
-   *
-   * ⚠ **歯からネットワークへ出ていない**（`action.yml` の `runs.using` を実際に
-   * 引くことはしていない）。代わりに (a) ファイル内の他のジョブに後れを
-   * 取っていないこと と (b) node24 だと確認できた版の下限表 の2つで挟む。
-   */
+  /** `action.yml` の `runs.using` は引かない（ネットワークに出ない）。代わりに、ファイル内の他のジョブに後れを取っていないことと、node24 と確認できた版の下限表の2つで挟む。 */
   const NODE24_MIN_MAJOR = {
-    // 2026-09-10 に `action.yml` の `runs.using` を引いて node24 だと確認した
-    // 最小のメジャー。⚠ **表に無いメジャーは確認していない**——だから下限は
-    // 安全側に寄せてある。ここより下の版へ落とすときは `runs.using` を自分で
-    // 引き直し、この表を更新すること。
-    //   actions/checkout@v6        node24（v4 は node20。v5 は未確認）
-    //   actions/setup-node@v6      node24（v4 は node20。v5 は未確認）
-    //   actions/upload-artifact@v6 node24（v4・v5 は未確認）
-    //   actions/cache@v5, @v6      node24（v4 は node20）
+    // node24 と確認できた最小のメジャー。表に無いメジャーは未確認なので、下限は安全側に寄せてある。
     "actions/checkout": 6,
     "actions/setup-node": 6,
     "actions/upload-artifact": 6,
     "actions/cache": 5,
   };
 
-  /**
-   * `uses: actions/<name>@v<major>` を拾う。
-   *
-   * @param {string} block
-   */
+  /** @param {string} block */
   function usesInBlock(block) {
     return [...block.matchAll(/^\s*uses: (actions\/[a-z-]+)@v(\d+)$/gm)].map((match) => ({
       action: match[1],
@@ -570,11 +456,6 @@ describe("blockDeclaresAlways: 実キーとコメントの引用を区別する�
 });
 
 describe("コメント潰しが identifier-probes ジョブの対象範囲で「扱えない」形に当たっていないこと(Issue #177)", () => {
-  // 🔴 `extractStepBlock` が返す前に通す `blankOutWorkflowComments` の
-  // unhandled を無視できないようにする(呼び出し側が黙って安全側へ倒さないための
-  // 配線そのもの。`scripts/workflow-comment-blank-lib.mjs` の docstring)。
-  // ⚠ 特定の呼び出し履歴に依存しないよう、ここで identifier-probes ジョブの
-  // 全段を洗い直してから確かめる。
   it("identifier-probes ジョブの全段(name 段)に unhandled が無い", () => {
     stepBlockCommentUnhandled.length = 0;
     for (const step of steps) {
