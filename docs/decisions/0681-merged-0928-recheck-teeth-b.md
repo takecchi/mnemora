@@ -17,14 +17,14 @@
 
 ## 足した歯
 
-| PR | すり抜けた変異 | 歯 |
-|---|---|---|
-| #1340 | 読み込みの再試行が `sleep` を待たずに次の試行へ進む／種類の付いた失敗（`kind`）でも、投げ直す前に待つ | `packages/local-embedding/src/__tests__/retry-wait-before-next-attempt.test.ts` |
-| #1331 | `completeStructured` が空の `system` を `""` で送る | `packages/anthropic/src/__tests__/complete-structured-empty-system.test.ts` |
-| #1331 | 根が object で `$defs` を持つスキーマまで包む | `packages/openai/src/__tests__/structured-root-object-with-defs-not-wrapped.test.ts` |
-| #1331 | 上限を宣言していないモデルの失敗の案内から `options.modelId` が消える | `packages/local-embedding/src/__tests__/unknown-input-limit-guidance.test.ts` |
-| #1374 | `subjectCandidates` と `extractionContext` を併用した抽出で言語の一文が消える／統合・内省の言語の一文が記憶の件数で出入りする／Runtime が builder の `system` を捨てて LLM へ渡す | `packages/core/src/__tests__/language-instruction-prompts.test.ts` |
-| #1383 | status の判定を `forgotten` だけ先にする／ゲートの時刻を `{ query }` の `validAt` で決める／`{ seedMemoryId }`・`{ query }` では未到来を見ない | `packages/core/src/__tests__/consolidate-validity-gate-shapes.test.ts` |
+| PR    | すり抜けた変異                                                                                                                                                                    | 歯                                                                                   |
+| ----- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| #1340 | 読み込みの再試行が `sleep` を待たずに次の試行へ進む／種類の付いた失敗（`kind`）でも、投げ直す前に待つ                                                                             | `packages/local-embedding/src/__tests__/retry-wait-before-next-attempt.test.ts`      |
+| #1331 | `completeStructured` が空の `system` を `""` で送る                                                                                                                               | `packages/anthropic/src/__tests__/complete-structured-empty-system.test.ts`          |
+| #1331 | 根が object で `$defs` を持つスキーマまで包む                                                                                                                                     | `packages/openai/src/__tests__/structured-root-object-with-defs-not-wrapped.test.ts` |
+| #1331 | 上限を宣言していないモデルの失敗の案内から `options.modelId` が消える                                                                                                             | `packages/local-embedding/src/__tests__/unknown-input-limit-guidance.test.ts`        |
+| #1374 | `subjectCandidates` と `extractionContext` を併用した抽出で言語の一文が消える／統合・内省の言語の一文が記憶の件数で出入りする／Runtime が builder の `system` を捨てて LLM へ渡す | `packages/core/src/__tests__/language-instruction-prompts.test.ts`                   |
+| #1383 | status の判定を `forgotten` だけ先にする／ゲートの時刻を `{ query }` の `validAt` で決める／`{ seedMemoryId }`・`{ query }` では未到来を見ない                                    | `packages/core/src/__tests__/consolidate-validity-gate-shapes.test.ts`               |
 
 歯は、元の変異を当てると赤になることを確かめてから入れた。
 
