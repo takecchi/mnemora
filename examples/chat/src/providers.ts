@@ -19,139 +19,50 @@ import type { UsageMeter } from "./usage-meter.js";
 import { createUsageMeter } from "./usage-meter.js";
 
 /**
- * サンプルアプリが実際に使う provider の切り替え（PR 本文「LLM/Embedding は実 API キーが
- * 無くても動く」）。
- *
- * **黙って擬似物へフォールバックしない**——`mode` を呼び出し側（cli.ts）に返し、
- * 画面に必ず表示させる。どちらで動いているかを隠さない、という原則の姿3の適用。
- *
- * **LLM と Embedding を別々に選べる（本 PR の拡張）。** 理由: retrieval-quality の
- * ベンチで「順位が変わったのは埋め込みのせいか抽出のせいか」を切り分けたい場合、
- * 一方だけを本物に入れ替えられる必要がある。`MNEMORA_LLM` / `MNEMORA_EMBEDDING`
- * （受け付ける値は `LLM_MODES` / `EMBEDDING_MODES` が持つ。下の `"recorded"`・`"local"` の
- * 説明を見ること）で個別に上書きできる——**未指定なら、いままで通り
- * `OPENAI_API_KEY` の有無だけで両方が決まる**（`selectProviderMode` の契約は変えない。
- * 既存テストはこの2つの環境変数を設定しないため、そのまま通る）。
+ * provider の切り替え。黙って擬似物へフォールバックしない——`mode` を呼び出し側（cli.ts）に返し、画面に必ず表示させる。
+ * LLM と Embedding は `MNEMORA_LLM`/`MNEMORA_EMBEDDING` で別々に選べる（順位の変化が埋め込みと抽出のどちらのせいかを切り分けるため）。
+ * 未指定なら `OPENAI_API_KEY` の有無だけで両方が決まる。
  */
+/** `"recorded"` は記録した実 API の応答を再生する。記録に無い入力は例外にする（黙って stub へ倒れない）。 */
+/** `"local"` は embedding 専用。`@mnemora/local-embedding` は `EmbeddingProvider` しか実装していないので、`MNEMORA_LLM=local` は他の未知の値と同じく例外になる。 */
 /**
- * `"recorded"` は ADR 0051 で足した第3のモード——**記録した実 API の応答を再生する**。
- *
- * `"deterministic"`（意味を持たない stub）とも `"openai"`（実 API を叩く）とも違う。
- * 記録済みの入力に対しては `"openai"` と同じベクトル・同じ抽出結果を返し、
- * 記録に無い入力に対しては例外を投げる（黙って stub へ倒れない）。
- */
-/**
- * `"local"` は Issue #109 で足した第4のモード——**`@mnemora/local-embedding`
- *（外部サービスへ繋がない、プロセス内 ONNX 推論、ADR 0085）を使う**。
- *
- * ⚠ **embedding 専用である。LLM 側に `"local"` は無い。** `@mnemora/local-embedding` は
- * `EmbeddingProvider` しか実装していない——LLM の代替は無い。`MNEMORA_LLM=local` は
- * 他の未知の値と同じく例外になる（`parseModeOverride` 参照）。`MNEMORA_EMBEDDING=local`
- * だけが有効。
- */
-/**
- * ⚠ **`anthropic` が無いのは書き忘れではない。** `packages/anthropic` は
- * `LLMProvider` を実装しているが（ADR 0072）、**`examples/chat` には一度も配線されて
- * いない**——`examples/chat/package.json` の依存に `@mnemora/anthropic` は無く、
- * このファイルもそれを一度も import していない。`git log -S 'anthropic' --
- * examples/chat/package.json` は1件もヒットしない（配線してから外したのではなく、
- * そもそも触られたことが無い。`examples/chat/` 全体で引くと、この説明自身を書いた側の
- * コミットが当たるので、依存の履歴としては読まないこと）。
- *
- * **理由は ADR 0072「引き受けた負債」3・4 に逐語で書かれている**
- * （`docs/decisions/0072-anthropic-llm-provider.md`）:
- *
- * > 3. `packages/anthropic` は Phase 1 の完了条件に入っていない。
- * >    `docs/roadmap.md` 段階6 は4パッケージを名指ししており、本 PR ではそこを
- * >    直していない。Phase 1 の定義を動かすかはオーナーの判断である。
- * > 4. 北極星の物差し（`examples/chat` の `retrieval` / `compare`）は、
- * >    Anthropic では一度も走っていない。カセットも無い。
- * >    ⟹ この PR は「Anthropic で想起の質がどうなるか」について何も言っていない。
- * >    言えるのは「契約が揃っている」ことだけである。
- *
- * （⚠ 上の引用の `docs/roadmap.md` 段階6 は 2026-09-29 に削除した（#762）。当時の本文は
- * 635c93d の版にある。引用は ADR 0072 の当時の文面のまま残してある。）
- *
- * ⚠ **ADR 0072 決定1（`@mnemora/anthropic` が `EmbeddingProvider` を実装しない。理由は同 ADR「設計としては既に決まっていた」の節）
- * と混同しないこと。**あちらは「Anthropic に埋め込み API が無い」というパッケージ内部
- * の話であり、こちらは「`examples/chat` へまだ配線していない」という別の理由の
- * スコープ外である。
- *
- * ⚠ **層が1つ足りない、という話でもない。**この repo の provider は4層
- * （`deterministic`/`recorded`/`openai`/`local`。AGENTS.md）に分かれているが、
- * その軸は実装の性質（意味を持たない stub／記録の再生／実 API／プロセス内 ONNX 推論）
- * であってベンダーではない。`anthropic` を足すとしても5層目にはならない——`openai`
- * と同じ「実 API」層の別ベンダーである。
- *
- * `MNEMORA_LLM=anthropic` / `MNEMORA_EMBEDDING=anthropic` は他の未知の値と同じく
- * 例外になる（`parseModeOverride` 参照。`LLM_MODES`/`EMBEDDING_MODES` のどちらにも
- * `"anthropic"` は無い）。
+ * `anthropic` が無いのは書き忘れではない。`packages/anthropic` は `LLMProvider` を実装しているが、`examples/chat` には配線していない。
+ * 理由は ADR 0072「引き受けた負債」3・4: 北極星の物差し（`retrieval`/`compare`）は Anthropic で一度も走っておらずカセットも無いので、
+ * 想起の質について何も言えない。足すとしても5層目ではなく、`openai` と同じ「実 API」層の別ベンダーになる。
+ * `MNEMORA_LLM=anthropic` は未知の値として例外になる。
  */
 export type ProviderMode = "openai" | "deterministic" | "recorded" | "local";
 
 export interface Providers {
-  /**
-   * 後方互換のために残す単一ラベル。`MNEMORA_LLM`/`MNEMORA_EMBEDDING` を使わない
-   * 呼び出し（既存の `chat`/`compare`）では `llmMode`/`embeddingMode` と必ず一致する。
-   * 個別に上書きした場合にどちらの実体を指すかは曖昧になるため、**新しいコードは
-   * `llmMode`/`embeddingMode` を見ること**。
-   */
+  /** 後方互換のために残す単一ラベル。新しいコードは `llmMode`/`embeddingMode` を見ること（個別に上書きするとどちらの実体を指すか曖昧になる）。 */
   mode: ProviderMode;
   llmMode: ProviderMode;
   embeddingMode: ProviderMode;
   llmProvider: LLMProvider;
   embeddingProvider: EmbeddingProvider;
-  /** `llmMode`/`embeddingMode` のどちらかが `"openai"` のときだけ存在する。 */
   usageMeter?: UsageMeter;
   /**
-   * 渡されたカセット（`CreateProvidersOptions.cassette`）が、この実行では
-   * 一度も使われなかったかどうか。
-   *
-   * ⭐ **`requireCassette` の鏡像である。**`requireCassette` は「`recorded` を
-   * 指定したのにカセットが無い」を例外にする——**その逆（カセットを渡したのに
-   * `llmMode`/`embeddingMode` のどちらも `"recorded"` を選ばなかった）は例外にできない。**
-   *
-   * 理由: `cli.ts` の `runRetrieval` の arm A（`llmOverride`/`embeddingOverride` とも
-   * `"deterministic"`）は、`resolveRecordedRun` が返したカセットを**全 arm に**渡す
-   * 配線の下で走る——これは現物を読んで確かめた既存の正当な経路であり（⛔ 走らせて
-   * 確かめてはいない）、arm A がカセットを使わないのは壊れているからではない
-   * （対照群として意図的に擬似 provider のままにしている）。⟹ ここを例外にすると、
-   * いま緑の対照 arm がそのまま落ちる。
-   *
-   * ⟹ 判定（例外）ではなく、出力に焼く候補の一覧として扱う
-   * （ADR 0255 / ADR 0223 決定5「取りこぼしがゼロにならないと分かっている道具に
-   * 『これが全部です』と名乗らせない」の適用——ここでの取りこぼしは「例外にできない
-   * 正当な無視のケースがある」こと自体を指す）。`cli.ts` の `printProviderMode` が
-   * これを画面の警告行として開示する。
+   * 渡されたカセットがこの実行で一度も使われなかったか。例外にしない: `retrieval` の arm A は全 arm にカセットを渡す配線の下で、
+   * 対照群として意図的に擬似 provider のままなので、例外にするとその対照 arm が落ちる。出力に焼く候補として扱い、
+   * `printProviderMode` が警告行として開示する。
    */
   cassetteIgnored: boolean;
   /**
-   * 「種カセット」（`CreateProvidersOptions.seedCassette`、Issue #691 続き）を実際に
-   * 使ったときだけ存在する。呼ぶと、その時点までに LLM・埋め込みそれぞれで
-   * 種から返した回数／実 API（delegate）を呼んだ回数を返す——**呼ぶたびに実測を
-   * 読み直す関数**であり、構築時点のスナップショットではない（記録の実行が進むほど
-   * 数が増える）。`usage-meter`（`UsageMeter.formatReport`）とは別の実測であり、
-   * 混ぜて出さない（マネージャー指示）。
-   *
-   * `seedCassette` を渡さなければ `undefined`——**種を与えなければ、この関数自体が
-   * 存在しない**ことで、既存の呼び出し側の挙動を1バイトも変えない。
+   * 「種カセット」を使ったときだけ存在する。呼ぶたびに実測を読み直す（構築時のスナップショットではない）。
+   * `usage-meter` とは別の実測なので混ぜて出さない。種を与えなければ関数自体が存在しないことで、既存の呼び出し側の挙動を変えない。
    */
   readSeedUsage?: () => SeedUsageSummary;
 }
 
-/** `Providers.readSeedUsage` が返す形。LLM・埋め込みを別々に数える。 */
 export interface SeedUsageSummary {
   llm: SeedUsageCounts;
   embedding: SeedUsageCounts;
 }
 
-/** 本物の OpenAI を使う場合のモデル選定。サンプルアプリの裁量値であり、強い根拠は無い。 */
 export const OPENAI_LLM_MODEL = "gpt-4o-mini";
 export const OPENAI_EMBEDDING_MODEL = "text-embedding-3-small";
-/** 次元を絞って埋め込みテーブル・HNSW 索引を軽くする（サンプルアプリの裁量値）。 */
 export const OPENAI_EMBEDDING_DIMENSIONS = 256;
 
-/** 擬似 provider が使う埋め込み空間。`DeterministicEmbeddingProvider` の既定と揃える。 */
 export const DETERMINISTIC_EMBEDDING_SPACE = {
   provider: "testkit",
   model: "deterministic",
@@ -161,37 +72,19 @@ export const DETERMINISTIC_EMBEDDING_SPACE = {
 export type EnvLike = Partial<Record<string, string | undefined>>;
 
 /**
- * `OPENAI_API_KEY` が空でない値として存在するかどうかだけを見る、切り替えの単一の分岐点。
- * `createProviders` から切り出してあるのは、副作用（provider の構築）無しに分岐の単体テストを
- * 書けるようにするため。
- *
- * **この関数のシグネチャ・振る舞いは変えていない**（既存テスト `providers.test.ts` が
- * 直接呼んでいるため）。`MNEMORA_LLM`/`MNEMORA_EMBEDDING` による個別上書きは
- * `selectLLMMode`/`selectEmbeddingMode` という別関数に足す。
+ * 切り替えの単一の分岐点。副作用無しに分岐の単体テストを書けるよう、`createProviders` から切り出してある。
+ * シグネチャ・振る舞いは `providers.test.ts` が直接呼んでいるため変えない。
  */
 export function selectProviderMode(env: EnvLike): ProviderMode {
   return env.OPENAI_API_KEY ? "openai" : "deterministic";
 }
 
-/**
- * `MNEMORA_LLM` が受け付ける値。**`"local"` を含まない**——LLM 側に local 実装は無い
- * （`ProviderMode` の docstring 参照）。
- */
+/** `"local"` を含まない（LLM 側に local 実装は無い）。 */
 const LLM_MODES = ["openai", "deterministic", "recorded"] as const;
 
-/**
- * `MNEMORA_EMBEDDING` が受け付ける値。`LLM_MODES` に `"local"` を足した形
- * （Issue #109、`@mnemora/local-embedding`）。
- */
 const EMBEDDING_MODES = ["openai", "deterministic", "recorded", "local"] as const;
 
-/**
- * `MNEMORA_LLM`/`MNEMORA_EMBEDDING` の値を検証する。空文字は「未指定」として扱う。
- *
- * **許可する値の集合を呼び出し側から渡す**（`LLM_MODES`/`EMBEDDING_MODES`）——
- * LLM と embedding で受け付ける `ProviderMode` の集合が違う（`"local"` は embedding だけ）
- * ため、1つの固定リストでは表現できない。**未知の値は例外**という既存の作法は変えない。
- */
+/** 許可する値の集合を呼び出し側から渡す（LLM と embedding で受け付ける集合が違うため）。未知の値は例外。空文字は「未指定」。 */
 function parseModeOverride(
   varName: "MNEMORA_LLM" | "MNEMORA_EMBEDDING",
   value: string | undefined,
@@ -209,12 +102,10 @@ function parseModeOverride(
   );
 }
 
-/** `MNEMORA_LLM` が指定されていればそれを、無ければ `selectProviderMode` の結果を使う。 */
 export function selectLLMMode(env: EnvLike): ProviderMode {
   return parseModeOverride("MNEMORA_LLM", env.MNEMORA_LLM, LLM_MODES) ?? selectProviderMode(env);
 }
 
-/** `MNEMORA_EMBEDDING` が指定されていればそれを、無ければ `selectProviderMode` の結果を使う。 */
 export function selectEmbeddingMode(env: EnvLike): ProviderMode {
   return (
     parseModeOverride("MNEMORA_EMBEDDING", env.MNEMORA_EMBEDDING, EMBEDDING_MODES) ??
@@ -223,24 +114,9 @@ export function selectEmbeddingMode(env: EnvLike): ProviderMode {
 }
 
 /**
- * `source`（既定 `process.env`）から `MNEMORA_LOCAL_EMBEDDING_CACHE_DIR` だけを
- * 持ち出す。設定されていなければ（未設定 or 空文字。`parseModeOverride` と同じ
- * 「空文字は未指定」という作法）`{}` を返す。
- *
- * **なぜ要るか（Issue #164 の続き）**: `createExampleRuntime(databaseUrl, { MNEMORA_LLM: …,
- * MNEMORA_EMBEDDING: "local", … })` のようにリテラルの env オブジェクトを渡す呼び出しは
- * `process.env` を丸ごと展開しない——CI の `actions/cache` が job-level env で
- * `MNEMORA_LOCAL_EMBEDDING_CACHE_DIR` を設定していても、リテラルの側がそれを運ばなければ
- * `LocalEmbeddingProvider` まで届かず、キャッシュが（保存も復元もされないまま）空回りする。
- * `consolidation-cost.postgres.test.ts` の1本がこれで実際に 429 を踏んだ
- * （`cacheDir=未指定（既定の場所）` が transformers.js の既定パスに落ち、
- * `actions/cache` の `path:` の外へ書き込んでいた。CI run 34704804772）。
- *
- * ⛔ **`...process.env` を丸ごと展開する代わりにこれを使うこと。** `cli.ts` の
- * `identifier-probes`/`consolidation-cost` サブコマンドは `...process.env` を展開して
- * いるが、DB 歯の側は環境変数を意図して固定している（同じファイルの deterministic 版は
- * 素のリテラルのまま）——`...process.env` に戻すと、歯が周囲の環境変数すべてに
- * 左右されるようになる。必要なのはこの1変数だけである。
+ * `MNEMORA_LOCAL_EMBEDDING_CACHE_DIR` だけを持ち出す。リテラルの env オブジェクトを渡す呼び出しは `process.env` を丸ごと展開しないので、
+ * CI の `actions/cache` が job-level env で設定していても、運ばなければ `LocalEmbeddingProvider` まで届かずキャッシュが空回りする。
+ * `...process.env` を丸ごと展開する代わりにこれを使うこと（DB 歯が周囲の環境変数すべてに左右されるようになる）。
  */
 export function localEmbeddingCacheDirEnv(source: EnvLike = process.env): EnvLike {
   const value = source.MNEMORA_LOCAL_EMBEDDING_CACHE_DIR;
@@ -248,22 +124,10 @@ export function localEmbeddingCacheDirEnv(source: EnvLike = process.env): EnvLik
 }
 
 /**
- * `LocalEmbeddingProvider` へ渡す固定した Hugging Face revision（Issue #597 案(a)）。
- *
- * 🔴 **クローン（miku）の決定**: 上流の repo 消失・ミラー汚染を予防するため、CI が
- * **使う側**（ここと `scripts/print-local-embedding-cache-key.mjs` のキャッシュ鍵）だけを
- * 採用時の sha に固定する。⛔ **`scripts/check-local-embedding-fingerprint.mjs`（指紋門）は
- * 固定しない**——`main` を照合し続ける番犬として残り、上流の `main` が動いて門が赤くなったら、
- * それがこの固定値を更新せよという合図になる（ADR 0253 追記）。
- *
- * 唯一の宣言は `scripts/local-embedding-pinned-revision.json`（scripts 側。
- * `@mnemora/local-embedding` の公開 API には足していない——`DEFAULT_LOCAL_EMBEDDING_REVISION`
- * のような公開 export は作らない、という決定である）。`print-local-embedding-cache-key.mjs`
- * が同じファイルを読んでおり、**同じ宣言を見ていることが、両者が食い違わない根拠である。**
- *
- * ⛔ **読めなければ投げる。** 黙って `revision: undefined`（transformers.js の既定 `"main"`）
- * へ戻すと、固定したはずの CI が実は固定されていない、という一番気づきにくい壊れ方になる
- * ——`parseModeOverride`/`decideProviderSource` が未知の値で例外にするのと同じ作法。
+ * `LocalEmbeddingProvider` へ渡す固定した Hugging Face revision。CI が使う側（ここと `scripts/print-local-embedding-cache-key.mjs`）だけを固定し、
+ * 指紋門 `scripts/check-local-embedding-fingerprint.mjs` は固定しない（`main` を照合し続ける番犬で、赤くなったらこの固定値の更新の合図）。
+ * 唯一の宣言は `scripts/local-embedding-pinned-revision.json`。公開 API には足さない。
+ * 読めなければ投げる: 黙って既定の `main` へ戻すと、固定したはずの CI が実は固定されていない、という気づきにくい壊れ方になる。
  */
 export function localEmbeddingPinnedRevision(
   declarationPath: string = fileURLToPath(
@@ -297,23 +161,9 @@ export function localEmbeddingPinnedRevision(
   return sha;
 }
 
-// ---------------------------------------------------------------------------
-// カセット再生か実 API かを決める(ADR 0068 ③)
-//
-// **現物の欠陥**: `cli.ts` の `resolveCassetteForRun` は「`OPENAI_API_KEY` が在れば
-// 無条件に実 API」だった。カセット(`examples/chat/cassettes/*.json`)が在っても、
-// キーが環境にあるだけで再生のつもりが実 API に倒れる——「明示すればカセットを
-// 使える口」がどこにも無かった。
-//
-// **既定の振る舞いは変えない**（「キーが在れば実 API」は誰かが選んだ意図かもしれない）。
-// `MNEMORA_PROVIDER_SOURCE` で**明示したときだけ**、キーの有無を上書きできる能力を足す。
-// ---------------------------------------------------------------------------
+// `MNEMORA_PROVIDER_SOURCE` で明示したときだけ、キーの有無を上書きできる。既定（「キーが在れば実 API」）は変えない——誰かが選んだ意図かもしれないため。
 
-/**
- * どちらを使うか と、なぜそう決まったか。**理由を捨てない**——`reason` が無いと
- * 「たまたま recorded になった」のか「明示して recorded にした」のかを画面から
- * 区別できず、ADR 0051 の「どちらで走ったかを隠さない」規律が骨抜きになる。
- */
+/** どちらを使うかと、なぜそう決まったか。理由を捨てない: `reason` が無いと、たまたま recorded になったのか明示したのかを画面から区別できない。 */
 export type ProviderSourceDecision =
   | { source: "openai"; reason: "key-present" }
   | { source: "recorded"; reason: "no-key" }
@@ -321,12 +171,8 @@ export type ProviderSourceDecision =
   | { source: "openai"; reason: "forced" };
 
 /**
- * `MNEMORA_PROVIDER_SOURCE` が指定されていればそれを最優先する(カセット側はキーの有無に
- * 関わらず強制できる)。未指定(未設定または空文字)なら、いままで通り `OPENAI_API_KEY` の
- * 有無だけで決まる。
- *
- * **未知の値は例外**(`parseModeOverride` と同じ作法)——黙って既定へ倒れない。
- * **`"openai"` をキー無しで強制された場合も例外**(下のコメント参照)。
+ * `MNEMORA_PROVIDER_SOURCE` が指定されていれば最優先する。未知の値は例外（黙って既定へ倒れない）。
+ * `"openai"` をキー無しで強制された場合も例外。
  */
 export function decideProviderSource(env: EnvLike): ProviderSourceDecision {
   const forced = env.MNEMORA_PROVIDER_SOURCE;
@@ -334,19 +180,9 @@ export function decideProviderSource(env: EnvLike): ProviderSourceDecision {
     return { source: "recorded", reason: "forced" };
   }
   if (forced === "openai") {
-    // **キーが無いのに `openai` を強制されたら落とす。**
-    //
-    // ⚠ ここを「そのまま返す」だけにすると、この ADR が塞ごうとしている欠陥が
-    // **新しい形で復活する**——呼び出し側(`cli.ts` の `runCompare`)は
-    // `source === "openai"` のときカセットを読まずに `process.env` をそのまま
-    // `createProviders` へ渡すので、`selectProviderMode` が「キーが無い ⟹
-    // deterministic」と判定する。結果、**画面には「実 API を叩く」と出しながら
-    // 意味を持たない擬似 provider で走り、数字の表を出して EXIT=0 で終わる**
-    // (実装の途中で実際にこの状態を踏み、走らせて確認した。ADR 0068 参照)。
-    //
-    // **⟹「明示した source と、実際に使われる provider が食い違う」経路を作らない。**
-    // これは ADR 0051 が `requireCassette` で引いたのと同じ線であり、
-    // 反対側(`recorded` を強制したのにカセットが無い)は既にそこで落ちている。
+    // キーが無いのに `openai` を強制されたら落とす。そのまま返すと、`runCompare` はカセットを読まず `process.env` を `createProviders` へ渡すので、
+    // 画面には実 API と出しながら擬似 provider で走り、数字の表を出して EXIT=0 で終わる。
+    // 明示した source と実際に使われる provider が食い違う経路を作らない。
     if (!env.OPENAI_API_KEY) {
       throw new Error(
         'MNEMORA_PROVIDER_SOURCE="openai" を指定したが、OPENAI_API_KEY が無い（ADR 0068）。' +
@@ -367,7 +203,6 @@ export function decideProviderSource(env: EnvLike): ProviderSourceDecision {
     : { source: "recorded", reason: "no-key" };
 }
 
-/** `decideProviderSource` の結果を、画面に出すための一文にする。 */
 export function describeProviderSourceReason(decision: ProviderSourceDecision): string {
   switch (decision.reason) {
     case "key-present":
@@ -386,24 +221,12 @@ export function describeProviderSourceReason(decision: ProviderSourceDecision): 
 }
 
 /**
- * 「予定」を名乗った経路だけが持つ値。**名乗っていない経路は `null` を渡す**
- * （省略できない・既定値を持たない）。
- *
- * ⭐ **省略可能にしない理由は `Providers.cassetteIgnored` と同じである**——
- * 「予定を名乗ったのに、食い違いを開示しないまま provider バナーを出す」経路を
- * 書けなくするため（AGENTS.md「形で塞ぐ」）。`cli.ts` の `printProviderMode` は
- * これを必須の引数で受け取る。
- *
- * ⛔ **`null` は「食い違っていない」ではない。「予定を名乗っていない」である。**
- * `chat` / `scope` / `backfill` などは `[cassette]` 行を1行も出さない——
- * 名乗っていない予定と食い違うことはできない。
+ * 「予定」を名乗った経路だけが持つ値。名乗っていない経路は `null` を渡す（省略できない）。省略可能にしないのは、
+ * 予定を名乗ったのに食い違いを開示しないまま provider バナーを出す経路を書けなくするため。
+ * `null` は「食い違っていない」ではなく「予定を名乗っていない」。
  */
 export type PlannedProviderSource = ProviderSourceDecision["source"] | null;
 
-/**
- * `decideProviderSource` が名乗った「予定」と、`createProviders` が実際に組んだ
- * 「実測」の食い違い（Issue #594）。
- */
 export interface PlanActualMismatch {
   plannedSource: ProviderSourceDecision["source"];
   llmMode: ProviderMode;
@@ -413,23 +236,10 @@ export interface PlanActualMismatch {
 }
 
 /**
- * 画面に並ぶ2行——`[cassette] provider source の予定`（構築の**前**、
- * `decideProviderSource`）と `[provider] LLM / Embedding`（構築の**後**、
- * `createProviders`）——が食い違っているかを判定する（Issue #594）。
- *
- * 🔴 **なぜ `Providers.cassetteIgnored` では足りないか。** あちらは
- * `cassette !== undefined` を前提に持つ——**`cli.ts` の `resolveRecordedRun` は
- * `decision.source === "openai"` の枝でカセットを読まずに即 return する**ので、
- * `openai` 経路では `cassetteIgnored` を `true` にできる枝が1つも無い。
- * ⟹ **この経路の食い違いを、あの検出器は原理的に見ない。**
- * 【実測】`plan-actual-mismatch.test.ts` の陽性対照が、この盲点そのものを固定している。
- *
- * ⭐⭐ **これは判定ではなく開示である。⛔ 例外にはできない。**
- * `cli.ts` の `buildArmSpecs` が組む `retrieval` の arm A（擬似LLM+擬似埋め込み）と
- * arm B（擬似LLM+本物の埋め込み）は、**意図して**予定と食い違わせる対照群である。
- * ⟹ 食い違いそのものは欠陥とは限らず、**正当な食い違いと事故の食い違いを、
- * この関数は区別しない（区別できない）。** `Providers.cassetteIgnored` が
- * 例外になれないのと同じ理由であり、ADR 0255 / ADR 0223 決定5 の適用である。
+ * 予定（構築の前）と実測（構築の後）の2行が食い違っているかを判定する。`Providers.cassetteIgnored` では足りない:
+ * `openai` 経路ではカセットを読まないので、あちらは原理的にこの食い違いを見ない。
+ * 判定ではなく開示で、例外にはできない。`retrieval` の arm A/B は意図して予定と食い違わせる対照群で、
+ * 正当な食い違いと事故の食い違いを区別できない。
  */
 export function detectPlanActualMismatch(
   plannedSource: PlannedProviderSource,
@@ -453,15 +263,8 @@ export function detectPlanActualMismatch(
 }
 
 /**
- * `detectPlanActualMismatch` の結果を、画面に焼く行にする。
- *
- * ⭐ **予定の値と実測の値を、どちらも逐語で出す**——読み手に2行を突き合わせさせない、
- * というのが Issue #594 の芯である。⛔ **どちらが正しいかは名乗らない**
- * （上の「判定ではなく開示である」を参照）。
- *
- * ⚠ **`describeMode`（`cli.ts`）の長い説明文ではなく `ProviderMode` の値そのものを出す。**
- * この行の役目は2行の**突き合わせ**であり、突き合わせる相手は
- * `MNEMORA_LLM` / `MNEMORA_EMBEDDING` に書く値だからである。
+ * 予定の値と実測の値を、どちらも逐語で出す（読み手に2行を突き合わせさせない）。どちらが正しいかは名乗らない。
+ * `describeMode` の長い説明文ではなく `ProviderMode` の値そのものを出す（突き合わせる相手は `MNEMORA_LLM`/`MNEMORA_EMBEDDING` に書く値だから）。
  */
 export function describePlanActualMismatch(mismatch: PlanActualMismatch): string {
   const differing = [
@@ -477,42 +280,15 @@ export function describePlanActualMismatch(mismatch: PlanActualMismatch): string
 }
 
 export interface CreateProvidersOptions {
-  /**
-   * `"recorded"` モードで再生に使うカセット（ADR 0051）。`"recorded"` を選んだのに
-   * これが無ければ**構築時に落ちる**——カセット未指定を「じゃあ擬似物で」と読み替えない。
-   */
+  /** `"recorded"` を選んだのにこれが無ければ構築時に落ちる（カセット未指定を「じゃあ擬似物で」と読み替えない）。 */
   cassette?: Cassette;
-  /**
-   * 実 API の入出力を記録する（ADR 0051）。`"openai"` を選んだ側だけが記録の対象になる
-   * ——叩いていない API は記録しようがない。
-   */
   recorder?: CassetteRecorder;
-  /**
-   * `OpenAILLMProvider` へ渡す `temperature`（省略可能な純追加、Issue #690 段3a）。
-   *
-   * **省略時（既定）は渡さない**——`llmMode === "openai"` の既存の呼び出し（`compare`/
-   * `retrieval`/`answer` 等）はこの欄を渡していないため、挙動は1バイトも変わらない。
-   * `answer-time-weighting` ベンチが、非決定性を切り分けるために temperature を固定
-   * したいときだけ明示的に渡す。
-   */
+  /** 省略時は渡さない（`llmMode === "openai"` の既存の呼び出しの挙動を変えない）。 */
   llmTemperature?: number;
   /**
-   * 「種カセット」（Issue #691 続き）。`llmMode`/`embeddingMode` が `"openai"` の側だけに
-   * 効く——種にある入力（`llmCassetteKey`/`embeddingCassetteKey` が一致する入力）には
-   * 実 API を呼ばずその値を返し、無ければ実 API を呼ぶ（`SeededLLMProvider`/
-   * `SeededEmbeddingProvider`、`@mnemora/testkit`）。**`recorder` と組み合わせると**、
-   * 種から返した値も実 API から返した値も同じように新しいカセットへ記録される
-   * ——新しいカセットは自己完結し、種への参照は残さない。
-   *
-   * **なぜ要るか**: `record` は毎回、抽出（`observe()`）を実 API でやり直す。抽出は
-   * 非決定的なため、録り直すたびに記憶集合が変わりうる（マネージャーが実 API で
-   * `record:answer` を走らせた際に実測——陽性対照 `applyRetentionMutation` が
-   * 「変異対象の部分文字列が見つからない」で落ちた）。旧カセットを種として渡すことで、
-   * 同じ入力には記録済みの値を返し、記憶集合を旧カセットへ揃えやすくする。
-   *
-   * **省略すれば（既定）、この欄が無かったときと1バイトも挙動が変わらない**——
-   * `buildLLM`/`buildEmbedding` の `"openai"` 分岐は、`seedCassette` が `undefined` の
-   * ときは real をそのまま使う（`SeededLLMProvider`/`SeededEmbeddingProvider` で包まない）。
+   * 「種カセット」。`openai` の側だけに効き、種にある入力には実 API を呼ばずその値を返す。`recorder` と組み合わせると、
+   * 種由来も実 API 由来も新しいカセットへ記録され、種への参照は残らない。抽出は非決定的で録り直すたびに記憶集合が変わりうるため、
+   * 旧カセットを種として渡して揃えやすくする。省略時は包まず real をそのまま使う。
    */
   seedCassette?: Cassette;
 }
@@ -526,9 +302,6 @@ export function createProviders(
   const embeddingMode = selectEmbeddingMode(env);
   const { cassette, recorder, llmTemperature, seedCassette } = options;
 
-  // `buildLLM`/`buildEmbedding` が `"openai"` 分岐で `SeededLLMProvider`/
-  // `SeededEmbeddingProvider` を作ったときだけ、ここへ実体を控える
-  // （`Providers.readSeedUsage` が呼ばれた時点の実測を読むための参照）。
   let seededLLM: SeededLLMProvider | undefined;
   let seededEmbedding: SeededEmbeddingProvider | undefined;
 
@@ -542,9 +315,7 @@ export function createProviders(
     return cassette;
   };
 
-  // LLM・Embedding のどちらか一方でも本物を使うなら、1つの usage-meter（1つの実
-  // OpenAI クライアント）を両方で共有する——呼び出し回数・トークン・費用をこのプロセスの
-  // 実行全体で一箇所に集計するため（PR 本文 (A)）。
+  // 1つの usage-meter を両方で共有する——呼び出し回数・トークン・費用をこのプロセス全体で一箇所に集計するため。
   const usageMeter =
     llmMode === "openai" || embeddingMode === "openai"
       ? createUsageMeter({
@@ -570,11 +341,7 @@ export function createProviders(
       client: usageMeter?.client,
       ...(llmTemperature !== undefined ? { temperature: llmTemperature } : {}),
     });
-    // 組み立て順: real → `SeededLLMProvider`（種にあれば実 API を呼ばない）→
-    // `RecordingLLMProvider`（種由来・実 API 由来のどちらも新しいカセットへ記録する）。
-    // この順を逆にする（Recording が real を直接包み、Seeded がその外側に来る）と、
-    // 種から返した値が一度も recorder を通らず、新しいカセットに記録されない
-    // （変異試験で確認済み）。
+    // 組み立て順は real → `SeededLLMProvider` → `RecordingLLMProvider`。逆にすると、種から返した値が recorder を通らず、新しいカセットに記録されない。
     const withSeed: LLMProvider = seedCassette
       ? (seededLLM = new SeededLLMProvider(real, {
           seed: seedCassette.llm,
@@ -595,24 +362,11 @@ export function createProviders(
         },
       });
     }
-    // Issue #109: 外部サービスへ繋がない埋め込み（ADR 0085）。鍵もカセットも要らない
-    // ——`recorded`/`openai` より先に見る必要は無いが、`!== "openai"` の擬似物 fallback
-    // より先に見ないと `local` が誤って `DeterministicEmbeddingProvider` に落ちてしまう。
+    // `!== "openai"` の擬似物 fallback より先に見ないと、`local` が誤って `DeterministicEmbeddingProvider` に落ちる。
     if (embeddingMode === "local") {
-      // `MNEMORA_LOCAL_EMBEDDING_CACHE_DIR` が指定されていれば `cacheDir` として渡す
-      // （`LocalEmbeddingProvider` のコンストラクタが元から持つオプション——**使うだけで
-      // このパッケージ自体は変更していない**）。CI の `identifier-probes` ジョブが
-      // `actions/cache` でモデル重みをキャッシュする場所を固定するために使う——
-      // transformers.js の既定（`@huggingface/transformers` パッケージ自身の中の `.cache/`。
-      // `node_modules` の置き方で場所が変わり、入れ直すと消える）は環境によって場所が変わりうる
-      // ため、明示したパスのほうが「次の実行でも同じ場所を見る」ことを保証しやすい。
-      //
-      // `revision` も渡す（Issue #597 案(a)）。CI が使う側（ここと
-      // `scripts/print-local-embedding-cache-key.mjs` のキャッシュ鍵）だけを、採用時の
-      // sha に固定する——`scripts/local-embedding-pinned-revision.json` が唯一の宣言。
-      // ⛔ `@mnemora/local-embedding` 自体の既定は変えていない（`revision` を渡さなければ
-      // transformers.js の既定 `"main"` のまま）。ここは「examples/chat が渡す値」を
-      // 固定するだけである。
+      // `MNEMORA_LOCAL_EMBEDDING_CACHE_DIR` を `cacheDir` として渡す。transformers.js の既定の場所は環境によって変わりうるので、
+      // 明示したパスのほうが次の実行でも同じ場所を見ることを保証しやすい。`revision` も渡し、CI が使う側だけを固定する
+      // （`@mnemora/local-embedding` 自体の既定は変えない）。
       const cacheDir = env.MNEMORA_LOCAL_EMBEDDING_CACHE_DIR;
       return new LocalEmbeddingProvider({
         ...(cacheDir ? { cacheDir } : {}),
@@ -628,7 +382,7 @@ export function createProviders(
       dimensions: OPENAI_EMBEDDING_DIMENSIONS,
       client: usageMeter?.client,
     });
-    // `buildLLM` と同じ組み立て順（real → Seeded → Recording）。理由も同じ。
+    // `buildLLM` と同じ組み立て順（real → Seeded → Recording）。
     const withSeed: EmbeddingProvider = seedCassette
       ? (seededEmbedding = new SeededEmbeddingProvider(real, {
           seed: seedCassette.embedding,
@@ -645,8 +399,7 @@ export function createProviders(
   const llmProvider = buildLLM();
   const embeddingProvider = buildEmbedding();
 
-  // `requireCassette` の鏡像（`Providers.cassetteIgnored` の docstring参照）。
-  // 例外にはできない——`Providers.cassetteIgnored` の docstring の arm A を見ること。
+  // `requireCassette` の鏡像。例外にはできない（`Providers.cassetteIgnored` の docstring 参照）。
   const cassetteIgnored =
     cassette !== undefined && llmMode !== "recorded" && embeddingMode !== "recorded";
 
