@@ -1,10 +1,8 @@
 import type { ConsolidationCostRunJson, ConsolidationRoundJson } from "./consolidation-json.js";
 
-/** `status: "measured"` のときだけ呼ばれる(`status: "weights_unavailable"` のときは
- *  呼び出し側がメトリクスを1つも出さずに打ち切る——`cli.ts` の `runConsolidationCostCommand`)。 */
+/** `status: "measured"` のときだけ呼ばれる。`weights_unavailable` のときは呼び出し側がメトリクスを出さずに打ち切る。 */
 type MeasuredConsolidationCostRunJson = Extract<ConsolidationCostRunJson, { status: "measured" }>;
 
-/** 画面向けの人が読む要約(機械可読な出力は `MNEMORA_CONSOLIDATION_JSON` の側)。 */
 export function formatConsolidationCostReport(json: MeasuredConsolidationCostRunJson): string {
   const lines: string[] = [];
   lines.push(
@@ -15,10 +13,7 @@ export function formatConsolidationCostReport(json: MeasuredConsolidationCostRun
       `recallLimit=${json.recallLimit} budgetLadder=[${json.budgetLadder.join(",")}]`,
   );
   lines.push(`stoppedAfterRound=${json.stoppedAfterRound} stopReason=${json.stopReason}`);
-  // ⚠ `json.abort === null`(打ち切っていない)のときは1行も足さない——正常系の出力は
-  // 完走したときの表と1文字も変わらない。`abort !== null` のときだけ、以下の表が
-  // 「round `abort.round` の実行中に例外で打ち切った部分的な結果である」ことを明示する
-  // (打ち切りの表が完走した表と見分けが付かない形にしない)。
+  // `json.abort === null` のときは1行も足さない。打ち切りの表が、完走した表と見分けが付かない形にしないため。
   if (json.abort !== null) {
     lines.push(
       `⚠ round ${json.abort.round} の実行中に例外が投げられ、打ち切った。` +
