@@ -7,17 +7,8 @@ import { PostgresOutboxStore } from "../outbox-store.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
 /**
- * 終端に達しないまま止まり続ける job（Issue #1196）が `limit` 本以上あっても、`claimBatch`
- * が飢餓を起こさないことを、Postgres と testkit の fixture の両方で縛る。
- *
- * 新しい振る舞い（`OutboxStore` の doc の 2026-09-29 追記、ADR 0357）: **取り直し**
- * （claim 時点で `claimed_at` が既に非 NULL＝リースが切れた行を再び claim する場合）は
- * `available_at` を `opts.now` に書き直す。**初めての claim**（`claimed_at` が NULL
- * だった行）では `available_at` を変えない。取る順（`available_at` の古い順）そのものは
- * 変えていない。
- *
- * 「止まり続ける」は、claim した job に `complete` も `fail` も呼ばない（ワーカーがその job で毎回
- * 止まる）ことで作る。リースが切れるたびに次の `claimBatch` を呼ぶ。
+ * 取り直し（claim 時点で `claimed_at` が既に非 NULL＝リースが切れた行を再び claim する場合）は `available_at` を `opts.now` に書き直す。初めての claim（`claimed_at` が NULL だった行）では変えない。取る順（`available_at` の古い順）そのものは変えない。
+ * 「止まり続ける」は、claim した job に `complete` も `fail` も呼ばない（ワーカーがその job で毎回止まる）ことで作る。リースが切れるたびに次の `claimBatch` を呼ぶ。
  */
 
 const ctx: Ctx = { tenantId: "outbox-head-of-line" };
@@ -93,7 +84,6 @@ for (const [name, makeKit] of KITS) {
       const stuck = ids.slice(0, 3);
       let now = T;
 
-      // round0: 初めての claim。stuck の3本が古い順に取られる。availableAt は変えない。
       const round0 = await kit.outboxStore.claimBatch(ctx, {
         limit: 3,
         now: new Date(now),
@@ -105,11 +95,8 @@ for (const [name, makeKit] of KITS) {
         const job = round0.find((j) => j.id === id)!;
         expect(job.availableAt.getTime()).toBe(T - 3_600_000 + i * 1000);
       }
-      // 止まる: complete も fail も呼ばない。
 
       now += LEASE_MS * 2;
-      // round1: リース切れの取り直し。availableAt がまだ更新されていないので、依然として
-      // stuck の3本が古い順の先頭にいる。この claim で availableAt が now に書き直される。
       const round1 = await kit.outboxStore.claimBatch(ctx, {
         limit: 3,
         now: new Date(now),
@@ -122,8 +109,6 @@ for (const [name, makeKit] of KITS) {
       }
 
       now += LEASE_MS * 2;
-      // round2: stuck の3本の availableAt は round1 の now まで進んだので、
-      // まだ一度も claim されていない job3..5 のほうが古い順で先に来る。
       const round2 = await kit.outboxStore.claimBatch(ctx, {
         limit: 3,
         now: new Date(now),
@@ -168,10 +153,8 @@ for (const [name, makeKit] of KITS) {
         for (const job of claimed) {
           seen.add(job.id);
           if (!stuckSet.has(job.id)) {
-            // 止まらない job は前へ進める。
             await kit.outboxStore.complete(ctx, job.id, job.attempts);
           }
-          // stuck な job は complete/fail を呼ばない（毎回止まる）。
         }
         now += LEASE_MS * 2;
       }

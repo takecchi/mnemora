@@ -6,21 +6,6 @@ import type { Observation } from "../observation.js";
 import { buildConsolidatedMemory } from "../strategies/consolidate.js";
 import { buildReflectedMemory } from "../strategies/reflect.js";
 
-/**
- * LLM が返した tags のうち、空文字・空白だけの要素は「tag を返さなかった」ものとして捨てる。
- *
- * tags は「話題・内容の要約」を LLM が推論した値（ADR 0318 の3本の役割分担の表）であり、
- * 空白だけの要素は要約になっていない。LLM 由来の空白だけの文字列を「与えられなかった」として
- * 扱うのは、digest（`resolveDigest`、空白だけならフォールバック）と claim key
- * （`deriveClaimKeys`、空白だけなら `null`）と同じ扱いである。
- *
- * 【実測 2026-09-27】以前は `""`・`" "`・全角空白（U+3000） をそのまま `Memory.tags` に書き、
- * `@mnemora/postgres` と testkit の `InMemoryMemoryStore` の両方で、その名前の proposed ラベルが
- * `listLabels` に出ていた（extract の inline / deferred・consolidate・reflect の全経路。
- * reflect は `""` をスキーマで拒むが `" "` は通していた）。通しの歯は
- * `packages/postgres/src/__tests__/llm-blank-tags.postgres.test.ts`。
- */
-
 const ctx: Ctx = { tenantId: "llm-blank-tags" };
 const NOW = new Date("2026-09-27T00:00:00.000Z");
 const BLANK_AND_REAL = ["", " ", "\u3000", "\n\t", "旅行", "旅行"];

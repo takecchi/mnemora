@@ -6,13 +6,7 @@ import { createRuntime } from "../runtime.js";
 import { defaultDecayStrategy } from "../strategies/decay.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * Issue #1734（2026-09-30 マージ分の確かめ直し）の #1467 のすり抜け W4（ADR 0381 の 2026-09-30 追記・約束7）。
- * `winnerId` が memberIds のどれかと大文字小文字だけ違うとき、store の `get` が両者（`winnerId` の綴りと、
- * memberIds の候補）に**同じ id の記憶を返したときだけ**救済する。両方 `null`（どちらも見つからない）は、
- * 「同じ記憶」の証拠にならないので `RangeError`。既存の歯は、片方だけ `null`・別の記憶を返す形しか見ていなかった。
- * 群版（`resolveContestedGroup`）と、2者版（`resolveContested`）は同じ形の判定を持つので、両方を縛る。
- */
+// 群版（`resolveContestedGroup`）と2者版（`resolveContested`）は同じ形の判定を持つので、両方を縛る。
 const ctx: Ctx = { tenantId: "tenant-rescue-both-null" };
 const NOW = new Date("2026-06-01T00:00:00.000Z");
 

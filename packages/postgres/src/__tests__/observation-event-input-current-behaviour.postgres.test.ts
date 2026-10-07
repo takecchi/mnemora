@@ -14,16 +14,7 @@ import { PostgresEventStore } from "../event-store.js";
 import { PostgresMemoryStore } from "../memory-store.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
-/**
- * Observation とイベントの書き込みの口が入力の中身をどう扱うかの、今の振る舞い（9回目の棚卸し）。
- * `MemoryStore.createObservation`・`EventStore.append`・`MemoryEvent.memoryId` の TSDoc の歯。
- * `@mnemora/postgres` と testkit の fixture で縛り、2つが違うところ（`payload: undefined`）は、それぞれの今の
- * 振る舞いのまま縛る（揃えるかはオーナーへの問いの待ち）。整数でない `sizeBeforeBytes` は、ADR 0434 で fixture を
- * Postgres に揃えたので、どちらも拒む。
- * core の Fake の側は `packages/core/src/__tests__/fake-observation-event-rejects.test.ts`。
- *
- * ⚠ 望ましい姿の主張ではない。変えるときは、この歯ごと書き換えること。
- */
+/** ⚠ 望ましい姿の主張ではない。今の振る舞いを縛るので、変えるときはこの歯ごと書き換えること。`@mnemora/postgres` と testkit の fixture で違うところ（`payload: undefined`）は、それぞれの今の振る舞いのまま縛る。 */
 
 const ctx: Ctx = { tenantId: "observation-event-input-a" };
 const other: Ctx = { tenantId: "observation-event-input-b" };
@@ -178,7 +169,6 @@ describe.each(KITS)("イベントの入力（今の振る舞い）: %s", (kitNam
     await expect(kit.es.append(ctx, make(memoryId))).rejects.toThrow();
   });
 
-  // ADR 0434: fixture も Postgres（列が整数）と同じく拒む。
   it("append: sizeBeforeBytes が整数でない（1.5）は拒む", async () => {
     const { kit, memoryId } = await withMemory();
     await expect(kit.es.append(ctx, event(memoryId, { sizeBeforeBytes: 1.5 }))).rejects.toThrow();

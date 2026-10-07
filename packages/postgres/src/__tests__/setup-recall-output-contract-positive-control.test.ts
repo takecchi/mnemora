@@ -5,28 +5,21 @@ import { takeRuntimeOutputContractProblemsForTesting } from "../../../core/src/_
 import { createFakeRuntimeStores } from "../../../core/src/__tests__/runtime-fakes.js";
 
 /**
- * `setup-recall-output-contract.ts`（`vi.mock` で `createRuntime` の戻り値を検査に通す配線）の
- * 陽性対照（Issue #1276 / ADR 0397）。
+ * `setup-recall-output-contract.ts`（`vi.mock` で `createRuntime` の戻り値を検査に通す配線）の陽性対照。
  *
  * ## なぜ要るか
  *
- * 並列 project は `isolate: false` で走る（`vitest.config.mts`）。ファイルの間でモジュールが
- * 共有されるので、`vi.mock` の包みが2つ目以降のファイルでも効き続けるかは、検査の側から
- * 見えない——包みが効かなくなっても、契約を破る呼び出しが無い限り、テストは黙って緑のままである
- * （`DELIBERATELY_VIOLATING_TESTS` は空。わざと破るテストが1本も無いので、検査が
- * 落ちる場面が無い）。この歯は、わざと契約を破る呼び出しをして、**破れが実際に溜まること**を
- * 確かめる。包みが効いていなければ、溜まらず、ここで赤になる。
+ * 並列 project は `isolate: false` で走る（`vitest.config.mts`）。ファイルの間でモジュールが共有されるので、`vi.mock` の包みが2つ目以降のファイルでも効き続けるかは、検査の側から見えない。
+ * 包みが効かなくなっても、契約を破る呼び出しが無い限り、テストは黙って緑のままである（`DELIBERATELY_VIOLATING_TESTS` は空。わざと破るテストが1本も無いので、検査が落ちる場面が無い）。
+ * この歯は、わざと契約を破る呼び出しをして、破れが実際に溜まることを確かめる。包みが効いていなければ、溜まらず、ここで赤になる。
  *
  * ## 仕組み
  *
- * - 破れの作り方は core の `recall-pipeline.test.ts`（T1）と同じ——`RuntimeDeps.tokenCounter` に
- *   非整数を返す実装を差す（呼び出し側が実際に差せる拡張点）。`usage.estimatedTokens` は
- *   整数の契約なので、`recall()` の戻り値が契約を破る。
- * - 溜まった破れを `takeRuntimeOutputContractProblemsForTesting()` で取り出して、
- *   `afterEach` の検査（`failOnRuntimeOutputContractViolations`）に渡さない——`DELIBERATELY_VIOLATING_TESTS`
- *   へ名前を足す方式だと、破れが溜まったかを確かめる手段が無い（一覧は「溜まっても無視する」だけ）。
- * - 対（契約を守る呼び出しでは何も溜まらない）も同じファイルに置く。「何でも溜める」包みを
- *   陽性の側だけでは見分けられない。
+ * - 破れの作り方は core の `recall-pipeline.test.ts`（T1）と同じ。`RuntimeDeps.tokenCounter` に非整数を返す実装を差す（呼び出し側が実際に差せる拡張点）。
+ *   `usage.estimatedTokens` は整数の契約なので、`recall()` の戻り値が契約を破る。
+ * - 溜まった破れを `takeRuntimeOutputContractProblemsForTesting()` で取り出して、`afterEach` の検査（`failOnRuntimeOutputContractViolations`）に渡さない。
+ *   `DELIBERATELY_VIOLATING_TESTS` へ名前を足す方式だと、破れが溜まったかを確かめる手段が無い（一覧は「溜まっても無視する」だけ）。
+ * - 対（契約を守る呼び出しでは何も溜まらない）も同じファイルに置く。「何でも溜める」包みを陽性の側だけでは見分けられない。
  * - DB は使わない（包みは store に依らない）。並列 project に置く（`SERIAL_TEST_FILES` に入れない）。
  */
 
@@ -67,7 +60,6 @@ async function seedEmbeddedMemory(stores: ReturnType<typeof createFakeRuntimeSto
 
 describe("出力の契約の検査（setup-recall-output-contract.ts）の陽性対照", () => {
   it("陽性対照: 契約を破る recall() の戻り値が、検査に溜まる（包みが効いていなければここで赤になる）", async () => {
-    // 検査が溜めた破れは、前のテストの afterEach で空になっている。念のため空にしてから始める。
     takeRuntimeOutputContractProblemsForTesting();
 
     const { runtime, stores } = buildRuntime({

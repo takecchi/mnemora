@@ -5,17 +5,6 @@ import type { LLMProvider, StructuredRequest } from "../interfaces/llm-provider.
 import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * Issue #1099: `kind: "usage"` の Observation（`observe({ kind: "memory_usage" })` が作る
- * 使用報告）は、抽出器を通らない（`docs/memory-model.md` §2・§6、`ExtractionOutcome` の
- * `skipped` の doc）。ところが `reextract` は `kind` を見ずに `extractCandidates` を呼び、
- * payload の JSON（`{"recallId":…,"usedMemoryIds":[…]}`）を LLM に送って、それを本文とする
- * `stated` の Memory を作っていた（Fake と Postgres の両方で実測。書き込み側の差分ファズで
- * 見つけた）。
- *
- * 直した後は、存在しない Observation と同じく、LLM も書き込みも試みる前に `Error` を投げる。
- */
-
 const ctx: Ctx = { tenantId: "tenant-1" };
 
 /** 抽出の呼び出しを数える LLM。抽出には、プロンプトの本文をそのまま1件の候補にして返す。 */

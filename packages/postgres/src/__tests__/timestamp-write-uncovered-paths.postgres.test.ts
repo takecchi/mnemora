@@ -15,7 +15,7 @@ import {
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
 /**
- * Issue #1040（PR #1052）の約束: SQL に `Date` を渡す口は、すべて `toPgTimestamp`（UTC の文字列）を通す。
+ * SQL に `Date` を渡す口は、すべて `toPgTimestamp`（UTC の文字列）を通す。
  * `conformance.postgres.test.ts` の末尾の検査は適合テストが通る口を見るが、適合テストの入力が
  * 通らない口（`occurredAt` を持つ observation・`reinforceMany` の `unnest` の配列・`markContestedGroup` の
  * JSON のイベント・`resolveOrphanedContested`・trigram の期間／validAt の絞り）は残る。ここで足す。
@@ -150,7 +150,6 @@ describe("適合テストの入力が通らない口でも、素の Date を pg 
       { id: a!.id, event: ev(a!.id) },
       { id: b!.id, event: ev(b!.id) },
     );
-    // 相手（b）が消えた後の生き残り（a）を、孤児の contested から戻す。
     await store.resolveOrphanedContested!(ctx, {
       id: a!.id,
       contestedWithId: b!.id,

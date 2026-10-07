@@ -1,11 +1,7 @@
-// ADR 0434（穴探し14巡目）: testkit のインメモリ実装と Postgres 実装に、同じ入力（NUL・`sizeBeforeBytes`・
-// `reinforce` の `nowSeq`・outbox の行を書くときの `opts.now`・`createMemory` の `purgedAt`）を流し、
+// testkit のインメモリ実装と Postgres 実装に、同じ入力（NUL・`sizeBeforeBytes`・`reinforce` の `nowSeq`・
+// outbox の行を書くときの `opts.now`・`createMemory` の `purgedAt`）を流し、
 // **どちらも同じ側（拒む／通る）になる**ことを確かめる。Postgres が拒むと確かめた入力だけを fixture が拒み、
 // Postgres が通す入力は fixture も通す（境界ちょうどの値を含む）。
-// クローンの委譲先（マネージャー mgr-0629e6a2）が書いた。オーナーではない。
-//
-// 同じ表をインメモリだけに当てたもの（DB が要らない。fixture の例外の文面も縛る）が
-// `packages/testkit/src/__tests__/in-memory-nul-numeric-purged-at-postgres-alignment.test.ts`。2つの表は同じ内容。
 
 import { afterAll, describe, expect, it } from "vitest";
 import type {
@@ -43,7 +39,6 @@ afterAll(async () => {
   await closeTestClient();
 });
 
-/** 1つのケースが使う、空の store 一式。 */
 interface Kit {
   memory: MemoryStore;
   events: EventStore;
@@ -194,7 +189,6 @@ const INT4_MESSAGE =
 const NOW_MESSAGE = /now must be a valid Date \(got Invalid Date\)/;
 
 const CASES: Case[] = [
-  // ---- 候補2: 書き込み（NUL） ----
   {
     name: "createMemory: claimKey.subject に NUL",
     expect: "reject",
@@ -241,7 +235,6 @@ const CASES: Case[] = [
     },
   },
   {
-    // ADR 0630: 以前は通った（書けて、読み戻すと MemorySchema を通らなかった）。今は入口で拒む。
     name: "createMemory: 空文字の extractorVersion は拒む（ADR 0630。以前は通った）",
     expect: "reject",
     message: /extractorVersion is malformed/,
@@ -485,7 +478,6 @@ const CASES: Case[] = [
     },
   },
 
-  // ---- 候補2: 読み取り（NUL） ----
   {
     name: "findActiveByClaimKey: claimKey.subject に NUL",
     expect: "reject",
@@ -600,7 +592,6 @@ const CASES: Case[] = [
     },
   },
 
-  // ---- 候補3: sizeBeforeBytes（int4） ----
   ...(
     [
       ["2^31（int4 の最大値 + 1）", I32, "reject"],
@@ -741,7 +732,6 @@ const CASES: Case[] = [
     },
   ]),
 
-  // ---- 候補3: reinforce の nowSeq ----
   ...(
     [
       ["負（-1）", -1],
@@ -828,7 +818,6 @@ const CASES: Case[] = [
     },
   },
 
-  // ---- 候補3: opts.now の Invalid Date（outbox の行を実際に書くときだけ） ----
   {
     name: "createMemoryWithOutbox: now が Invalid Date（jobKinds あり）",
     expect: "reject",
@@ -1036,7 +1025,6 @@ function registerCases(kits: Array<[string, () => Promise<Kit>]>): void {
         });
       }
 
-      // ---- 候補4: purgedAt ----
       it("createMemory に purgedAt を渡しても保存せず、null で読み戻る（断らない）", async () => {
         const kit = await makeKit();
         const created = await kit.memory.createMemory(ctx, newMemory({ purgedAt: AT }));

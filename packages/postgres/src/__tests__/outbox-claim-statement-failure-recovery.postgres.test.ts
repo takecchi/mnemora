@@ -11,36 +11,14 @@ import {
 } from "./test-db.js";
 
 /**
- * `claimBatch` の文が途中で失敗しても（`lock_timeout`・接続断）、**ジョブを取りこぼさない**こと。
+ * 失敗した `claimBatch` の後、ジョブは claim されていないまま（`claimed_at` が無く、`attempts` も進んでいない）であり、同じ `now` での次の `claimBatch` が、リースの切れを待たずに拾う。
+ * ⚠ 「リースを待たずに」は、`claimBatch` を1つの SQL 文（`SELECT … FOR UPDATE SKIP LOCKED` の CTE と同じ文の `UPDATE`）で書いており、Postgres が1文を丸ごとロールバックすることに拠っている。
  *
- * ## 約束が書かれている場所
- * - `OutboxStore` の冒頭の契約（`packages/core/src/interfaces/outbox-store.ts`）:
- *   `claimBatch` は `completed_at IS NULL AND failed_at IS NULL` かつ `available_at <= now` の
- *   ジョブを返す。リース（ADR 0032）は、終端に達しないジョブが「二度と claim されず、どこからも
- *   見えなくなる」ことを避けるためにある。
- * - [ADR 0206](../../../../docs/decisions/0206-outbox-concurrent-claim-conformance.md)
- *   「その後（2026-09-17）」: 誰にも拾われない行が生じるには「ロックを持つが claim しない者」が
- *   要る。文がエラー・`lock_timeout`・接続断でロールバックする経路は「確かめていないこと」に
- *   残っていた——この歯がそこを測る。
+ * ⚠ 測っていないこと: この歯が起こす失敗は、文がテーブルのロックを待つ段（claim を書く前）で起きる。claim を書いた後の失敗（たとえば `claimBatch` をトランザクションの無い複数の文に分け、後の文が落ちる形）はこの起こし方では作れず、この歯では捕まらない。
  *
- * ## この歯が縛ること
- * 失敗した `claimBatch` の後、ジョブは **claim されていないまま**（`claimed_at` が無く、`attempts` も
- * 進んでいない）であり、**同じ `now` での次の `claimBatch` が、リースの切れを待たずに拾う**。
- * ⚠ 「リースを待たずに」は、上の文書が約束として書いている範囲より一段強い。今の実装が
- * `claimBatch` を1つの SQL 文（`SELECT … FOR UPDATE SKIP LOCKED` の CTE と同じ文の `UPDATE`）で
- * 書いており、Postgres が1文を丸ごとロールバックすることに拠っている。
- *
- * ⚠ **測っていないこと**: この歯が起こす失敗は、文がテーブルのロックを待つ段（claim を書く前）で
- * 起きる。claim を書いた**後**の失敗（たとえば `claimBatch` をトランザクションの無い複数の文に
- * 分け、後の文が落ちる形）は、この起こし方では作れない。そうした回帰は、この歯では捕まらない。
- *
- * ## 失敗の起こし方
- * 別の接続で `outbox` にテーブルの `ACCESS EXCLUSIVE` ロックを持つ。`claimBatch` は行に届く前、
- * テーブルのロックを取る段で待たされる（`SKIP LOCKED` は行のロックにしか効かないので、迂回できない）。
+ * 失敗の起こし方: 別の接続で `outbox` にテーブルの `ACCESS EXCLUSIVE` ロックを持つ。`claimBatch` は行に届く前にテーブルのロックを取る段で待たされる（`SKIP LOCKED` は行のロックにしか効かないので迂回できない）。
  * その待ちを `lock_timeout` で打ち切るか、backend を `pg_terminate_backend` で切る。
- *
- * ⚠ ロックを持つ接続（`holder`）を放す前に、共有のプールで `outbox` を読むと、その読みもロック待ちで
- * 止まる。各 `it` で「ロックを放す → 共有のプールで確かめる」の順を守ること。
+ * ⚠ ロックを持つ接続（`holder`）を放す前に共有のプールで `outbox` を読むと、その読みもロック待ちで止まる。各 `it` で「ロックを放す → 共有のプールで確かめる」の順を守ること。
  */
 describe("PostgresOutboxStore.claimBatch — 文が途中で失敗しても、ジョブを取りこぼさない（ADR 0206）", () => {
   const TENANT = `outbox-claim-rollback-${randomUUID()}`;
@@ -133,7 +111,6 @@ describe("PostgresOutboxStore.claimBatch — 文が途中で失敗しても、�
       await closePostgresClient(claimerClient).catch(() => {});
     }
 
-    // 検算: 起こした失敗が実際に起きた（claimBatch が投げた）。
     expect(caughtError).toBeDefined();
     await expectNotClaimedAndReclaimable(ctx, jobId, now);
   });
@@ -157,7 +134,6 @@ describe("PostgresOutboxStore.claimBatch — 文が途中で失敗しても、�
 
     let caughtError: unknown;
     try {
-      // max: 1 なので、この接続が claimBatch でも使われる。
       const pidResult = await claimerClient.pool.query<{ pid: number }>(
         "SELECT pg_backend_pid() AS pid",
       );
@@ -170,7 +146,6 @@ describe("PostgresOutboxStore.claimBatch — 文が途中で失敗しても、�
           () => undefined,
           (err: unknown) => err,
         );
-      // テーブルのロック待ちに入ってから切る。
       await new Promise((resolve) => setTimeout(resolve, 300));
       await pool.query("SELECT pg_terminate_backend($1)", [claimerPid]);
       caughtError = await claimPromise;
@@ -180,7 +155,6 @@ describe("PostgresOutboxStore.claimBatch — 文が途中で失敗しても、�
       await closePostgresClient(claimerClient).catch(() => {});
     }
 
-    // 検算: 起こした失敗が実際に起きた（claimBatch が投げた）。
     expect(caughtError).toBeDefined();
     await expectNotClaimedAndReclaimable(ctx, jobId, now);
   });

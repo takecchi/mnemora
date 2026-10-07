@@ -6,16 +6,6 @@ import { defaultDecayStrategy } from "../strategies/decay.js";
 import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * `observe({ kind: "memory_usage", externalId })` の約束のうち、次の4つを縛る。
- * - 同じ `externalId` で違う中身が来ても、保存済みの中身が使われ、後着は無視される
- *   （使用の記録・強化のどちらの経路でも）。
- * - `externalId` は Observation 行の列で、payload には入らない。
- * - 別の kind（utterance・event・document のどれでも）と `externalId` が衝突したら、使用を記録せず、
- *   その Observation の id を `memoryIds: []`・`extraction: "skipped"` で返す。
- * - `externalId` は空文字を断り、1文字は受ける（他の3種と同じ規約）。
- */
-
 const ctx: Ctx = { tenantId: "tenant-1" };
 const NOW = new Date("2026-06-01T00:00:00.000Z");
 const RECORDED_AT = new Date(NOW.getTime() - 24 * 60 * 60 * 1000);
@@ -123,7 +113,6 @@ describe("memory_usage の再送: 同じ externalId で違う中身が来ても�
 
       expect(second.observationId).toBe(first.observationId);
       expect(second.memoryIds).toEqual([]);
-      // 後着の中身（recallB・memoryB）は記録も強化もされない。
       expect((await stores.memoryStore.get(ctx, memoryB.id))?.lastReinforcedAt ?? null).toBeNull();
     });
   }

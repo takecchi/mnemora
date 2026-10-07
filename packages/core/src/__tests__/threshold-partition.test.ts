@@ -8,11 +8,8 @@ import {
 import type { ScoreBreakdown } from "../recall.js";
 
 /**
- * 段2の閾値比較を、網羅的な三分割にしたこと（ADR 0044）の歯。
- *
- * **以前は `filter(total >= t)` と `filter(total < t)` の2本を独立に走らせていた。
- * この2つは補集合ではない**——どちらかが `NaN` だと両方の比較が false になり、
- * 候補は残らないのに `below_threshold` にも数えられなかった。
+ * `filter(total >= t)` と `filter(total < t)` の2本は補集合ではない: どちらかが `NaN` だと両方の比較が false になり、
+ * 候補は残らないのに `below_threshold` にも数えられない。そこで閾値比較を網羅的な三分割にしている。
  */
 
 /** `ScoredCandidate` の最小の作り。`score.total` 以外はこの検査の対象ではない。 */
@@ -53,7 +50,6 @@ describe("partitionByThreshold（ADR 0044）", () => {
     ];
     const p = partitionByThreshold(scored, 0.1);
     expect(p.passed.length + p.belowThreshold.length + p.notComparable.length).toBe(scored.length);
-    // NaN が2件あることまで見る（1件だけ拾う実装を弾く）。
     expect(p.notComparable).toHaveLength(2);
   });
 
@@ -102,10 +98,8 @@ describe("partitionByThreshold（ADR 0044）", () => {
 });
 
 describe("countKindForPartition（ADR 0044）", () => {
-  // **🔴 到達不能な分岐の「前提そのもの」を測る歯である。**
-  // `partitionByThreshold` が正しい限り 'unknown' 側は recall() から到達しない。
-  // ⟹ 到達しないことを理由に測らないでいると、`'exact'` をリテラルで書き戻す変更が
-  //    素通りする（実際、この関数へ切り出す前はその変異が生き残った）。
+  // 到達不能な分岐の「前提そのもの」を測る歯。`partitionByThreshold` が正しい限り 'unknown' 側は recall() から到達しないが、
+  // 到達しないことを理由に測らないでいると、`'exact'` をリテラルで書き戻す変更が素通りする。
   function part(passed: number, below: number, notComparable: number) {
     const fill = (n: number, tag: string) =>
       Array.from({ length: n }, (_, i) => candidate(`${tag}-${i}`, 0));
@@ -121,7 +115,6 @@ describe("countKindForPartition（ADR 0044）", () => {
   });
 
   it("🔴 網羅でなければ 'unknown' へ落ちる（嘘をつくのではなく黙る）", () => {
-    // 1件どこにも入っていない分割。
     expect(countKindForPartition(part(2, 3, 0), 6)).toBe("unknown");
   });
 
@@ -135,18 +128,10 @@ describe("countKindForPartition（ADR 0044）", () => {
 });
 
 describe("countKindForUnits（ADR 0045）", () => {
-  // **🔴 段2でやったのと同じ形——到達不能な分岐の「前提そのもの」を測る歯である。**
-  // 単位を組む繰り返しが正しい限り 'unknown' 側は recall() から到達しない。
-  // ⟹ 到達しないことを理由に測らないでいると、`'exact'` をリテラルで書き戻す変更が
-  //    素通りする（段2ではまさにそれが起きた）。
-  //
-  // ⚠ ここで測っているのは `slice` の網羅性ではない。それは言語の保証であり同語反復になる。
-  //    測っているのは「候補がそれぞれちょうど1つの単位に入ったか」という、
-  //    単位を組む繰り返しの性質である。
-  // 候補の id は単位をまたいで一意にする（実際の単位の組み方と同じ形）。二重計上の歯は、既存の id を
-  // もう1つの単位へ入れて作る（`duplicateOf`）。⚠ 2026-09-28: 以前は単位ごとに `m-0` から振り直していたので、
-  // 単位をまたいで id が重なっていた——件数だけで数えていた実装の上でしか成り立たない形だった
-  // （`countKindForUnits`・`unitAssemblyShortfall` を id の集合で数えるようにしたので、形を直した）。
+  // 段2でやったのと同じ形で、到達不能な分岐の「前提そのもの」を測る歯。
+  // ここで測っているのは `slice` の網羅性ではない（言語の保証であり同語反復になる）。「候補がそれぞれちょうど1つの単位に入ったか」という、
+  // 単位を組む繰り返しの性質である。
+  // 候補の id は単位をまたいで一意にする（実際の単位の組み方と同じ形）。二重計上の歯は、既存の id をもう1つの単位へ入れて作る（`duplicateOf`）。
   function units(...memberCounts: number[]) {
     let next = 0;
     return memberCounts.map((n) => ({
@@ -159,12 +144,10 @@ describe("countKindForUnits（ADR 0045）", () => {
   }
 
   it("単位が候補を網羅していれば 'exact' と名乗る", () => {
-    // 単位の形も非対称にする（1件の単位2つ・2件の同伴ペア1つ = 候補4件）。
     expect(countKindForUnits(units(1, 2, 1), 4)).toBe("exact");
   });
 
   it("🔴 候補が1件どの単位にも入っていなければ 'unknown' へ落ちる（嘘をつくのではなく黙る）", () => {
-    // 候補5件のうち4件しか単位に入っていない＝1件が消えている。
     expect(countKindForUnits(units(1, 2, 1), 5)).toBe("unknown");
   });
 
@@ -178,12 +161,8 @@ describe("countKindForUnits（ADR 0045）", () => {
 });
 
 describe("unitAssemblyShortfall（ADR 0043）", () => {
-  // **🔴 向きの判断を測る歯である。**`recall()` からは「覆えている」と「二重計上」が
-  // どちらも omission 無しになって区別が付かない ⟹ ここで直接測るしかない。
-  // 候補の id は単位をまたいで一意にする（実際の単位の組み方と同じ形）。二重計上の歯は、既存の id を
-  // もう1つの単位へ入れて作る（`duplicateOf`）。⚠ 2026-09-28: 以前は単位ごとに `m-0` から振り直していたので、
-  // 単位をまたいで id が重なっていた——件数だけで数えていた実装の上でしか成り立たない形だった
-  // （`countKindForUnits`・`unitAssemblyShortfall` を id の集合で数えるようにしたので、形を直した）。
+  // 向きの判断を測る歯。`recall()` からは「覆えている」と「二重計上」がどちらも omission 無しになって区別が付かないので、ここで直接測る。
+  // 候補の id は単位をまたいで一意にする（実際の単位の組み方と同じ形）。二重計上の歯は、既存の id をもう1つの単位へ入れて作る（`duplicateOf`）。
   function units(...memberCounts: number[]) {
     let next = 0;
     return memberCounts.map((n) => ({

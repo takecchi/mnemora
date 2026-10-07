@@ -7,12 +7,12 @@ import { closeTestClient, getTestClient, TEST_EMBEDDING_SPACE } from "./test-db.
 
 /**
  * `PostgresVectorStore.searchMany` に、クエリごとの `search` を並べたものと同じ入力を流し、戻り値を突き合わせる
- * （Postgres の内側の差分の歯。2実装を並べる `store-boundary-diff.postgres.test.ts` と同じ形）。
+ * （Postgres の内側の差分の歯）。
  *
  * 契約（`VectorStore.searchMany?` の TSDoc）: 各 `queries[i]` の結果は、同じ `opts` で `search` を単独で呼んだ
  * 場合と、集合・順序ともに完全に一致する。返す `Map` の key は `queries` の key と同じ集合。
  * 同じ key が2回以上あるときは、**最後のクエリの結果だけ**を返し、`Map` の並びはその key が**最初に現れた位置**
- * である（Issue #1284）——結果は `new Map(queries.map((q) => [q.key, search(q)]))` と同じ。ただし、同じ key のうち
+ * である——結果は `new Map(queries.map((q) => [q.key, search(q)]))` と同じ。ただし、同じ key のうち
  * 前のクエリだけが投げる入力（そのベクトルだけが DB に拒まれる値）では、この式は投げるが、`searchMany` は投げずに
  * 返す（前のクエリは SQL に送らないため）。この歯の場面には、その入力は無い。
  *
@@ -20,11 +20,9 @@ import { closeTestClient, getTestClient, TEST_EMBEDDING_SPACE } from "./test-db.
  *   上の `new Map(…)` と同じく畳んだ並び（key と、その結果か「投げた」）。結果は memoryId を別名に伏せ、
  *   距離を含めて比べる。`searchMany` が投げたときは、全部の key を「投げた」として並べる。
  * - 当てるのは、`VectorFilter` の各欄・`limit` の境界・比較不能のクエリ・key の境界（下の `scenarios`）。
- *   ベクトルの成分は整数にしてある（float4 の丸めは #1268 の範囲）。
+ *   ベクトルの成分は整数にしてある（float4 の丸めは `vector-search-float4-tie.postgres.test.ts` が見る）。
  *
- * 🔴 **許可リスト（`KNOWN_DIFFERENCES`）は、契約の外で、揃える先が未決の Issue に在る差だけを持つ**（今は空。
- * key の重複（Issue #1284）は後勝ちに揃えたので、例外の有無の差（Issue #1285、NUL を含む key）は直したので、
- * どちらも載せていない）。
+ * 🔴 **許可リスト（`KNOWN_DIFFERENCES`）は、契約の外で、揃える先が未決の Issue に在る差だけを持つ**（今は空）。
  * 各項目は今の振る舞い（`search` 側と `searchMany` 側の戻り値の形）を持ち、実測と違えば落ちる。
  * 許可リストの外で差が出たら落ちる（契約に反する差は `searchMany` を直す）。差が出なくなったら、それも落ちる。
  */
@@ -72,7 +70,7 @@ interface Outcome {
   kind: Kind;
 }
 
-/** `new Map(entries)` と同じく畳む: 同じ key は最初に現れた位置に、最後の値を置く（Issue #1284）。 */
+/** `new Map(entries)` と同じく畳む: 同じ key は最初に現れた位置に、最後の値を置く。 */
 function foldLikeMap(outcome: Outcome): Outcome {
   return { ...outcome, entries: [...new Map(outcome.entries)] };
 }
@@ -123,7 +121,6 @@ const add = (name: string, s: () => Scenario) => scenarios.push([name, s]);
 const withFilter = (name: string, extra: Partial<VectorFilter>) =>
   add(`filter.${name}`, () => ({ queries: Q, opts: { limit: 10, filter: filter(extra) } }));
 
-// ---- filter の各欄 ----
 withFilter("tenantId だけ", {});
 withFilter("status:[active]", { status: ["active"] });
 withFilter("status:[archived]", { status: ["archived"] });
@@ -158,12 +155,10 @@ for (const field of ["decayFloorAtAfter", "occurredAfter", "occurredBefore", "va
 }
 withFilter("decayFloorSeqAfter:1.5", { decayFloorSeqAfter: 1.5 });
 
-// ---- limit ----
 for (const limit of [0, 1, 2, 100, -1, 1.5, Number.NaN]) {
   add(`limit:${limit}`, () => ({ queries: Q, opts: { limit, filter: filter() } }));
 }
 
-// ---- クエリ ----
 const one = (queries: Query[]) => () => ({ queries, opts: { limit: 10, filter: filter() } });
 add("queries:[]", one([]));
 add("queries:1件", one([Q[0]!]));
@@ -175,7 +170,7 @@ add(
   "queries:同じ key が離れて3回（間に別の key）",
   one([Q[0]!, Q[1]!, { key: "x", vector: [0, 0, 1] }, { key: "x", vector: [1, 0, 1] }]),
 );
-// #1299 M8: 返る Map の key は入力と一字一句同じ（空白・Unicode の正規化・大文字小文字で、key を加工も統合もしない）。
+// 返る Map の key は入力と一字一句同じ（空白・Unicode の正規化・大文字小文字で、key を加工も統合もしない）。
 // key ごとにベクトルを変えてあるので、結果が混ざれば（key の取り違え・統合）並びか中身に出る。
 const KEY_EXACTNESS: Record<string, Query[]> = {
   "queries:key の前後に空白": [
@@ -218,7 +213,7 @@ const differing = new Map<string, { single: Outcome; many: Outcome }>();
 const observedSingle = new Map<string, Outcome>();
 /** key が重複しない場面の、畳む前の `search` の並びと `searchMany` の並び（過剰実装の歯が使う）。 */
 const uniqueKeyRuns = new Map<string, { raw: Outcome; many: Outcome }>();
-/** 最後の値を採ったか・並びを最初の位置にしたかを、名指しで見る場面（Issue #1284）。 */
+/** 最後の値を採ったか・並びを最初の位置にしたかを、名指しで見る場面。 */
 const duplicateKeyRuns = new Map<string, { raw: Outcome; many: Outcome; opts: Opts }>();
 
 describe("PostgresVectorStore.searchMany は、クエリごとの search を並べたものと同じ結果を返す", () => {

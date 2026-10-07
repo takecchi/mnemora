@@ -5,31 +5,14 @@ import { countMatchingQueries, requireDatabaseUrl } from "./test-db.js";
 import { dropTempDatabase } from "./temp-database.js";
 
 /**
- * `runMigrations` の末尾（`create`）・冒頭（`verify`）の pgvector 能力検査
- * （ADR 0367、`PGVECTOR_CAPABILITY_QUERY`）は、`vector` を `public` 以外の
- * `extensionSchema` に置いた呼び出しでも通らなければならない（Issue #1780）。
+ * 検査の SQL は `'[0]'::vector` と型をスキーマ修飾せずに書く。ところが検査は、各ファイルを流すときの `SET LOCAL search_path TO <schema>,<extensionSchema>` の外で流れる。
+ * 接続の既定の `search_path`（`"$user", public`）に `extensionSchema` は入っていないので、`vector` が `public` 以外にあると `type "vector" does not exist` で落ちる。
  *
- * ## 何が起きていたか
+ * 再現の条件: `vector` が `public` に無い DB（使い捨ての DB を作り、`extensionSchema` に拡張を置く。共有の `mnemora_test` は `public` にあるので落ちない）、
+ * `schema` と `extensionSchema` の両方を渡す（`schema` 未指定だと `extensionSchema` は捨てられる）、`search_path` に手を加えない普通の `pg.Pool`。
  *
- * 検査の SQL は `'[0]'::vector` と型をスキーマ修飾せずに書く。ところが検査は、各ファイルを流すときの
- * `SET LOCAL search_path TO <schema>,<extensionSchema>` の**外**で流れる。接続の既定の `search_path`
- * （`"$user", public`）に `extensionSchema` は入っていないので、`vector` が `public` 以外にあると
- * `type "vector" does not exist` で落ちる。
- *
- * ## 再現の条件（この歯が揃えているもの）
- *
- * - **`vector` が `public` に無い DB**（使い捨ての DB を作り、`extensionSchema` に拡張を置く）。
- *   共有の `mnemora_test` は `vector` が `public` にあるので、そこでは落ちない。
- * - **`schema` と `extensionSchema` の両方を渡す**（`schema` 未指定だと `extensionSchema` は捨てられる）。
- * - **`search_path` に手を加えない普通の `pg.Pool`**。
- *
- * ## 直し方に対する縛り
- *
- * - 検査のあと、**同じ接続**（`max: 1` の pool）の `SHOW search_path` が元のまま
- *   （`SET`・`set_config(..., false)` で恒久的に書き換える実装を捕まえる）。
- * - `schema` 未指定の呼び出しは `search_path` を一切触らない（`SET`・`set_config` を含む文が0本）。
- * - 検査を飛ばす・握りつぶす実装は、「`vector` が `extensionSchema` に在る」状況で `applied`/`extensionCheck` が
- *   出るだけでは捕まらないので、検査の問い合わせが実際に流れたことも数える。
+ * 直し方に対する縛り: 検査のあと同じ接続（`max: 1` の pool）の `SHOW search_path` が元のまま（`SET`・`set_config(..., false)` で恒久的に書き換える実装を捕まえる）。
+ * `schema` 未指定の呼び出しは `search_path` を一切触らない（`SET`・`set_config` を含む文が0本）。検査を飛ばす・握りつぶす実装は結果だけでは捕まらないので、検査の問い合わせが実際に流れたことも数える。
  */
 
 const EXT_SCHEMA = "mnemora_ext_1780";

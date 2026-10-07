@@ -2,31 +2,9 @@ import { describe, expect, it } from "vitest";
 import { defaultScoringStrategy } from "../strategies/scoring.js";
 
 /**
- * `freshness`/`decay` が「計算されている」ことと「順位（`total`）へ配線されている」ことは
- * 別物である。
- *
- * `packages/core/src/__tests__/scoring.test.ts` は前者（`freshness`/`decay` の計算式
- * そのもの——`occurredAt`/`lastReinforcedAt` を優先する・古いほど低くなる、等）を
- * 既に守っている。このファイルは後者だけを守る——**`freshness`/`decay` が `total` の
- * 積に実際に合成されているか。** `total = affinity * decay * tagMatch * freshness *
- * strength` という式の中からどちらかを丸ごと落とす変異（≒ 配線を切る）を入れても、
- * `scoring.test.ts` はほぼ検出しない（`defaultScoringStrategy` を直接呼んで
- * `score.freshness`/`score.decay` を見る歯はあっても、`score.total` の大小関係から
- * その項の寄与を確かめる歯は無いため）。このファイルはその穴を埋める。
- *
- * ⭐ **`freshness` と `decay` を同じファイルの別 `describe` で守る**——起点が違う
- * （`freshness` は `occurredAt ?? recordedAt`、`decay` は `lastReinforcedAt ??
- * recordedAt`）ため、片方の配線が切れても他方の `describe` は緑のままである
- * （下の各 `describe` の doc、および ADR 0240「決定1b」参照）。
- *
- * ⛔ **このファイルが示さないもの**（`describe`/`it` の名前にも明記する）:
- * - **`freshness`/`decay` の計算式そのものの正しさ**（`occurredAt`/
- *   `lastReinforcedAt` を優先するか・式の形が正しいか）——それは `scoring.test.ts`
- *   の管轄であり、ここでは検査しない。
- * - **`recall()` から先の経路**——このファイルは `defaultScoringStrategy` という
- *   スコア戦略1つを直接呼んでいるだけで、`recall()` が実際に `total` で候補を
- *   並べ替えていることは検査していない。SQL 側で `decay`/`freshness` 相当の項が
- *   別途落ちていないかも、このファイルは見ていない。
+ * `freshness`/`decay` が「計算されている」ことと「`total` の積に配線されている」ことは別物で、このファイルは後者だけを守る
+ * （計算式そのものは `scoring.test.ts`）。`freshness` と `decay` は起点が違う（`occurredAt ?? recordedAt` と `lastReinforcedAt ?? recordedAt`）ので、
+ * 片方の配線が切れても他方の `describe` が緑のままになるよう、別の `describe` で守る。`recall()` から先の経路は見ない。
  */
 
 const HOUR = 1000 * 60 * 60;
@@ -54,8 +32,6 @@ describe("defaultScoringStrategy — freshness の『配線』（occurredAt の�
     () => {
       const now = new Date("2026-01-01T00:00:00.000Z");
 
-      // 他の項（recordedAt/lastReinforcedAt/strength/tagMatch/similarity/now）は
-      // すべて同一。occurredAt だけを変える。
       const recent = defaultScoringStrategy({
         ...baseInput(now),
         occurredAt: now,
@@ -65,9 +41,6 @@ describe("defaultScoringStrategy — freshness の『配線』（occurredAt の�
         occurredAt: new Date(now.getTime() - 400 * DAY),
       });
 
-      // freshness が total から外れている（配線切れ）と、この不等号は成立しない
-      // （400日前の候補と「たったいま」の候補が同順位になる。本 PR の ADR が
-      // 陽性対照として実測した壊れ方そのもの）。
       expect(recent.total).toBeGreaterThan(stale.total);
     },
   );
@@ -136,7 +109,6 @@ describe("defaultScoringStrategy — decay の『配線』（lastReinforcedAt �
         lastReinforcedAt: new Date(now.getTime() - 400 * DAY),
       });
 
-      // decay が total から外れている（配線切れ）と、この不等号は成立しない。
       expect(recentlyReinforced.total).toBeGreaterThan(staleReinforced.total);
     },
   );

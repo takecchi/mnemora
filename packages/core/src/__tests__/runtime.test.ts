@@ -15,15 +15,10 @@ import {
 } from "../runtime.js";
 import type { ReextractSkip } from "../strategies/reextract.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
+import { withSourceObservation } from "./observed-memory.js";
 import type { FakeMemoryStore } from "./runtime-fakes.js";
 
-/**
- * ADR 0047: `MemoryStore.recordUsage` は `recall_usages.recall_id → recalls(id)` の
- * 外部キー相当を要求するようになった（`FakeMemoryStore` にも適用した）。以前この節の
- * 2つのテストは実体の無い固定文字列 `"recall-1"` を渡していたが、それは「本番経路では
- * 起きえない `recall_usages` 行」を手元でだけ緑にしていた（ADR 0047 の決め手）。
- * `MemoryStore.createRecall`（recall 段6の書き込み口そのもの）で実在の recallId を用意する。
- */
+/** `MemoryStore.createRecall`（recall 段6の書き込み口そのもの）で実在の recallId を用意する。`recordUsage` は `recall_usages.recall_id → recalls(id)` の外部キー相当を要求するため、実体の無い固定文字列は使えない。 */
 async function createRecallFixture(stores: { memoryStore: FakeMemoryStore }, ctx: Ctx) {
   return stores.memoryStore.createRecall(ctx, {
     tenantId: ctx.tenantId,
@@ -79,19 +74,11 @@ function throwingLlm(): LLMProvider {
 }
 
 /**
- * `llmReturning` と同じ抽出結果を返しつつ、`reflect()` の `ReflectionLLMResultSchema` で
- * 呼ばれたときは「一般化するものは無い」（`outcome: "nothing"`）を返す（Issue #849 追記）。
+ * `llmReturning` と同じ抽出結果を返しつつ、`reflect()` の `ReflectionLLMResultSchema` で呼ばれたときは「一般化するものは無い」（`outcome: "nothing"`）を返す。
  *
- * ⚠ **この関数が要る理由**: `reflect()` は `consolidate()` と違い、eligible が**1件でも**
- * LLM を呼ぶ（`no_eligible_basis` で打ち切るのは0件のときだけ——`reflect.test.ts` の
- * 「eligible が0件なら、LLM を呼ばずに打ち切る」コメント参照）。この節の歯は種を1件だけ
- * 用意する（近傍を作らない）ため、`reflect` ジョブでは種1件だけで実際に LLM が呼ばれる。
- * 素の `llmReturning` は `req.schema.parse({ memories })` を無条件で呼ぶため、
- * `ReflectionLLMResultSchema` に対しては parse が失敗して例外になり、`reflect()` の
- * catch 節がそれを `outcome: "llm_failed"` に変えてしまう——「payload が正しい job は
- * 処理される」という、この節の歯が測りたいこととは無関係な理由で `llm_failed`（Issue #849
- * の修正後は `tick()` の `failed` 側）になってしまう。`req.schema.safeParse` で先に
- * extraction 形を試し、失敗したら reflect の「辞退」形を返すことで、この歯は
+ * `reflect()` は eligible が1件でも LLM を呼ぶ。素の `llmReturning` は `req.schema.parse({ memories })` を無条件で呼ぶので、
+ * `ReflectionLLMResultSchema` では parse が失敗し、`reflect()` の catch 節がそれを `outcome: "llm_failed"` に変えてしまう。
+ * `req.schema.safeParse` で先に extraction 形を試し、失敗したら reflect の「辞退」形を返すことで、この節の歯を
  * 「job が正しく processed になる」ことだけを測る形に保つ。
  */
 function llmReturningOrDecliningReflection(
@@ -112,11 +99,9 @@ function llmReturningOrDecliningReflection(
 }
 
 /**
- * Issue #371: `completeStructured` 呼び出しの**回数**と**順序**を検査したいテスト用の
- * fake。`responses[0]` が1回目の呼び出し（常に `extractCandidates` 由来）、`responses[1]`
- * が2回目（opt-in が有効なら `deriveClaimKeys` 由来）に対応する——`runExtraction` が
- * 常に「抽出 → (opt-inのときだけ)claim key」の順で呼ぶことを前提にした単純化。
- * 設定した回数を超えて呼ばれたら例外を投げる（未設定の応答を勝手に補わない）。
+ * `completeStructured` 呼び出しの回数と順序を検査したいテスト用の fake。`responses[0]` が1回目の呼び出し（常に `extractCandidates` 由来）、
+ * `responses[1]` が2回目（opt-in が有効なら `deriveClaimKeys` 由来）に対応する。`runExtraction` が常に「抽出 → (opt-inのときだけ)claim key」の順で
+ * 呼ぶことを前提にした単純化。設定した回数を超えて呼ばれたら例外を投げる（未設定の応答を勝手に補わない）。
  */
 function sequencedLlm(responses: unknown[]): LLMProvider & { calls: StructuredRequest<unknown>[] } {
   const calls: StructuredRequest<unknown>[] = [];
@@ -193,16 +178,6 @@ describe("runtime.observe — extract: 'sync'（既定, D2）", () => {
     expect(memory?.provenance.kind).toBe("stated");
   });
 
-  /**
-   * ADR 0008 の判定基準を取り込み側に当てる。
-   *
-   * LLM 呼び出しが失敗して全文フォールバックへ倒れた Memory は、**抽出されたものではない**
-   * ——未処理の生テキストである。監査ログがこれを `reason: 'extracted'` として記録すると、
-   * 監査ログ自体が事実でないことを主張することになる（「消えたことが見える」ための仕組みが、
-   * 「起きなかったことが起きた」と言う）。
-   *
-   * この歯は、`meta.reason` が抽出の成否を区別し続けることを守る。
-   */
   it("LLM が失敗して全文フォールバックへ倒れたことが、監査ログの meta.reason に残る", async () => {
     const { runtime, stores } = buildRuntime(throwingLlm());
     const result = await runtime.observe(ctx, { kind: "utterance", text: "障害時の発話" });
@@ -226,13 +201,6 @@ describe("runtime.observe — extract: 'sync'（既定, D2）", () => {
     expect((created!.meta as { reason?: string }).reason).toBe("extracted");
   });
 
-  /**
-   * `meta` は既存の jsonb NOT NULL 列（`memory_events.meta`）へのキー追加のみで、
-   * マイグレーションは不要（`packages/postgres/src/schema.ts` 参照）。書き手は
-   * `event-store.ts` の `append` と `memory-store.ts` の `updateStatusWithEvent` の2つだけで、
-   * どちらも `JSON.stringify(event.meta)` をそのまま書くだけ——キーの集合を検査する
-   * トリガー・列 default は無い。
-   */
   it("LLM 失敗の kind が監査ログの meta.failureKind に残る", async () => {
     const provider: LLMProvider = {
       complete: async () => {
@@ -332,13 +300,8 @@ describe("runtime.observe — extract: 'sync'（既定, D2）", () => {
 });
 
 /**
- * ⭐ オーナーが名指しで要求した通しの歯（ADR 0072 追記）:
- * provider が `kind` 付きで投げる → `extraction` が飲む → *それでも* `ObserveResult` から
- * `kind` が読める、を1本で通す。
- *
- * ⚠ 偽の `LLMProvider`（`completeStructured` が throw する）を `createRuntime` へ本物の
- * 経路で注入し、`runtime.observe()` を実際に呼ぶ——`ObserveResult` を手で組み立てて
- * `extractionFailure` を入れて assert する「皮で注入するだけの歯」にはしない。
+ * 偽の `LLMProvider`（`completeStructured` が throw する）を `createRuntime` へ本物の経路で注入し、`runtime.observe()` を実際に呼ぶ。
+ * `ObserveResult` を手で組み立てて `extractionFailure` を入れて assert する「皮で注入するだけの歯」にはしない。
  */
 describe("runtime.observe — provider の kind が ObserveResult まで運ばれる（ADR 0072 追記）", () => {
   function throwingLlmWithKind(kind: string, message: string): LLMProvider {
@@ -362,7 +325,6 @@ describe("runtime.observe — provider の kind が ObserveResult まで運ば�
       throwingLlmWithKind("refusal", "the model refused to answer"),
     );
 
-    // ADR 0013 の飲み込みが維持されていること: throw せずに resolve する。
     const result = await runtime.observe(ctx, {
       kind: "utterance",
       text: "本物の経路を通す発話",
@@ -374,7 +336,6 @@ describe("runtime.observe — provider の kind が ObserveResult まで運ば�
       message: "the model refused to answer",
     });
 
-    // 全文フォールバックの Memory が実際に作られていること（ADR 0013 の安全弁そのもの）。
     expect(result.memoryIds).toHaveLength(1);
     const memory = await stores.memoryStore.get(ctx, result.memoryIds[0]!);
     expect(memory?.content).toBe("本物の経路を通す発話");
@@ -529,7 +490,6 @@ describe("runtime.observe — 冪等性（roadmap.md 段階3の完了条件）",
     await runtime.observe(ctx, { kind: "utterance", text: "本文", externalId: "ext-2" });
     await runtime.observe(ctx, { kind: "utterance", text: "本文", externalId: "ext-2" });
 
-    // 最初の1回の抽出で作られた embed ジョブ(1件)だけが残っているはず。
     const pending = await stores.outboxStore.claimBatch(ctx, {
       kinds: ["embed"],
       limit: 10,
@@ -614,15 +574,8 @@ describe("runtime.observe — memory_usage（ADR 0009）", () => {
   });
 
   /**
-   * [Issue #874](https://github.com/takecchi/mnemora/issues/874): `handleMemoryUsage` は
-   * `MemoryStore.reinforceMany`（任意メソッド）が在ればそれを1回だけ呼び、無ければ
-   * 従来どおり `reinforce` を1件ずつ呼ぶループへ戻る——`archiveDecayed`/`sweepArchive`
-   * と同じ「口が在るかどうかで分岐する」作法（上の
-   * `describe("runtime.sweepArchive...")` のブロック参照）。
-   *
-   * `FakeMemoryStore` は `reinforceMany` を実装している（既定では「口が在る」側の
-   * 経路を通る）ので、「口が無い」側は `archiveDecayed` の歯と同じ作法
-   * ——`undefined` を代入して prototype を隠す——で個別に検査する。
+   * `FakeMemoryStore` は `reinforceMany` を実装している（既定では「口が在る」側の経路を通る）ので、「口が無い」側は
+   * `undefined` を代入して prototype を隠す作法で個別に検査する。
    */
   it("MemoryStore.reinforceMany が在るときはそれを1回だけ呼び、reinforce を1件ずつは呼ばない", async () => {
     const { runtime, stores } = buildRuntime(llmReturning([]));
@@ -650,17 +603,14 @@ describe("runtime.observe — memory_usage（ADR 0009）", () => {
       ),
     );
 
-    // Issue #961: `recordUsageAndReinforce`（任意）が在ると記録と強化を1つの口で撃ち、下の
-    // 2段の経路（`reinforceMany` / 1件ずつの `reinforce`）を通らない。この歯が見るのは2段の
-    // 経路の分岐なので、その口を持たない adapter を模す（下と同じ作法）。
+    // `recordUsageAndReinforce`（任意）が在ると記録と強化を1つの口で撃ち、下の2段の経路（`reinforceMany` / 1件ずつの `reinforce`）を通らない。
+    // この歯が見るのは2段の経路の分岐なので、その口を持たない adapter を模す。
     (stores.memoryStore as { recordUsageAndReinforce?: unknown }).recordUsageAndReinforce =
       undefined;
     const recallId = await createRecallFixture(stores, ctx);
-    // ⚠ `reinforce` 自体は spy しない——`FakeMemoryStore.reinforceMany` の実装は
-    // 「`reinforce` を呼び回す素直な実装」（ADR 0303 追記節、この PR の判断）であり、
-    // `reinforceMany` が実際に呼ばれても内部で `reinforce` が複数回呼ばれる。ここで
-    // 検査したいのは fake の内部実装ではなく、`runtime.ts` が「口が在るときは
-    // `reinforceMany` を1回呼ぶ」という分岐を実際に選んだことだけである。
+    // `reinforce` 自体は spy しない: `FakeMemoryStore.reinforceMany` は `reinforce` を呼び回す素直な実装なので、`reinforceMany` が実際に
+    // 呼ばれても内部で `reinforce` が複数回呼ばれる。検査したいのは fake の内部実装ではなく、`runtime.ts` が
+    // 「口が在るときは `reinforceMany` を1回呼ぶ」という分岐を選んだことだけである。
     const reinforceManySpy = vi.spyOn(stores.memoryStore, "reinforceMany");
 
     const result = await runtime.observe(ctx, {
@@ -704,11 +654,9 @@ describe("runtime.observe — memory_usage（ADR 0009）", () => {
       ),
     );
 
-    // 口を持たない adapter を模す（`archiveDecayed` の歯と同じ作法。`delete` では
-    // 消えない——クラスのメソッドは prototype に在る）。
-    // Issue #961: `recordUsageAndReinforce`（任意）が在ると記録と強化を1つの口で撃ち、下の
-    // 2段の経路（`reinforceMany` / 1件ずつの `reinforce`）を通らない。この歯が見るのは2段の
-    // 経路の分岐なので、その口を持たない adapter を模す（下と同じ作法）。
+    // 口を持たない adapter を模す（`delete` では消えない。クラスのメソッドは prototype に在る）。
+    // `recordUsageAndReinforce`（任意）が在ると記録と強化を1つの口で撃ち、下の2段の経路を通らない。
+    // この歯が見るのは2段の経路の分岐なので、その口を持たない adapter を模す。
     (stores.memoryStore as { recordUsageAndReinforce?: unknown }).recordUsageAndReinforce =
       undefined;
     (stores.memoryStore as { reinforceMany?: unknown }).reinforceMany = undefined;
@@ -751,8 +699,7 @@ describe("runtime.observe — memory_usage（ADR 0009）", () => {
       embeddingStatus: "pending",
     });
     const recallId = await createRecallFixture(stores, ctx);
-    // 同じ (recallId, memoryId) を先に一度送っておく——2回目は insertedMemoryIds が
-    // 空になる（上の「再送では reinforce が二重に走らない」歯と同じ前提）。
+    // 同じ (recallId, memoryId) を先に一度送っておく。2回目は insertedMemoryIds が空になる。
     await runtime.observe(ctx, { kind: "memory_usage", recallId, usedMemoryIds: [memory.id] });
 
     const reinforceManySpy = vi.spyOn(stores.memoryStore, "reinforceMany");
@@ -767,8 +714,8 @@ describe("runtime.observe — memory_usage（ADR 0009）", () => {
   });
 
   it("2段の経路（recordUsageAndReinforce が無い adapter）でも、insertedMemoryIds が空なら reinforceMany を呼ばない", async () => {
-    // 上の歯は、Issue #961 の後は `recordUsageAndReinforce` の経路を通り、2段の経路の
-    // 「空なら呼ばない」分岐には届かない。口を持たない adapter を模して、その分岐を見る。
+    // 上の歯は `recordUsageAndReinforce` の経路を通り、2段の経路の「空なら呼ばない」分岐には届かない。
+    // 口を持たない adapter を模して、その分岐を見る。
     const { runtime, stores } = buildRuntime(llmReturning([]));
     const memory = await stores.memoryStore.createMemory(ctx, {
       tenantId: "tenant-1",
@@ -808,12 +755,6 @@ describe("runtime.observe — memory_usage（ADR 0009）", () => {
   });
 });
 
-/**
- * Issue #870: `ObserveMemoryUsageInput` は他3種（utterance/event/document）と違い
- * `externalId` を持たず、`handleMemoryUsage` は `externalId: null` を固定で渡していた
- * ——`observations` 行の冪等化が構造的に効かず、同じ使用報告を再送するたびに
- * `observations` 行が増え続けていた（`recall_usages`/`reinforce` 自体は元から冪等）。
- */
 describe("runtime.observe — memory_usage の externalId 冪等性（Issue #870）", () => {
   function observationsBacking(stores: { memoryStore: FakeMemoryStore }) {
     // Fake の裏の Map を直接数える（`FakeMemoryStore` に列挙の口が無いため、
@@ -949,7 +890,6 @@ describe("runtime.observe — memory_usage の externalId 冪等性（Issue #870
     expect(result.observationId).toBe(utteranceObservation.id);
     expect(result.memoryIds).toEqual([]);
     expect(result.extraction).toBe("skipped");
-    // recordUsage が呼ばれていれば強化されているはず——呼ばれていないことを状態で確かめる。
     const notReinforced = await stores.memoryStore.get(ctx, memory.id);
     expect(notReinforced?.lastReinforcedAt).toBeNull();
   });
@@ -987,24 +927,11 @@ describe("runtime.tick — embed ジョブ（embeddingStatus の遷移）", () =
   });
 
   /**
-   * Issue #449 / ADR 0305: 3段つながっての歯。
-   *
-   * 1. `observe({ kind: 'document' })` の `content` に上限は無い（`observation.ts` の
-   *    `.min(1)` のみ、`.max()` 無し）。
-   * 2. LLM 抽出が失敗すると `fallbackWholeObservationCandidate` が Observation の全文を
-   *    そのまま1件の候補にする（`extraction.ts`）。
-   * 3. その全文が `processEmbedJob` 経由で `embed(ctx, [memory.content])` へそのまま渡る。
-   *
-   * **この歯が固定するのは、3段がつながった先で `EmbeddingProvider` の契約
-   * （`embedding-provider.ts` の interface doc）どおりに reject する provider を
-   * 使ったとき、次の3つがすべて成り立つことである**——
-   * (a) Memory.content は全文のまま変わらない（黙って切り詰められない）、
-   * (b) embeddingStatus は 'failed' になる、
-   * (c) tick はそれを failed として数える（黙って ready にならない）。
-   *
-   * ⚠ **これは 既定の挙動を1つも変えていない**——`observe`/`extraction`/`processEmbedJob`
-   * のどれも本歯のために変更していない。固定しているのは「provider が契約どおりに
-   * reject したとき、その先の3段が正しく振る舞うこと」だけである。
+   * `observe({ kind: 'document' })` の `content` に上限は無い。LLM 抽出が失敗すると `fallbackWholeObservationCandidate` が
+   * Observation の全文をそのまま1件の候補にし、その全文が `processEmbedJob` 経由で `embed(ctx, [memory.content])` へそのまま渡る。
+   * この3段がつながった先で、`EmbeddingProvider` の契約どおりに reject する provider を使ったとき、
+   * (a) Memory.content は全文のまま変わらない（黙って切り詰められない）、(b) embeddingStatus は 'failed' になる、
+   * (c) tick はそれを failed として数える（黙って ready にならない）、がすべて成り立つことを固定する。
    */
   it("LLM抽出が失敗して全文フォールバックになった Memory を、上限超過で reject する embeddingProvider に渡すと、content は全文のまま embeddingStatus が 'failed' になり、tick はそれを failed として数える（Issue #449）", async () => {
     const hugeContent = "x".repeat(500);
@@ -1045,17 +972,9 @@ describe("runtime.tick — embed ジョブ（embeddingStatus の遷移）", () =
 
 describe("runtime.reembed（ADR 0079: provider が直った後に、索引へ戻す）", () => {
   /**
-   * この ADR が塞ごうとしている穴を、端から端まで1本で通す:
-   *
-   * 1. 埋め込みの provider が落ちている間に `observe()` する
-   * 2. `tick()` が失敗し、`embeddingStatus` は `failed`・outbox 行は `failed_at`（終端）
-   * 3. **provider が直る**
-   * 4. `tick()` をもう一度呼んでも**何も起きない**（`fail` は終端で、`claimBatch` は
-   *    `failed_at IS NULL` を要求する。ADR 0032）——ここが穴だった
-   * 5. `reembed()` を呼ぶ ⟹ 次の `tick()` で `ready` になり、ベクトルが入る
-   *
-   * ⚠ **段4を落とすと、この歯は「そもそも直っていた」を検査したことになる。**
-   * 段4があることで初めて「`reembed` が効いた」と言える。
+   * provider が落ちている間に `observe()` → `tick()` が失敗（`embeddingStatus` は `failed`・outbox 行は `failed_at`＝終端）→ provider が直る →
+   * `tick()` をもう一度呼んでも何も起きない（`fail` は終端で、`claimBatch` は `failed_at IS NULL` を要求する）→ `reembed()` → 次の `tick()` で `ready`。
+   * 「直った後の `tick()` が何も起こさない」段を落とすと、この歯は「そもそも直っていた」を検査したことになる。
    */
   it("provider が落ちている間に入った Memory は、tick を繰り返しても索引へ戻らない。reembed してから tick すると ready になる", async () => {
     const { runtime, stores } = buildRuntime(
@@ -1071,10 +990,8 @@ describe("runtime.reembed（ADR 0079: provider が直った後に、索引へ戻
     // `tick` の書き込みで「過去の観測」まで書き換わる（実際にそれで一度赤くなった）。
     const afterFailure = (await stores.memoryStore.get(ctx, memoryId))?.embeddingStatus;
 
-    // provider が直る。
     stores.embeddingProvider.shouldFail = false;
 
-    // ⚠ ここが穴だった: 直った後に tick を呼んでも、失敗した行は二度と claim されない。
     const uselessTick = await runtime.tick(ctx, { kinds: ["embed"], leaseMs: TEST_LEASE_MS });
     const stillFailed = (await stores.memoryStore.get(ctx, memoryId))?.embeddingStatus;
 
@@ -1123,20 +1040,9 @@ describe("runtime.reembed（ADR 0079: provider が直った後に、索引へ戻
 });
 
 /**
- * Issue #753（#449 の残り、ADR 0305 決定4の歯の続き）: 上限超過で `failed` になった
- * Memory には、ADR 0079 の `reembed()` だけでは回復手段が無かった——`requeueEmbedJobs`
- * は failed を pending に戻して embed ジョブを積み直すだけで、次の `processEmbedJob` は
- * 同じ `memory.content`（全文のまま）を再び `embed()` へ送るため、また同じ理由で
- * `failed` に戻る。
- *
- * `RuntimeDeps.embeddingInput`（任意の opt-in フック）は、`processEmbedJob` が
- * `embed()` へ送る文字列を差し替えられるようにする——`Memory.content` 自体は変えない。
- *
- * この節の2本は対になっている:
- * - 1本目: フックを注入した runtime で `reembed()` → `tick()` すると `ready` になる
- *   （フックが無いと直せない、を実際に直せることの陽性対照）。
- * - 2本目: フックを渡さない今までどおりの runtime では、`reembed()` → `tick()` を
- *   繰り返しても `failed` のまま（既定の挙動は1ビットも変わっていないことの固定）。
+ * `RuntimeDeps.embeddingInput`（任意の opt-in フック）は、`processEmbedJob` が `embed()` へ送る文字列を差し替える（`Memory.content` 自体は変えない）。
+ * 1本目はフックを注入した runtime で `reembed()` → `tick()` すると `ready` になる陽性対照。
+ * 2本目はフックを渡さない runtime では、`reembed()` → `tick()` を繰り返しても `failed` のまま。
  */
 describe("runtime.tick — processEmbedJob の embeddingInput opt-in フック（Issue #753）", () => {
   function overLimitEmbeddingProvider(): EmbeddingProvider {
@@ -1161,16 +1067,11 @@ describe("runtime.tick — processEmbedJob の embeddingInput opt-in フック�
     const memoryId = observeResult.memoryIds[0]!;
 
     const failedTick = await runtime.tick(ctx, { kinds: ["embed"], leaseMs: TEST_LEASE_MS });
-    // ⚠ `FakeMemoryStore.get` は可変な Memory オブジェクトへの参照をそのまま返す
-    // （上の「runtime.reembed」describe の注意と同じ footgun）。ここで文字列として
-    // 値を取り出しておかないと、後続の `healingTick` の書き込みで「過去の観測」の
-    // つもりだった `afterFailure` まで "ready" に書き換わる。
+    // `FakeMemoryStore.get` は可変な Memory オブジェクトへの参照をそのまま返すので、ここで文字列として値を取り出しておかないと、
+    // 後続の `healingTick` の書き込みで `afterFailure` まで "ready" に書き換わる。
     const afterFailureStatus = (await stores.memoryStore.get(ctx, memoryId))?.embeddingStatus;
 
-    // 運用側が opt-in フックを足した runtime を、同じ store（同じ永続状態）に対して
-    // 新たに立てる——runtime 自身は状態を持たない関数の集合であり、状態は deps 側の
-    // store が持つ。既存の failed 行に対して「後からフックを足した runtime で reembed
-    // する」という、実際の復旧オペレーションをそのまま模している。
+    // 運用側が opt-in フックを足した runtime を、同じ store（同じ永続状態）に対して新たに立てる。runtime 自身は状態を持たず、状態は deps 側の store が持つ。
     const healingRuntime = createRuntime({
       memoryStore: stores.memoryStore,
       outboxStore: stores.outboxStore,
@@ -1235,12 +1136,8 @@ describe("runtime.tick — processEmbedJob の embeddingInput opt-in フック�
 });
 
 /**
- * Issue #312 / [ADR 0161](../../../docs/decisions/0161-runtime-get-recall.md):
- * `Runtime.getRecall` は `MemoryStore.getRecall` への**素通し**である
- * （`reembed` と同じ形——`runtime.ts` の doc コメント参照）。ここで検査するのは
- * 「素通しであること」そのもの——`viaRuntime` と `stores.memoryStore.getRecall` を
- * 直接呼んだ結果が一致することを見る。値の中身（score/retrievedVia の形）の検査は
- * `recall-runtime.ts` の歯の役目であり、ここでは行わない。
+ * `Runtime.getRecall` は `MemoryStore.getRecall` への素通しなので、`viaRuntime` と `stores.memoryStore.getRecall` を直接呼んだ結果が一致することを見る。
+ * 値の中身（score/retrievedVia の形）の検査は `recall-runtime.ts` の歯の役目であり、ここでは行わない。
  */
 describe("runtime.getRecall（Issue #312、ADR 0161: MemoryStore.getRecall への素通し）", () => {
   it("createRecall で書いた行を、memoryStore.getRecall と同じ内容で読み戻す", async () => {
@@ -1274,15 +1171,8 @@ describe("runtime.getRecall（Issue #312、ADR 0161: MemoryStore.getRecall へ�
 });
 
 /**
- * ADR 0114: `docs/memory-model.md` §11 行8「`decay_floor_at < now()` を検出する
- * 低頻度の掃引…→ `status='archived'` + `archived` イベント」を実行する
- * `Runtime.sweepArchive` の検査。
- *
- * `MemoryStore.archiveDecayed` は任意メソッドである——`FakeMemoryStore` は
- * `InMemoryMemoryStore`（`@mnemora/testkit`）と同じく実装しているので、既定では
- * 「口が在る」側（`supported: true`）の経路を通る。「口が無い」側
- * （`supported: false`）は `supersedeWithNewMemories` の歯（ADR 0100）と同じ作法——
- * `undefined` を代入して prototype を隠す——で個別に検査する。
+ * `MemoryStore.archiveDecayed` は任意メソッドで、`FakeMemoryStore` は実装しているので、既定では「口が在る」側（`supported: true`）の経路を通る。
+ * 「口が無い」側（`supported: false`）は、`undefined` を代入して prototype を隠す作法で個別に検査する。
  */
 async function createDecayedMemory(
   stores: ReturnType<typeof buildRuntime>["stores"],
@@ -1361,8 +1251,7 @@ describe("runtime.sweepArchive（ADR 0114: 減衰しきった Memory の掃引�
     const { runtime, stores } = buildRuntime(llmReturning([]));
     await createDecayedMemory(stores, "sweep-archive-unsupported", new Date(NOW.getTime() - 1_000));
 
-    // 口を持たない adapter を模す（`supersedeWithNewMemories` の歯と同じ作法。
-    // `delete` では消えない——クラスのメソッドは prototype に在る）。
+    // 口を持たない adapter を模す（`delete` では消えない。クラスのメソッドは prototype に在る）。
     (stores.memoryStore as { archiveDecayed?: unknown }).archiveDecayed = undefined;
 
     const result = await runtime.sweepArchive(ctx, { now: NOW, limit: 10 });
@@ -1394,14 +1283,8 @@ describe("runtime.sweepArchive（ADR 0114: 減衰しきった Memory の掃引�
 });
 
 /**
- * Issue #364 / [ADR 0186](../../../docs/decisions/0186-sweep-archive-follows-decay-clock.md):
- * `sweepArchive` は `opts.clock` を省略されたとき `tenant_settings.decay_clock` へ従う。
- *
- * ここで検査しているのは「`Runtime.sweepArchive` が `MemoryStore.archiveDecayed` へ
- * どんな `opts` を渡すか」であって、`FakeMemoryStore.archiveDecayed` 自身が `clock`/
- * `nowSeq` に応じて対象を絞り込むかどうかではない（`FakeMemoryStore` は壁時計の
- * `decayFloorAt` だけで絞る素朴な実装であり、本 Issue の対象外——ADR 0186 決めたことは
- * 「どの引数を渡すか」であり、store 側の絞り込みは ADR 0165 が別途固定している）。
+ * ここで検査しているのは「`Runtime.sweepArchive` が `MemoryStore.archiveDecayed` へどんな `opts` を渡すか」であって、
+ * `FakeMemoryStore.archiveDecayed` 自身が `clock`/`nowSeq` に応じて対象を絞り込むかどうかではない（`FakeMemoryStore` は壁時計の `decayFloorAt` だけで絞る素朴な実装）。
  * `vi.spyOn` で `archiveDecayed`/`getActivitySeq` の呼び出しそのものを観測する。
  */
 describe("runtime.sweepArchive が opts.clock 省略時に decay_clock へ従う（Issue #364 / ADR 0186）", () => {
@@ -1460,8 +1343,7 @@ describe("runtime.sweepArchive が opts.clock 省略時に decay_clock へ従う
     expect(typeof passedOpts?.nowSeq).toBe("number");
   });
 
-  // Issue #1217: `opts.clock` を明示しても、`'wall'` 以外で `opts.nowSeq` を省けば tenant_activity は読む
-  // （ADR 0186 決めたこと1 のコードどおり）。読まないのは、`decay_clock`（tenant_settings）のほうだけ。
+  // `opts.clock` を明示しても、`'wall'` 以外で `opts.nowSeq` を省けば tenant_activity は読む。読まないのは `decay_clock`（tenant_settings）のほうだけ。
   it("clock: 'activity' を明示して nowSeq を省くと、decay_clock は読まず、tenant_activity は1回読む", async () => {
     const { runtime, stores } = buildRuntime(llmReturning([]));
     const archiveDecayedSpy = vi.spyOn(stores.memoryStore, "archiveDecayed");
@@ -1494,22 +1376,9 @@ describe("runtime.sweepArchive が opts.clock 省略時に decay_clock へ従う
 });
 
 /**
- * ADR 0082 / issue #105（外部の採用検討者からの報告）。
- *
- * 報告の芯は2つあった。
- * 1. `OutboxJobKind` に `"consolidate"` が**名指しで**在るので、呼び出し側は
- *    「積めば `tick` が処理してくれる」と読む（実際に読み違えた利用者が居る）。
- * 2. 推測として:「`kinds: ['consolidate']` を渡すと claim はできてしまうが処理する分岐が
- *    無いので、何も起こらないまま lease が切れて、claim され続けるのに進まないのでは」。
- *
- * **2 は現物では起きていなかった**（PR 本文の実測を参照）。この節の歯は、
- * **起きていないことが、これからも起き続けない**ように固定するために置いてある。
- *
- * ⚠ **この節の歯が守っているのは「`failed` という1つの数では足りない」ことである。**
- * 「embed の provider が落ちて失敗した」と「`tick` がその kind を処理できない」は、
- * どちらも終端の失敗だが**呼び出し側が次に取る手が違う**（前者は provider を直して
- * `reembed`、後者はそもそも `tick` に頼む相手が違う）。`failed: 1` だけを返すと
- * この2つが同じ顔になる——ADR 0029 が `ReextractResult.skipped` で塞いだのと同じ族。
+ * `failed` という1つの数では足りない: 「embed の provider が落ちて失敗した」と「`tick` がその kind を処理できない」は、
+ * どちらも終端の失敗だが呼び出し側が次に取る手が違う（前者は provider を直して `reembed`、後者はそもそも `tick` に頼む相手が違う）。
+ * `failed: 1` だけを返すとこの2つが同じ顔になる。
  */
 describe("runtime.tick — 対応していない outbox job kind（ADR 0082 / issue #105）", () => {
   /** 利用者が独自に足した kind。`TICK_SUPPORTED_JOB_KINDS` に**永久に**入らない側の代表。 */
@@ -1543,11 +1412,9 @@ describe("runtime.tick — 対応していない outbox job kind（ADR 0082 / is
   });
 
   it("⭐ 芯: 「処理を試みて失敗した」と「対応していない kind だった」が、同じ tick の中で別の顔になる", async () => {
-    // 同じ1回の tick で2件を拾わせる:
-    //   - embed ジョブ 1件（provider が落ちていて失敗する ＝ 試して失敗した）
-    //   - 対応していない kind 1件（試すまでもなく処理できない）
-    // `failed: 2` は両者を足した数であり、**どちらがどちらか言わない**。
-    // `unsupported` だけが後者を名指しする。これが無いと呼び出し側は区別できない。
+    // 同じ1回の tick で2件を拾わせる: embed ジョブ 1件（provider が落ちていて失敗する＝試して失敗した）と、
+    // 対応していない kind 1件（試すまでもなく処理できない）。`failed: 2` は両者を足した数で、どちらがどちらか言わない。
+    // `unsupported` だけが後者を名指しする。
     const { runtime, stores } = buildRuntime(
       llmReturning([{ content: "本文", digest: "要旨", provenanceKind: "stated" }]),
     );
@@ -1569,7 +1436,6 @@ describe("runtime.tick — 対応していない outbox job kind（ADR 0082 / is
   });
 
   it("⭐ 黙って lease 切れを待たない: 対応していない kind は終端で落ち、2回目の tick では claim されない", async () => {
-    // 報告者が推測した「claim され続けるがいつまでも進まない」が起きないことを測る歯。
     const { runtime, stores } = buildRuntime(llmReturning([]));
     const jobId = await enqueueJobOfKind(stores, CUSTOM_KIND);
 
@@ -1582,20 +1448,15 @@ describe("runtime.tick — 対応していない outbox job kind（ADR 0082 / is
     expect(rowAfterFirst.failedAt).not.toBeNull();
     expect(rowAfterFirst.lastError).toBe(`${UNSUPPORTED_KIND_ERROR_PREFIX}${CUSTOM_KIND}`);
 
-    // 2回目は claim されない（`fail` は終端。ADR 0032）。lease が切れて再び拾われる形ではない。
     const second = await runtime.tick(ctx, { kinds: [CUSTOM_KIND], leaseMs: TEST_LEASE_MS });
     expect(second).toEqual({ processed: 0, failed: 0, unsupported: [], leaseConflicts: [] });
     expect(stores.outboxStore.listJobs(ctx).find((job) => job.id === jobId)!.attempts).toBe(1);
   });
 
   /**
-   * 🔴 **報告に無い穴。実装を書いた後に自分で読み返して見つけたので、歯にした。**
-   *
-   * `kind` は DB の `text` 列から来る**任意の文字列**であり、`OutboxJobKind` は開いた
-   * ユニオンなので型でも止まらない。ハンドラの索引にプレーンなオブジェクトを使うと、
-   * `kind` が `"constructor"` / `"toString"` のときに `Object.prototype` 側の関数が
-   * 返ってしまい、**「対応している」と誤判定して呼ぶ**。そうなると、この節が守っている
-   * 「対応していない kind は unsupported に出る」が**この2語に対してだけ黙って破れる**。
+   * `kind` は DB の `text` 列から来る任意の文字列で、`OutboxJobKind` は開いたユニオンなので型でも止まらない。
+   * ハンドラの索引にプレーンなオブジェクトを使うと、`kind` が `"constructor"` / `"toString"` のときに `Object.prototype` 側の関数が返ってしまい、
+   * 「対応している」と誤判定して呼ぶ。
    */
   it.each(["constructor", "toString", "__proto__", "hasOwnProperty"])(
     "⭐ kind が '%s' でも prototype の関数をハンドラと取り違えず、unsupported に出る",
@@ -1632,37 +1493,6 @@ describe("runtime.tick — 対応していない outbox job kind（ADR 0082 / is
     });
   });
 
-  /**
-   * 🔴 **この歯は時限式だった。ここで役目を終えた（Issue #204 / ADR 0157）。**
-   *
-   * 元の歯は「`consolidate` / `reflect` はいまは `tick` に分岐が無く `unsupported` に出る」を
-   * `it.each(["consolidate", "reflect"])` で測っていた。ADR 0082 決定5 が予告していた
-   * とおり——「本体が入ったら赤くなる。それが正しい。**本体を足す側がこの歯を
-   * 書き換えるところまでがその作業**である」——`TICK_SUPPORTED_JOB_KINDS` に
-   * `"consolidate"`/`"reflect"` を足した今、元のアサーション
-   * （`expect(TICK_SUPPORTED_JOB_KINDS).not.toContain(kind)` と
-   * `unsupported: [{ jobId, kind }]`）はどちらも成り立たなくなった。
-   *
-   * **単に削除しない**（ADR 0157 決定3）——代わりに、下の2本を「いまは tick が処理する」
-   * ことを測る歯として書き換えた:
-   *
-   * 1. `TICK_SUPPORTED_JOB_KINDS` が実際に両方を含むこと（元の歯の否定）。
-   * 2. payload が壊れている（`memoryId` が無い）ジョブは、**`unsupported` にではなく
-   *    `failed` の側**（対応している kind として扱われたが、処理を試みて失敗した）に
-   *    出ること——`processConsolidateJob`/`processReflectJob` が
-   *    `readSeedMemoryIdFromPayload` で投げ、`tick()` がそれを `fail()` に落とす経路
-   *    （ADR 0082 の「無いの分類」を保ったまま、`unsupported` の意味を壊さない）。
-   *
-   * ⚠ 「well-formed な payload を tick が実際に処理する」歯は、この describe の外
-   * （`runtime.tick — consolidate/reflect ジョブを処理する`）に置いた——対象の Memory を
-   * 用意する必要があり、この describe の他の歯（未対応 kind・壊れた payload）とは
-   * セットアップの形が異なるため。
-   *
-   * ⚠ この節の他の4つの歯（`CUSTOM_KIND` / prototype 名を使うもの）は時限式では**ない**
-   * ——`CUSTOM_KIND` は利用者が足した kind であり、`TICK_SUPPORTED_JOB_KINDS` に入ることは
-   * 無い。kind がいくつ増えても、それらは効き続ける（下の歯が実際にそれを壊していないことを
-   * 確認済み——この編集は上のブロックだけを書き換えている）。
-   */
   it("⭐ `TICK_SUPPORTED_JOB_KINDS` は 'consolidate'/'reflect' を含む（時限式の歯が役目を終えた証跡）", () => {
     expect(TICK_SUPPORTED_JOB_KINDS).toContain("consolidate");
     expect(TICK_SUPPORTED_JOB_KINDS).toContain("reflect");
@@ -1672,10 +1502,8 @@ describe("runtime.tick — 対応していない outbox job kind（ADR 0082 / is
     "⭐ '%s' ジョブの payload が壊れている（memoryId が無い）と、unsupported ではなく failed で終端に落ちる",
     async (kind) => {
       const { runtime, stores } = buildRuntime(llmReturning([]));
-      // `enqueueJobOfKind` は observation 用の outbox 経路を借りて payload を
-      // `{ observationId }` にする——`consolidate`/`reflect` が読む `memoryId` を持たない、
-      // 「payload が壊れている」ケースの具体例（ADR 0157 決定「payload が壊れていたときの
-      // 倒れ方を決める」）。
+      // `enqueueJobOfKind` は observation 用の outbox 経路を借りて payload を `{ observationId }` にする。
+      // `consolidate`/`reflect` が読む `memoryId` を持たない「payload が壊れている」ケースの具体例。
       const jobId = await enqueueJobOfKind(stores, kind);
 
       const tickResult = await runtime.tick(ctx, { kinds: [kind], leaseMs: TEST_LEASE_MS });
@@ -1693,24 +1521,17 @@ describe("runtime.tick — 対応していない outbox job kind（ADR 0082 / is
   );
 });
 
-/**
- * Issue #204 / ADR 0157: `tick()` が `consolidate`/`reflect` の outbox ジョブを実際に処理する
- * ことを、正常系（payload が正しい）で測る。上の describe（対応していない kind の節）は
- * 「壊れた payload」の倒れ方を測っており、ここは「対応している」ことそのものを測る。
- */
 describe("runtime.tick — consolidate/reflect ジョブを処理する（Issue #204 / ADR 0157）", () => {
   it.each(["consolidate", "reflect"] as const)(
     "⭐ payload `{ memoryId }` が正しければ、'%s' ジョブは unsupported にも failed にもならず処理される",
     async (kind) => {
-      // `llmReturningOrDecliningReflection`（`llmReturning([])` ではない）を使う理由:
-      // `reflect` は種1件だけでも LLM を呼ぶ（下のコメント参照）——素の `llmReturning` だと
-      // `ReflectionLLMResultSchema` の parse に失敗して `llm_failed`（Issue #849 修正後は
-      // `tick()` の `failed`）になり、この歯が測りたい「payload が正しい job は処理される」
-      // こととは無関係な理由で赤くなる。
+      // `llmReturningOrDecliningReflection` を使う理由: `reflect` は種1件だけでも LLM を呼ぶので、素の `llmReturning` だと
+      // `ReflectionLLMResultSchema` の parse に失敗して `llm_failed`（`tick()` の `failed`）になり、
+      // この歯が測りたい「payload が正しい job は処理される」こととは無関係な理由で赤くなる。
       const { runtime, stores } = buildRuntime(llmReturningOrDecliningReflection([]));
       const { jobs } = await stores.memoryStore.createMemoryWithOutbox(
         ctx,
-        {
+        await withSourceObservation(stores.memoryStore, ctx, {
           tenantId: "tenant-1",
           subjectId: null,
           sourceObservationId: null,
@@ -1731,7 +1552,7 @@ describe("runtime.tick — consolidate/reflect ジョブを処理する（Issue 
           halfLifeHours: 24,
           decayFloorAt: new Date(),
           embeddingStatus: "pending",
-        },
+        }),
         [kind],
       );
       expect(jobs).toHaveLength(1);
@@ -1739,11 +1560,9 @@ describe("runtime.tick — consolidate/reflect ジョブを処理する（Issue 
 
       const tickResult = await runtime.tick(ctx, { kinds: [kind], leaseMs: TEST_LEASE_MS });
 
-      // `seedMemoryId` の近傍が無い（テナントにこの1件しかない）ため、`consolidate()` は
-      // eligible が1件（種のみ）で `nothing_to_consolidate`（LLM を呼ばずに打ち切る）に終わる。
-      // `reflect()` は eligible 1件でも LLM を呼ぶが、`llmReturningOrDecliningReflection` が
-      // 「一般化するものは無い」で応じるため `nothing_to_reflect` に終わる——どちらも
-      // **`tick()` の視点では「処理を試みて成功した」**——ジョブは完了として扱われる。
+      // `consolidate()` は eligible が1件（種のみ）で `nothing_to_consolidate`（LLM を呼ばずに打ち切る）に終わる。
+      // `reflect()` は eligible 1件でも LLM を呼ぶが、`llmReturningOrDecliningReflection` が「一般化するものは無い」で応じるので
+      // `nothing_to_reflect` に終わる。どちらも `tick()` の視点では「処理を試みて成功した」ので、ジョブは完了として扱われる。
       expect(tickResult).toEqual({
         processed: 1,
         failed: 0,
@@ -1754,11 +1573,6 @@ describe("runtime.tick — consolidate/reflect ジョブを処理する（Issue 
   );
 });
 
-/**
- * Issue #204 / ADR 0157 決定4: 🔴 自動駆動は**既定で有効にならない**（北極星の問い2 /
- * docs/roadmap.md §1.1）。この describe は両方向を測る——
- * 「既定では1件も積まれない」と「opt-in すると積まれ、tick が処理する」。
- */
 describe("runtime.observe(extract) が consolidate/reflect の種を積むのは opt-in のときだけ（Issue #204 / ADR 0157）", () => {
   it("🔴 既定（config を渡さない）では、extract は embed 以外のジョブを1件も積まない", async () => {
     const { runtime, stores } = buildRuntime(
@@ -1767,10 +1581,8 @@ describe("runtime.observe(extract) が consolidate/reflect の種を積むのは
 
     await runtime.observe(ctx, { kind: "utterance", text: "本文" });
 
-    // `extract: 'sync'`（既定）は監査/冪等性のための `extract` ジョブを常に積み、
-    // 同じ呼び出しの中で `complete()` する（`handleExtractableObservation` 参照。
-    // ADR 0157 の対象ではない、既存の挙動）——ここで測りたいのは
-    // `consolidate`/`reflect` が積まれないことだけなので、それ以外の kind は無視する。
+    // `extract: 'sync'`（既定）は `extract` ジョブを常に積み、同じ呼び出しの中で `complete()` する。
+    // ここで測りたいのは `consolidate`/`reflect` が積まれないことだけなので、それ以外の kind は無視する。
     const kinds = stores.outboxStore
       .listJobs(ctx)
       .map((job) => job.kind)
@@ -1779,10 +1591,7 @@ describe("runtime.observe(extract) が consolidate/reflect の種を積むのは
   });
 
   it("⭐ `autoQueueConsolidateReflectOnExtract: true` にすると、同じ memoryId を種にした consolidate/reflect のジョブも積まれ、tick が処理する", async () => {
-    // `llmReturningOrDecliningReflection` を使う理由は上の it.each の歯と同じ——この
-    // テナントには Memory が1件しかできないため `reflect` ジョブは種1件だけで LLM を呼び、
-    // 素の `llmReturning` だと `ReflectionLLMResultSchema` の parse に失敗して
-    // `llm_failed`（Issue #849 修正後は `tick()` の `failed`）になってしまう。
+    // `llmReturningOrDecliningReflection` を使う理由は上の it.each の歯と同じ。
     const { runtime, stores } = buildRuntime(
       llmReturningOrDecliningReflection([
         { content: "本文", digest: "要旨", provenanceKind: "stated" },
@@ -1793,9 +1602,7 @@ describe("runtime.observe(extract) が consolidate/reflect の種を積むのは
     const observeResult = await runtime.observe(ctx, { kind: "utterance", text: "本文" });
     const memoryId = observeResult.memoryIds[0]!;
 
-    // `extract` ジョブも積まれるが（既存の挙動、上のテストのコメント参照）、sync 抽出の
-    // 中で既に `complete()` されているので、ここでは `consolidate`/`embed`/`reflect` の
-    // 3つだけを見る（ADR 0157 の対象）。
+    // `extract` ジョブも積まれるが sync 抽出の中で既に `complete()` されているので、ここでは `consolidate`/`embed`/`reflect` の3つだけを見る。
     const jobsBeforeTick = stores.outboxStore.listJobs(ctx).filter((job) => job.kind !== "extract");
     expect(
       jobsBeforeTick
@@ -1807,25 +1614,17 @@ describe("runtime.observe(extract) が consolidate/reflect の種を積むのは
       { kind: "reflect", payload: { memoryId } },
     ]);
 
-    // 積まれるだけでなく、tick() が実際に処理する（unsupported にならない）ところまで測る
-    // ——「積む」と「処理できる」を別の歯で確かめないと、payload の形が食い違っていても
-    // 「積んだこと」だけで緑になってしまう。既に complete 済みの `extract` ジョブは
-    // `claimBatch` の対象外なので `processed` には含まれない。
+    // 積まれるだけでなく、tick() が実際に処理する（unsupported にならない）ところまで測る。
+    // 「積む」と「処理できる」を別の歯で確かめないと、payload の形が食い違っていても「積んだこと」だけで緑になってしまう。
     const tickResult = await runtime.tick(ctx, { leaseMs: TEST_LEASE_MS });
     expect(tickResult).toEqual({ processed: 3, failed: 0, unsupported: [], leaseConflicts: [] });
   });
 });
 
 /**
- * ADR 0142 / Issue #233: `OutboxStore.complete`/`fail` を CAS にする。
- *
- * `packages/testkit` の `outbox-store-conformance.ts` が `InMemoryOutboxStore`/
- * `PostgresOutboxStore` の両方に対して同じ契約を検査しているが、`FakeOutboxStore`
- * （このファイルが使う `packages/core` 自身の私的なテストダブル）はその適合スイートの
- * 対象外である（`core` は `testkit` に依存しない、docs/architecture.md §4）。
- * ⚠ **この節が無いと、`FakeOutboxStore` の CAS 判定は「実装されているが、どの歯からも
- * 呼ばれない」まま残る**——ADR 0053 が「Mu5a 変異が生存」として残した穴と同じ形
- * （実装だけあって、それを壊す変異を検出する歯が無い）を、ここで自分から開けないための節。
+ * `FakeOutboxStore`（`packages/core` 自身の私的なテストダブル）は `packages/testkit` の適合スイートの対象外である
+ * （`core` は `testkit` に依存しない、docs/architecture.md §4）。この節が無いと、`FakeOutboxStore` の CAS 判定は
+ * 実装されているのにどの歯からも呼ばれないまま残る。
  */
 describe("OutboxStore.complete/fail の CAS（ADR 0142 / Issue #233、FakeOutboxStore）", () => {
   async function enqueueJob(stores: ReturnType<typeof buildRuntime>["stores"]): Promise<string> {
@@ -1896,7 +1695,6 @@ describe("OutboxStore.complete/fail の CAS（ADR 0142 / Issue #233、FakeOutbox
     const leaseMs = 1000;
     const base = new Date();
 
-    // ワーカーA が claim する。
     const claimA = await stores.outboxStore.claimBatch(ctx, {
       limit: 10,
       now: base,
@@ -1905,10 +1703,8 @@ describe("OutboxStore.complete/fail の CAS（ADR 0142 / Issue #233、FakeOutbox
     });
     const jobAsClaimedByA = claimA.find((j) => j.id === jobId)!;
 
-    // リースが切れる。
     const afterExpiry = new Date(base.getTime() + leaseMs);
 
-    // ワーカーB が再 claim して complete する。
     const claimB = await stores.outboxStore.claimBatch(ctx, {
       limit: 10,
       now: afterExpiry,
@@ -1919,22 +1715,17 @@ describe("OutboxStore.complete/fail の CAS（ADR 0142 / Issue #233、FakeOutbox
     expect(jobAsClaimedByB.attempts).toBeGreaterThan(jobAsClaimedByA.attempts);
     await stores.outboxStore.complete(ctx, jobId, jobAsClaimedByB.attempts);
 
-    // ワーカーA が遅れて、自分が claim した時点の(もう古い) attempts で fail を呼ぶ。
     await expect(
       stores.outboxStore.fail(ctx, jobId, "worker-A: stale failure", jobAsClaimedByA.attempts),
     ).rejects.toBeInstanceOf(OutboxLeaseConflictError);
 
-    // Bの complete の結果が、Aの遅れた呼び出しによって上書きされていない
-    // ——本 Issue が指摘したバグの直接の否定。
     const finalJob = stores.outboxStore.listJobs(ctx).find((j) => j.id === jobId)!;
     expect(finalJob.completedAt).not.toBeNull();
     expect(finalJob.failedAt).toBeNull();
   });
 
-  // Issue #826: complete/fail は互いに排他。先に付いた終端が勝ち、後から来た呼び出しは
-  // 行を変えず、例外も投げない（`packages/testkit` の `InMemoryOutboxStore`・
-  // `PostgresOutboxStore` と同じ意味論。`FakeOutboxStore` はどちらの適合スイートの
-  // 対象でもないため、ここで別に検査する）。
+  // complete/fail は互いに排他。先に付いた終端が勝ち、後から来た呼び出しは行を変えず、例外も投げない
+  // （`FakeOutboxStore` は適合スイートの対象でないため、ここで別に検査する）。
   it("逐次: complete → fail（同じ attempts）— completedAt は付いたまま、failedAt/lastError は null のまま（Issue #826）", async () => {
     const { stores } = buildRuntime(llmReturning([]));
     const jobId = await enqueueJob(stores);
@@ -1981,26 +1772,14 @@ describe("OutboxStore.complete/fail の CAS（ADR 0142 / Issue #233、FakeOutbox
 });
 
 /**
- * ADR 0142 決定3: `tick()` は `OutboxLeaseConflictError` を検知しても、その1件を
- * 飛ばして残りのジョブの処理を続ける（伝播させて `tick()` 全体を止めない）。
+ * リース競合は異常ではなく正常な並行の結果（別のワーカーが既にそのジョブを終わらせた）なので、`tick()` は `OutboxLeaseConflictError` を検知しても、
+ * その1件を飛ばして残りのジョブの処理を続ける。1件の良性の競合で同じ `tick` 呼び出し内の無関係な他のジョブまで止めない。
  *
- * **リース競合は異常ではなく、正常な並行の結果である**——別のワーカーが既にその
- * ジョブを終わらせたということであり、システムから見ればそのジョブは済んでいる。
- * 1件の良性の競合で、同じ `tick` 呼び出し内の無関係な他のジョブまで処理が止まるのは、
- * 狭い事象を広い停止に変換する形であり、避ける。
- *
- * **決定的な差し込み**（`FakeMemoryStore.beforeUpdateStatus`、ADR 0030 と同じ形）で
- * 再現する: `FakeEmbeddingProvider.beforeEmbedReturn` フックから、処理中のジョブ自身を
- * （テストコードが）直接 `claimBatch` で再 claim することで、「処理には成功したが
- * complete しようとした時点でリースを失っていた」を確率的な並行に頼らず毎回同じ形で
- * 起こす。
+ * 決定的な差し込みで再現する: `FakeEmbeddingProvider.beforeEmbedReturn` フックから、処理中のジョブ自身を直接 `claimBatch` で再 claim して、
+ * 「処理には成功したが complete しようとした時点でリースを失っていた」を確率的な並行に頼らず毎回同じ形で起こす。
  */
 describe("runtime.tick — リース競合は他のジョブの処理を止めない（ADR 0142 決定3）", () => {
   it("⭐ 1件が complete 時にリース競合しても、同じ tick 内の他のジョブは処理される", async () => {
-    // fakeNow は実時刻より確実に先の、この describe 内で完全に制御する時刻。
-    // 以前の Fake は、ジョブの availableAt を FakeBackingStore.enqueueJob が実時刻 `new Date()` で
-    // 打ったため、fakeNow を実時刻より先に置いて available_at <= now を常に成立させていた。
-    // 今の Fake は `opts.now` に従う(ADR 0555)が、この置き方は組み替えていない(ADR 0555 の「残り」)。
     let fakeNow = new Date(Date.now() + 1000);
     const fakeClock = { now: () => fakeNow };
     const leaseMs = 10;
@@ -2024,8 +1803,6 @@ describe("runtime.tick — リース競合は他のジョブの処理を止め�
         return;
       }
       hookFired = true;
-      // fakeNow をリース失効後まで進めてから、job A だけを別ワーカーとして
-      // 横取りする(limit:1・available_at 昇順なので A が選ばれる)。
       fakeNow = new Date(fakeNow.getTime() + leaseMs + 1000);
       const hijacked = await stores.outboxStore.claimBatch(ctx, {
         kinds: ["embed"],
@@ -2043,8 +1820,6 @@ describe("runtime.tick — リース競合は他のジョブの処理を止め�
       leaseMs,
     });
 
-    // A は「complete しようとした時点でリースを失っていた」——processed/failed の
-    // どちらにも数えず、leaseConflicts に名指しで出る。B は無関係に正常処理される。
     expect(tickResult.processed).toBe(1);
     expect(tickResult.failed).toBe(0);
     expect(tickResult.unsupported).toEqual([]);
@@ -2058,7 +1833,6 @@ describe("runtime.tick — リース競合は他のジョブの処理を止め�
     // 競合で弾かれた、という区別が付いていることを確認する。
     const memoryA = await stores.memoryStore.get(ctx, memoryIdA);
     expect(memoryA?.embeddingStatus).toBe("ready");
-    // Bは競合と無関係に、いつもどおり処理される。
     const memoryB = await stores.memoryStore.get(ctx, memoryIdB);
     expect(memoryB?.embeddingStatus).toBe("ready");
   });
@@ -2175,7 +1949,6 @@ describe("runtime.reextract（ADR 0028: 「やり直したら重複が残る」�
   });
 
   it("変わっていない候補は、2回目の reextract でも superseded にならない（content_hash 比較を外すと壊れる歯）", async () => {
-    // ここでは observe() 自体が最初から成功する（フォールバックを経由しない）。
     const stores = createFakeRuntimeStores();
     const succeedingLlm = llmReturning([
       { content: "変わらない内容", digest: "要旨", provenanceKind: "stated" },
@@ -2195,7 +1968,6 @@ describe("runtime.reextract（ADR 0028: 「やり直したら重複が残る」�
     expect(observeResult.extraction).toBe("ok");
     const originalId = observeResult.memoryIds[0]!;
 
-    // 同じ候補で reextract を2回走らせる——LLM は毎回同じ内容を返す（決定的）。
     await runtime.reextract(ctx, observeResult.observationId);
     const result = await runtime.reextract(ctx, observeResult.observationId);
 
@@ -2205,9 +1977,6 @@ describe("runtime.reextract（ADR 0028: 「やり直したら重複が残る」�
     expect(original?.supersededById ?? null).toBeNull();
   });
 
-  // ADR 0029: ADR 0028 が「引き受ける負債」に記録した欠落を埋める歯。
-  // `ReextractResult.skipped` が「見ていない」「見たが対象外」「見て変わっていなかった」を
-  // 別の顔で出すことを確かめる。
   describe("skipped（ADR 0029: 既存 Memory を supersede しなかった理由を出す）", () => {
     /** 同じ stores を共有しつつ、llmProvider だけ差し替えた runtime を作る。 */
     function runtimeWithLlm(
@@ -2251,7 +2020,6 @@ describe("runtime.reextract（ADR 0028: 「やり直したら重複が残る」�
       await stores.memoryStore.updateStatus(ctx, forgotten1Id, "forgotten");
       await stores.memoryStore.updateStatus(ctx, forgotten2Id, "forgotten");
 
-      // 別内容を返す LLM で reextract する——3件とも今回の content_hash 集合に含まれない。
       const runtime2 = runtimeWithLlm(
         stores,
         llmReturning([{ content: "新しい抽出結果", digest: "要旨", provenanceKind: "stated" }]),
@@ -2302,7 +2070,6 @@ describe("runtime.reextract（ADR 0028: 「やり直したら重複が残る」�
       expect(observeResult.extraction).toBe("ok");
       const originalId = observeResult.memoryIds[0]!;
 
-      // 同じ内容を返す LLM で reextract する——content_hash が一致し続ける。
       const result = await runtime.reextract(ctx, observeResult.observationId);
 
       expect(result.skipped).toEqual([{ kind: "unchanged", memoryId: originalId }]);
@@ -2328,7 +2095,6 @@ describe("runtime.reextract（ADR 0028: 「やり直したら重複が残る」�
       });
       expect(observeResult.extraction).toBe("llm_failed_whole_observation");
 
-      // reextract でも同じく LLM が失敗し続ける。
       const runtime2 = runtimeWithLlm(stores, throwingLlm());
       const result = await runtime2.reextract(ctx, observeResult.observationId);
 
@@ -2336,8 +2102,6 @@ describe("runtime.reextract（ADR 0028: 「やり直したら重複が残る」�
       expect(result.skipped).toEqual([
         { kind: "not_examined", reason: "llm_failed_whole_observation" },
       ]);
-      // ADR 0072 追記: `reextract` の `extractionFailure` も `observe()` と対称に運ばれる
-      // ——片方だけ種類が分かる非対称を作らない。
       expect(result.extractionFailure).toEqual({
         kind: null,
         message: "simulated LLM outage",
@@ -2396,13 +2160,10 @@ describe("runtime.reextract（ADR 0028: 「やり直したら重複が残る」�
 
     it("⭐ 「飛ばすものが無かった」・「候補0件」・「LLM失敗」の3つの顔が違う（オーナーの追加要求）", async () => {
       const stores = createFakeRuntimeStores();
-      // 候補0件の LLM で observe() する——Memory は1件も作られない。
       const zeroLlm = llmReturning([]);
       const zeroRuntime = runtimeWithLlm(stores, zeroLlm);
 
-      // 顔1: 「飛ばすものが無かった」——既存 Memory が無い Observation に、候補が有る LLM で
-      // reextract する。本経路（`classifyReextractTargets`）を通るが、existingBefore が
-      // 空なので skipped も空になる。
+      // 顔1: 「飛ばすものが無かった」。既存 Memory が無い Observation に、候補が有る LLM で reextract する。
       const observeResult1 = await zeroRuntime.observe(ctx, { kind: "utterance", text: "発話1" });
       expect(observeResult1.memoryIds).toEqual([]);
       const succeedingRuntime = runtimeWithLlm(
@@ -2412,14 +2173,12 @@ describe("runtime.reextract（ADR 0028: 「やり直したら重複が残る」�
       const nothingToSkip = await succeedingRuntime.reextract(ctx, observeResult1.observationId);
       expect(nothingToSkip.skipped).toEqual([]);
 
-      // 顔2: 「候補0件」——別の Observation に対し、候補0件の LLM のまま reextract する。
-      // listBySourceObservation を呼ぶ前の早期 return。
+      // 顔2: 「候補0件」。listBySourceObservation を呼ぶ前の早期 return。
       const observeResult2 = await zeroRuntime.observe(ctx, { kind: "utterance", text: "発話2" });
       const noCandidates = await zeroRuntime.reextract(ctx, observeResult2.observationId);
       expect(noCandidates.skipped).toEqual([{ kind: "not_examined", reason: "no_candidates" }]);
 
-      // 顔3: 「LLM失敗」——さらに別の Observation に対し、LLM 自体が例外を投げる。
-      // これも listBySourceObservation を呼ぶ前の早期 return。
+      // 顔3: 「LLM失敗」。これも listBySourceObservation を呼ぶ前の早期 return。
       const observeResult3 = await zeroRuntime.observe(ctx, { kind: "utterance", text: "発話3" });
       const throwingRuntime = runtimeWithLlm(stores, throwingLlm());
       const llmFailed = await throwingRuntime.reextract(ctx, observeResult3.observationId);
@@ -2427,20 +2186,15 @@ describe("runtime.reextract（ADR 0028: 「やり直したら重複が残る」�
         { kind: "not_examined", reason: "llm_failed_whole_observation" },
       ]);
 
-      // 3つの顔がそれぞれ違うことを並べて確認する——顔1だけが空配列（見たうえで、飛ばす
-      // ものが無かった）で、顔2・顔3は同じ「見ていない」でも reason が違う。
       expect(nothingToSkip.skipped).not.toEqual(noCandidates.skipped);
       expect(noCandidates.skipped).not.toEqual(llmFailed.skipped);
       expect(nothingToSkip.skipped).not.toEqual(llmFailed.skipped);
     });
   });
 
-  // ADR 0030（安全弁3）: 読み（listBySourceObservation）と書き（updateStatus）の間に
-  // 割り込む書き込みで安全弁が破れる TOCTOU を、compare-and-swap で塞いだことを検査する。
   describe("compare-and-swap（ADR 0030: 読んでから書くまでの間の TOCTOU を検知する）", () => {
     it("⭐ 対象 M の1件目を書きに来た瞬間に M を forgotten へ変えても、M は forgotten のまま・supersede されず・イベントも積まれない（別の対象 N は普通に supersede される）", async () => {
       const stores = createFakeRuntimeStores();
-      // 既存 Memory を2件作る（非対称: M は割り込みで forgotten に変わる、N は変わらない）。
       const setupRuntime = createRuntime({
         memoryStore: stores.memoryStore,
         outboxStore: stores.outboxStore,
@@ -2457,7 +2211,6 @@ describe("runtime.reextract（ADR 0028: 「やり直したら重複が残る」�
       const observeResult = await setupRuntime.observe(ctx, { kind: "utterance", text: "発話" });
       const [mId, nId] = observeResult.memoryIds as [string, string];
 
-      // reextract 用の runtime（別内容を返す LLM——M・N とも今回の content_hash 集合に無い）。
       const reextractRuntime = createRuntime({
         memoryStore: stores.memoryStore,
         outboxStore: stores.outboxStore,
@@ -2471,14 +2224,9 @@ describe("runtime.reextract（ADR 0028: 「やり直したら重複が残る」�
         hashContent: (content: string) => `sha256(${content})`,
       });
 
-      // 決定的な差し込み: toSupersede は existingBefore の順（M, N）でループされる
-      // （FakeBackingStore.memories は Map で挿入順を保つ）。M への1件目の書き込みが
-      // 来た「まさにその瞬間」に、別の誰か（利用者による forget 相当）が M を
-      // forgotten に変えたことにする。N には介入しない——フィクスチャを非対称にする
-      // ことで「件数は合っているが対応が崩れている」変異も捕まえられるようにする。
-      //
-      // ADR 0562: `FakeMemoryStore.get` は写しを返す（以前は backing.memories の行そのものだった）ので、
-      // 行そのものを引く `liveRowForTest` で取った参照の `status` を書き換えて「割り込み」を再現する。
+      // 決定的な差し込み: M への1件目の書き込みが来た瞬間に、別の誰か（利用者による forget 相当）が M を forgotten に変えたことにする。
+      // N には介入しない。フィクスチャを非対称にすることで「件数は合っているが対応が崩れている」変異も捕まえられるようにする。
+      // `FakeMemoryStore.get` は写しを返すので、行そのものを引く `liveRowForTest` で取った参照の `status` を書き換えて「割り込み」を再現する。
       const mBeforeIntervention = stores.memoryStore.liveRowForTest(ctx, mId);
       let intervened = false;
       stores.memoryStore.beforeUpdateStatus = (id) => {
@@ -2490,7 +2238,6 @@ describe("runtime.reextract（ADR 0028: 「やり直したら重複が残る」�
 
       const result = await reextractRuntime.reextract(ctx, observeResult.observationId);
 
-      // M: forgotten のまま・supersede されていない・skipped に status_changed_concurrently。
       const mAfter = await stores.memoryStore.get(ctx, mId);
       expect(mAfter?.status).toBe("forgotten");
       expect(result.supersededMemoryIds).not.toContain(mId);
@@ -2504,7 +2251,6 @@ describe("runtime.reextract（ADR 0028: 「やり直したら重複が残る」�
       );
       expect(mEvents).toEqual([]); // superseded イベントは一切積まれていない
 
-      // N: 同じ呼び出しの中で、普通に supersede されている（非対称であることの確認）。
       expect(result.supersededMemoryIds).toContain(nId);
       const nAfter = await stores.memoryStore.get(ctx, nId);
       expect(nAfter?.status).toBe("superseded");
@@ -2542,14 +2288,8 @@ describe("runtime.reextract（ADR 0028: 「やり直したら重複が残る」�
       });
 
       // 競合ではない、ただの障害（例: 接続断）を模す。
-      //
-      // ⚠ **この歯が差し替える先は、`reextract` が実際に呼ぶ口でなければならない。**
-      // ADR 0031 のときは `updateStatus` → `updateStatusWithEvent` へ向け直した。
-      // ADR 0100 で `FakeMemoryStore` が `supersedeWithNewMemories` を実装したため、
-      // `reextract` はそちらを呼ぶ——⟹ **差し替える先もそちらへ向け直す。**
-      // さもないと「差し替えた口が呼ばれず、例外が飛ばないので歯が落ちる」（今回は赤く
-      // なって気付けたが、条件がずれれば**緑のまま何も検査しなくなる**——ADR 0031 決定8 が
-      // 名指しした一番危険な壊れ方である）。
+      // 差し替える先は、`reextract` が実際に呼ぶ口（`supersedeWithNewMemories`）でなければならない。
+      // さもないと差し替えた口が呼ばれず、例外が飛ばないので歯が落ちるか、条件がずれれば緑のまま何も検査しなくなる。
       stores.memoryStore.supersedeWithNewMemories = async () => {
         throw new Error("simulated connection reset");
       };
@@ -2586,9 +2326,8 @@ describe("runtime.reextract（ADR 0028: 「やり直したら重複が残る」�
         hashContent: (content: string) => `sha256(${content})`,
       });
 
-      // 🔴 ADR 0100 の禁止1: 口が在って**投げた**ときに今日の経路で撃ち直さない。
-      // 撃ち直すと「トランザクションを張れなかった」と「張ったが失敗した」が呼び手から
-      // 区別できなくなる（Issue #134 が潰すなと明示した破れ）。
+      // 口が在って投げたときに今日の経路で撃ち直さない。撃ち直すと「トランザクションを張れなかった」と
+      // 「張ったが失敗した」が呼び手から区別できなくなる。
       let usedFallback = false;
       stores.memoryStore.supersedeWithNewMemories = async () => {
         throw new Error("simulated transaction failure");
@@ -2604,7 +2343,6 @@ describe("runtime.reextract（ADR 0028: 「やり直したら重複が残る」�
       await expect(reextractRuntime.reextract(ctx, observeResult.observationId)).rejects.toThrow(
         "simulated transaction failure",
       );
-      // フォールバックしていない＝今日の経路（updateStatusWithEvent）は呼ばれていない。
       expect(usedFallback).toBe(false);
     });
 
@@ -2653,9 +2391,8 @@ describe("runtime.reextract（ADR 0028: 「やり直したら重複が残る」�
       });
       const observeResult = await setupRuntime.observe(ctx, { kind: "utterance", text: "発話" });
 
-      // 口を持たない adapter を模す——第三者の既存 adapter がこの形である。
-      // ⚠ `delete` では消えない（クラスのメソッドは prototype に在り、インスタンスの
-      // own property ではない）——`undefined` を代入して prototype を隠す。
+      // 口を持たない adapter を模す（第三者の既存 adapter がこの形）。`delete` では消えない（クラスのメソッドは prototype に在る）ので、
+      // `undefined` を代入して prototype を隠す。
       (stores.memoryStore as { supersedeWithNewMemories?: unknown }).supersedeWithNewMemories =
         undefined;
 
@@ -2673,7 +2410,6 @@ describe("runtime.reextract（ADR 0028: 「やり直したら重複が残る」�
       });
       const unsupported = await withoutPort.reextract(ctx, observeResult.observationId);
       expect(unsupported.atomicity).toBe("store_unsupported");
-      // 口が無くても supersede そのものは今日どおり行われる。
       expect(unsupported.supersededMemoryIds).toHaveLength(1);
     });
   });
@@ -2681,11 +2417,9 @@ describe("runtime.reextract（ADR 0028: 「やり直したら重複が残る」�
 
 describe("observe の冪等な再送は、同時に別の観測が入っても抽出をやり直さない（ADR 0054）", () => {
   /**
-   * `handleExtractableObservation` は `createObservationWithOutbox` の `created` だけを見て
-   * 「抽出をやり直すか」を決める。擬似実装が `created` を大域の件数差から導いていると、
-   * **同時に別の観測が作られただけで再送が「新規」に化け**、同じ observation に対して
-   * 抽出がもう一度走る——LLM がもう一度叩かれ、`extraction` が `"skipped"` ではなく
-   * 抽出結果になり、`memoryIds` が空でなくなる。ここで測っているのはその**値**である。
+   * `handleExtractableObservation` は `createObservationWithOutbox` の `created` だけを見て「抽出をやり直すか」を決める。
+   * 擬似実装が `created` を大域の件数差から導いていると、同時に別の観測が作られただけで再送が「新規」に化け、
+   * 同じ observation に対して抽出がもう一度走る。ここで測っているのはその値である。
    */
   it("再送は extraction: 'skipped'・memoryIds: [] のままで、LLM は増えない", async () => {
     let llmCalls = 0;
@@ -2744,13 +2478,6 @@ describe("observe の冪等な再送は、同時に別の観測が入っても�
   });
 });
 
-/**
- * Issue #608 項目①（核心）: `buildNewMemoriesForCandidates`（runtime.ts）は同じ observation を
- * 全候補へ渡す。候補ごとに違う `subjectId` を持てるようになったことで、**1回の observe() から
- * 複数の Memory が出て、それぞれ違う主題を持てる**ことを、runtime 経由（observe()）で縛る。
- * `extraction.test.ts` の `buildNewMemoryFromCandidate` 単体の歯とは別に、
- * `runtime.observe` → `buildNewMemoriesForCandidates` の配線そのものが崩れていないことを見る。
- */
 describe("observe: 抽出候補ごとに subjectId を持てる（Issue #608 項目①）", () => {
   it("同じ observation から出た複数候補が、候補ごとに違う subjectId を持つ", async () => {
     const { runtime, stores } = buildRuntime(
@@ -2762,7 +2489,7 @@ describe("observe: 抽出候補ごとに subjectId を持てる（Issue #608 項
         // subjectId 省略 ＝ 未指定。従来どおり observation の値へ落ちる。
         { content: "念のための第4の候補", provenanceKind: "stated" },
       ]),
-      // 問15: 一覧を渡さずに候補ごとの主題を受けるのは opt-in（既定は捨てる）。
+      // 一覧を渡さずに候補ごとの主題を受けるのは opt-in（既定は捨てる）。
       { config: { acceptLlmSubjectIdWithoutCandidates: true } },
     );
 
@@ -2787,13 +2514,6 @@ describe("observe: 抽出候補ごとに subjectId を持てる（Issue #608 項
   });
 });
 
-/**
- * Issue #608 項目②(b): 呼び出し側が subject の候補一覧を渡し、抽出器に選ばせる口。
- * `buildExtractionPrompt` の文面自体（候補一覧・null の指示が載るか）は
- * `extraction.test.ts` が縛る——ここでは `runtime.observe` を通した配線
- * （ObserveXxxInput.subjectCandidates → Memory.subjectId、一覧外の値の runtime 検証、
- * deferred との組み合わせの検証エラー、reextract がこの欄を使わないこと）を縛る。
- */
 describe("observe: subjectCandidates（Issue #608 項目②(b)）", () => {
   it("一覧内の subjectId は、そのまま Memory の subjectId になる", async () => {
     const { runtime, stores } = buildRuntime(
@@ -2808,7 +2528,6 @@ describe("observe: subjectCandidates（Issue #608 項目②(b)）", () => {
     expect(result.extraction).toBe("ok");
     const memory = await stores.memoryStore.get(ctx, result.memoryIds[0]!);
     expect(memory?.subjectId).toBe("user:a");
-    // 何も弾かれていないので、rejectedSubjectIds は空配列で「渡した・0件弾いた」を示す。
     expect(result.rejectedSubjectIds).toEqual([]);
   });
 
@@ -2826,9 +2545,7 @@ describe("observe: subjectCandidates（Issue #608 項目②(b)）", () => {
     });
     expect(result.extraction).toBe("ok");
     const memory = await stores.memoryStore.get(ctx, result.memoryIds[0]!);
-    // ①の「省略」経路と同じ着地点——observation の subjectId へフォールバックする。
     expect(memory?.subjectId).toBe("user:conversation-default");
-    // 黙って戻さない: 弾いた値が ObserveResult に残る。
     expect(result.rejectedSubjectIds).toEqual(["user:ghost"]);
   });
 
@@ -2891,7 +2608,6 @@ describe("observe: subjectCandidates（Issue #608 項目②(b)）", () => {
       subjectCandidates: [],
     });
     expect(result.extraction).toBe("skipped");
-    // deferred なので observation は作られるが、抽出はまだ実行されない。
     const observation = await stores.memoryStore.getObservation(ctx, result.observationId);
     expect(observation).not.toBeNull();
   });
@@ -2950,7 +2666,6 @@ describe("observe: subjectCandidates（Issue #608 項目②(b)）", () => {
     });
     expect(observeResult.extraction).toBe("ok");
 
-    // reextract 用に、別の LLM 応答（一覧外だったはずの値）を返す runtime を同じ stores で作る。
     const reextractRuntime = createRuntime({
       memoryStore: stores.memoryStore,
       outboxStore: stores.outboxStore,
@@ -2962,8 +2677,7 @@ describe("observe: subjectCandidates（Issue #608 項目②(b)）", () => {
       ]),
       embeddingProvider: stores.embeddingProvider,
       hashContent: (content: string) => `sha256(${content})`,
-      // 問15: 既定では reextract も LLM の subjectId を捨てる（llm-subject-id-dropped-by-default.test.ts）。
-      // ここは「一覧で検証しようがない」ことを縛るので opt-in で受ける。
+      // 既定では reextract も LLM の subjectId を捨てる。ここは「一覧で検証しようがない」ことを縛るので opt-in で受ける。
       config: { acceptLlmSubjectIdWithoutCandidates: true },
     });
     const reextractResult = await reextractRuntime.reextract(ctx, observeResult.observationId);
@@ -2976,8 +2690,6 @@ describe("observe: subjectCandidates（Issue #608 項目②(b)）", () => {
     // これを検証しようがなく、LLM が返した値をそのまま使う——observe() 時点なら
     // 「一覧外」として弾かれていたはずの "user:ghost" が、ここではそのまま通る。
     expect(newMemory?.subjectId).toBe("user:ghost");
-    // `ReextractResult` に `rejectedSubjectIds` は無い（候補一覧を扱わないため、
-    // そもそも運ぶものが無い）。
     expect("rejectedSubjectIds" in reextractResult).toBe(false);
   });
 });
@@ -2991,7 +2703,6 @@ describe("observe: claimKey（Issue #371、(B) 第1段。ADR 0185/0315 決定2�
     expect(llm.calls.length).toBe(1); // 抽出の1回だけ。claim key の呼び出しは無い。
     const memory = await stores.memoryStore.get(ctx, result.memoryIds[0]!);
     expect(memory?.claimKey ?? null).toBeNull();
-    // 「渡していない」ので rejectedSubjectIds と同じ規約でキー自体が無い。
     expect("claimKeyFailure" in result).toBe(false);
   });
 
@@ -3036,12 +2747,10 @@ describe("observe: claimKey（Issue #371、(B) 第1段。ADR 0185/0315 決定2�
     const second = await stores.memoryStore.get(ctx, result.memoryIds[1]!);
     expect(first?.claimKey).toEqual({ subject: "user", predicate: "favorite_food" });
     expect(second?.claimKey).toEqual({ subject: "user", predicate: "favorite_color" });
-    // opt-in を使ったので claimKeyFailure キーは常に有る（成功時は null）。
     expect(result.claimKeyFailure).toBeNull();
   });
 
   it("既定の抽出プロンプトは opt-in の有無で変わらない——2回目の呼び出しだけが増える", async () => {
-    // 1回目（抽出）の req.prompt を捕まえ、opt-in の有無で完全に同一であることを確認する。
     const withoutOptIn = sequencedLlm([{ memories: [] }]);
     const { runtime: runtimeA } = buildRuntime(withoutOptIn);
     await runtimeA.observe(ctx, { kind: "utterance", text: "発話" });
@@ -3057,7 +2766,6 @@ describe("observe: claimKey（Issue #371、(B) 第1段。ADR 0185/0315 決定2�
     const firstPromptWithOptIn: unknown = withOptIn.calls[0]!.prompt;
 
     expect(firstPromptWithOptIn).toEqual(firstPromptWithoutOptIn);
-    // 候補0件なので claim key の呼び出しにも到達しない——どちらも呼び出しは1回だけ。
     expect(withoutOptIn.calls.length).toBe(1);
     expect(withOptIn.calls.length).toBe(1);
   });
@@ -3077,7 +2785,6 @@ describe("observe: claimKey（Issue #371、(B) 第1段。ADR 0185/0315 決定2�
   });
 
   it("claim key の呼び出しが失敗しても、Memory の作成は止まらない——claimKey は null のまま、失敗は ObserveResult に残る", async () => {
-    // 2回目（claim key）の応答を設定しない ⟹ sequencedLlm が例外を投げる。
     const llm = sequencedLlm([{ memories: [{ content: "発話", provenanceKind: "stated" }] }]);
     const { runtime, stores } = buildRuntime(llm);
     const result = await runtime.observe(ctx, {
@@ -3190,7 +2897,6 @@ describe("observe: claimKey（Issue #371、(B) 第1段。ADR 0185/0315 決定2�
     });
     const reextractResult = await reextractRuntime.reextract(ctx, observeResult.observationId);
     expect(reextractResult.extraction).toBe("ok");
-    // reextract は claim key opt-in を渡す口を持たない ⟹ 呼び出しは抽出の1回だけ。
     expect(reextractLlm.calls.length).toBe(1);
     const newMemoryId = reextractResult.memoryIds.find(
       (id) => !observeResult.memoryIds.includes(id),
@@ -3267,8 +2973,7 @@ describe("observe: claimKey knownPredicatesFromStore（Issue #691続き、ADR 03
       { claims: [{ subject: "user", predicate: "favorite_food" }] },
     ]);
     const { runtime, stores } = buildRuntime(llm);
-    // `listActiveClaimPredicates` を持たない adapter を模す（既存の
-    // 「findActiveByClaimKey を実装しない adapter」の歯と同じ手法）。
+    // `listActiveClaimPredicates` を持たない adapter を模す。
     // @ts-expect-error テスト用に任意メソッドを取り除く。
     stores.memoryStore.listActiveClaimPredicates = undefined;
     await runtime.observe(ctx, {
@@ -3395,17 +3100,12 @@ describe("observe: claimKey knownPredicatesFromStore（Issue #691続き、ADR 03
       subjectId: "user-1",
       claimKey: {
         enabled: true,
-        // 利用者が明示的に選んだ語彙——store 側にも同じ値 "favorite_food" が在るが、
-        // 重複せず1回だけ、かつ利用者の指定順が先頭に来ることを見る。
         knownPredicates: ["user_chosen_hint", "favorite_food"],
         knownPredicatesFromStore: true,
       },
     });
     const claimKeyCall = followUpLlm.calls[1]!;
     const system = claimKeyCall.prompt.system as string;
-    // 利用者指定分（"user_chosen_hint", "favorite_food"）の後ろに、store 分から
-    // 重複を除いた "favorite_color" だけが連結されている——"favorite_food" が
-    // 重複して並んでいれば、この厳密な部分文字列は一致しない。
     expect(system).toContain(
       "既知の predicate 候補一覧: user_chosen_hint, favorite_food, favorite_color。",
     );
@@ -3414,20 +3114,11 @@ describe("observe: claimKey knownPredicatesFromStore（Issue #691続き、ADR 03
 
 describe("observe: claimKey knownSubjects は subjectCandidates へ暗黙に転用しない（Issue #372負債6、ADR 0334）", () => {
   /**
-   * ⚠ ADR 0334「採らなかった案」: `knownPredicatesFromStore` と対になる
-   * `knownSubjectsFromStore`（store が自己蓄積した claim key subject を語彙ヒントに
-   * 動的に足す版）は実装していない——store 分は LLM が自由記述で作った曖昧な値
-   * （例: `'sibling'`）になりがちで、それを汎用語彙として横流しすると無関係な話題の
-   * 主張にまで誤って使い回される汚染を実測で確認したため（`claim-key.ts` の
-   * `ClaimKeyOptions.knownSubjects` doc コメント、ADR 0334 決定3参照）。
+   * `knownPredicatesFromStore` と対になる `knownSubjectsFromStore`（store が自己蓄積した claim key subject を語彙ヒントに動的に足す版）は実装していない。
+   * store 分は LLM が自由記述で作った曖昧な値（例: `'sibling'`）になりがちで、汎用語彙として横流しすると無関係な話題の主張にまで誤って使い回されるため。
    *
-   * ⚠ **当初案は `knownSubjects` 省略時に `subjectCandidates`（Issue #608 項目②(b)）を
-   * 既定値として転用していたが、取り下げた**（ADR 0334 追記〔2026-09-26〕）——
-   * `claimKey.enabled: true` と `subjectCandidates` を既に併用している呼び出し側が、
-   * `knownSubjects` という新しい opt-in を一切選んでいないのに claim key プロンプト・
-   * カセット鍵が動いてしまい、「off のときのプロンプトは1バイトも変えない」に反する
-   * ため。この describe が検査するのは、`knownSubjects` を明示しない限り
-   * `subjectCandidates` の有無・中身がプロンプトに一切影響しないことである。
+   * この describe が検査するのは、`knownSubjects` を明示しない限り `subjectCandidates` の有無・中身がプロンプトに一切影響しないこと。
+   * `claimKey.enabled: true` と `subjectCandidates` を併用している呼び出し側が、新しい opt-in を何も選んでいないのにプロンプト・カセット鍵が動いてはならない。
    */
 
   it("knownSubjects も subjectCandidates も渡さなければ、system に既知の subject 候補一覧の文言が無い", async () => {
@@ -3500,8 +3191,6 @@ describe("observe: claimKey knownSubjects は subjectCandidates へ暗黙に転�
     await withCandidatesRuntime.observe(ctx, {
       kind: "utterance",
       text: "姉は福岡で働いています。",
-      // 既存で claimKey.enabled と subjectCandidates を併用している呼び出し側を模す
-      // ——knownSubjects は一切渡していない（この opt-in を選んでいない）。
       subjectCandidates: ["user", "姉", "同僚"],
       claimKey: { enabled: true },
     });
@@ -3639,7 +3328,6 @@ describe("observe: claimKey 検出（Issue #372、(B) 第2段。ADR 0185 決定2
       text: "好きな食べ物はラーメン",
       claimKey: { enabled: true, detectContested: true },
     });
-    // 1件目の時点では相手がいない ⟹ no_conflict。
     expect(first.contestedDetection).toEqual([
       {
         memoryId: first.memoryIds[0],
@@ -3668,7 +3356,6 @@ describe("observe: claimKey 検出（Issue #372、(B) 第2段。ADR 0185 決定2
     expect(secondMemory?.status).toBe("contested");
     expect(firstMemory?.contestedWithId).toBe(second.memoryIds[0]);
     expect(secondMemory?.contestedWithId).toBe(first.memoryIds[0]);
-    // ⛔ superseded へは一切進めない。
     expect(firstMemory?.status).not.toBe("superseded");
     expect(secondMemory?.status).not.toBe("superseded");
   });
@@ -3791,18 +3478,13 @@ describe("observe: claimKey 検出（Issue #372、(B) 第2段。ADR 0185 決定2
   });
 
   it("claim key の subject/predicate が空白だけ（LLM の壊れた出力）だと、無関係な Memory 同士が『空の鍵』で誤って contested にならない", async () => {
-    // `deriveClaimKeys` が返す subject/predicate が空白だけ（スキーマの `min(1)` は
-    // 通るが、`normalizeClaimKeyPart` の trim で空文字列に潰れる）だと、鍵が
-    // 取れなかったものとして扱われる（`claim-key.ts` の `deriveClaimKeys` 参照）。
-    // 内容がまったく無関係な2件のどちらも壊れた鍵を返した場合、直す前は両方が
-    // `{ subject: "", predicate: "" }` という同じ「空の鍵」に潰れて誤って
-    // 一致してしまっていた。
+    // `deriveClaimKeys` が返す subject/predicate が空白だけ（スキーマの `min(1)` は通るが、`normalizeClaimKeyPart` の trim で空文字列に潰れる）だと、
+    // 鍵が取れなかったものとして扱われる。さもないと、内容が無関係な2件が同じ「空の鍵」に潰れて誤って一致する。
     const llm = sequencedLlm([
       { memories: [{ content: "好きな食べ物はラーメン", provenanceKind: "stated" }] },
       { claims: [{ subject: " ", predicate: "  " }] },
       { memories: [{ content: "明日は晴れるらしい", provenanceKind: "stated" }] },
       { claims: [{ subject: "　", predicate: "　" }] }, // 全角スペース——直す前は両方とも
-      // { subject: "", predicate: "" } に潰れ、無関係などうしが誤って一致していた。
     ]);
     const { runtime, stores } = buildRuntime(llm);
     const first = await runtime.observe(ctx, {
@@ -3815,8 +3497,6 @@ describe("observe: claimKey 検出（Issue #372、(B) 第2段。ADR 0185 決定2
       text: "明日は晴れるらしい",
       claimKey: { enabled: true, detectContested: true },
     });
-    // 鍵が取れなかった（null）ので、detectClaimKeyContested は検出自体を試みない
-    // （`contestedDetection` に対応する要素が現れない）。
     expect(first.contestedDetection).toEqual([]);
     expect(second.contestedDetection).toEqual([]);
     const firstMemory = await stores.memoryStore.get(ctx, first.memoryIds[0]!);
@@ -3828,10 +3508,8 @@ describe("observe: claimKey 検出（Issue #372、(B) 第2段。ADR 0185 決定2
   });
 
   it("相手の active が2件以上（3件目以降）のときは markContested を呼ばず、根拠が memory_events に構造として残る", async () => {
-    // 1件目・2件目は detectContested を使わずに作る——2件ともペアにならないまま
-    // `active` で残り続ける（実運用では「後から opt-in を有効にした」「バッチ内の
-    // 複数候補が同じ鍵になった」等でも同じ状況になりうる）。3件目で初めて検出を
-    // 有効にすると、相手の active が2件（=3件目）ある状態に出会う。
+    // 1件目・2件目は detectContested を使わずに作る。2件ともペアにならないまま `active` で残り続ける。
+    // 3件目で初めて検出を有効にすると、相手の active が2件ある状態に出会う。
     const llm = sequencedLlm([
       { memories: [{ content: "好きな食べ物はラーメン", provenanceKind: "stated" }] },
       { claims: [{ subject: "user", predicate: "favorite_food" }] },
@@ -3851,7 +3529,6 @@ describe("observe: claimKey 検出（Issue #372、(B) 第2段。ADR 0185 決定2
       text: "好きな食べ物は寿司",
       claimKey: { enabled: true },
     });
-    // 検出を使っていないので、1件目・2件目はどちらも active のまま。
     expect((await stores.memoryStore.get(ctx, first.memoryIds[0]!))?.status).toBe("active");
     expect((await stores.memoryStore.get(ctx, second.memoryIds[0]!))?.status).toBe("active");
 
@@ -3869,7 +3546,6 @@ describe("observe: claimKey 検出（Issue #372、(B) 第2段。ADR 0185 決定2
       [first.memoryIds[0], second.memoryIds[0]].sort(),
     );
 
-    // markContested を呼んでいない ⟹ 3件目は active のまま、既存2件の状態も変わらない。
     const thirdMemory = await stores.memoryStore.get(ctx, third.memoryIds[0]!);
     expect(thirdMemory?.status).toBe("active");
     expect(thirdMemory?.contestedWithId ?? null).toBeNull();
@@ -3897,9 +3573,8 @@ describe("observe: claimKey 検出（Issue #372、(B) 第2段。ADR 0185 決定2
       { claims: [{ subject: "user", predicate: "favorite_food" }] },
     ]);
     const { runtime, stores } = buildRuntime(llm);
-    // `findActiveByClaimKey` を持たない adapter を模す（インスタンスへ `undefined` を
-    // 直接代入してプロトタイプの実装を覆う。`delete` はプロトタイプのメソッドには
-    // 効かないため使わない）。
+    // `findActiveByClaimKey` を持たない adapter を模す（インスタンスへ `undefined` を直接代入してプロトタイプの実装を覆う。
+    // `delete` はプロトタイプのメソッドには効かない）。
     // @ts-expect-error テスト用に任意メソッドを取り除く。
     stores.memoryStore.findActiveByClaimKey = undefined;
     const result = await runtime.observe(ctx, {

@@ -15,21 +15,7 @@ import {
   TEST_EMBEDDING_SPACE,
 } from "./test-db.js";
 
-/**
- * ADR 0436: `PostgresEventStore.append`・`PostgresVectorStore.upsert` は、記憶が `ctx.tenantId` の記憶であることを
- * 書く前に確かめる。`memory_events.memory_id`・`memory_embeddings_<space>.memory_id` の外部キーは `memories(id)` だけで
- * テナントを含まないので、検査が無いと別テナントの記憶 id を指す行が `ctx.tenantId` の行として書けた。
- *
- * この歯が縛るもの:
- * - 別テナント・実在しない uuid・uuid でない id は、**行を書かずに**「memory not found for tenant」で投げる
- *   （生 SQL で行数を数える。store 越しの list・search では、別テナントの行は見えない）。
- * - その結果、`core.eraseTenant` が `blocked_by_foreign_reference` で止められる経路が、store 経由では起きない。
- * - 自テナントの正しい記憶への append・upsert は通る（断りすぎていない）。upsert の上書き（ON CONFLICT）も通る。
- * - ADR 0436「引き受けた負債」に書いた、既に書かれた食い違う行を見つける SQL が、食い違い1行を数え、無ければ0行になる。
- *
- * 適合テスト（`describeEventStoreConformance`・`describeVectorStoreConformance`）にも同じ契約の it があるが、
- * store の口からは「行が書かれていない」ことまでは見えない。行の有無と eraseTenant はこのファイルだけが見る。
- */
+/** 適合テストにも同じ契約の it があるが、store の口からは「行が書かれていない」ことまでは見えない。行の有無（生 SQL で数える）と `eraseTenant` はこのファイルだけが見る。 */
 
 afterAll(async () => {
   await closeTestClient();
@@ -81,7 +67,6 @@ async function countRows(
 describe("PostgresEventStore.append・PostgresVectorStore.upsert のテナント検査（ADR 0436）", () => {
   it("別テナントの記憶への append・upsert は行を書かずに投げ、eraseTenant は止められない", async () => {
     const { pool, eventStore, vectorStore, deps, a } = await setup();
-    // tb の ctx で ta の記憶 id を指す（修正前は両方成功し、tb の行として書かれた）。
     await expect(eventStore.append(ctxB, newEvent(a.id))).rejects.toThrow(
       /PostgresEventStore: memory not found for tenant/,
     );
@@ -91,7 +76,6 @@ describe("PostgresEventStore.append・PostgresVectorStore.upsert のテナント
     expect(await countRows(pool, "memory_events", TB)).toBe(0);
     expect(await countRows(pool, SPACE_TABLE, TB)).toBe(0);
 
-    // 修正前は `{ kind: "blocked_by_foreign_reference", count: 1 }`（イベントの1件）になり、ta の記憶を消せなかった。
     const outcome = await eraseTenant(ctxA, deps, { confirmTenantId: TA, limit: 100_000 });
     expect(outcome.kind).toBe("executed");
     expect(await countRows(pool, "memories", TA)).toBe(0);
@@ -124,25 +108,19 @@ describe("PostgresEventStore.append・PostgresVectorStore.upsert のテナント
     const got = await vectorStore.getVectors(ctxA, TEST_EMBEDDING_SPACE, [a.id]);
     expect([...got.values()].map((v) => v.vector)).toEqual([[0, 1, 0]]);
 
-    // 大文字の uuid も、自テナントの同じ記憶として通る（入口で小文字にそろえる）。
     const upper = await eventStore.append(ctxA, newEvent(a.id.toUpperCase()));
     expect(upper.memoryId).toBe(a.id);
 
-    // memoryId が null のイベント（events_purged）は記憶を指さないので検査しない。
     const purged = await eventStore.append(ctxA, newEvent(null, "events_purged"));
     expect(purged.memoryId).toBeNull();
 
-    // 自テナントだけの行なので、eraseTenant は止まらない。
     const outcome = await eraseTenant(ctxA, deps, { confirmTenantId: TA, limit: 100_000 });
     expect(outcome.kind).toBe("executed");
     expect(await countRows(pool, "memories", TB)).toBe(1);
   });
 });
 
-/**
- * ADR 0436「引き受けた負債」に書いた検出 SQL（読み取りだけ）。ADR の文面と同じものをここで実行する。
- * `${table}` は `memory_embeddings_<space>` の表名。
- */
+/** 既に書かれた食い違う行を見つける検出 SQL（読み取りだけ）。`${table}` は `memory_embeddings_<space>` の表名。 */
 const DETECT_EVENTS_SQL = `
 SELECT e.id, e.tenant_id, e.memory_id, m.tenant_id AS memory_tenant_id
 FROM memory_events e
@@ -154,8 +132,6 @@ FROM ${table} e
 JOIN memories m ON m.id = e.memory_id
 WHERE e.tenant_id <> m.tenant_id`;
 
-// ADR 0475: `PostgresEventStore.append` は uuid を小文字にそろえて比べる（基準）。大文字の自テナントの記憶は通り、小文字で読み戻る。
-// 大文字の別テナントの記憶は、大文字でも断る。3実装（InMemory・Fake）はこれに揃える。
 describe("PostgresEventStore.append は event.memoryId の大文字小文字を区別しない（ADR 0475）", () => {
   it("大文字の自テナントの記憶は通り（小文字で読み戻る）、大文字の別テナントは断る", async () => {
     const { pool, eventStore, a, b } = await setup();
@@ -177,7 +153,7 @@ describe("ADR 0436 の検出 SQL（既に書かれた、テナントの食い違
     expect((await pool.query(DETECT_EVENTS_SQL)).rowCount).toBe(0);
     expect((await pool.query(detectEmbeddingsSql(SPACE_TABLE))).rowCount).toBe(0);
 
-    // 修正前の実装が書いた行を、生 SQL で作る（外部キーはテナントを見ないので、スキーマとしては作れる）。
+    // 食い違う行は生 SQL で作る（外部キーはテナントを見ないので、スキーマとしては作れる）。
     await pool.query(
       `INSERT INTO memory_events (id, tenant_id, memory_id, kind, at, actor, meta)
        VALUES (gen_random_uuid(), $1, $2, 'updated', now(), '{"type":"system"}'::jsonb, '{}'::jsonb)`,

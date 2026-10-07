@@ -4,14 +4,8 @@ import type { LLMProvider } from "../interfaces/llm-provider.js";
 import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * 利用者へ投げ直す例外の message から、SQL に付けた値（params）を落とす（ADR 0423。ADR 0363・Issue #1064 と
- * 同じ作法）。SQL の文・`kind`・`cause` は残す。
- *
- * drizzle の `DrizzleQueryError` は `Failed query: <SQL>\nparams: <値>` という message を作る。
- * DB を使わず、その形の例外を fake の store に投げさせる（本物の drizzle での形は `packages/postgres`
- * の歯が見ている）。
- */
+// DB を使わず、drizzle の `DrizzleQueryError` と同じ形（message が `Failed query: <SQL>\nparams: <値>`）の例外を
+// fake の store に投げさせる（本物の drizzle での形は `packages/postgres` の歯が見ている）。
 
 const SECRET = "利用者の本文-SECRET-0123";
 

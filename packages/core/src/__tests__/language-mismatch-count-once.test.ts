@@ -5,12 +5,6 @@ import * as languageMismatch from "../language-mismatch.js";
 import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * ADR 0507: 言語の事後検査の、観測側の数え直しを「観測ごとに1回」へ畳んだ直しの歯。
- * (a) 振る舞いが変わらない: 畳む前の実装（下の `referenceDetect`。写し）と、色々な観測×候補で結果が一致する。
- * (b) 畳めている: 観測の数え関数が、1回の observe で候補の数によらず1回しか呼ばれない（呼び出し回数。時間は見ない）。
- */
-
 const profileSpy = vi.hoisted(() => ({ calls: 0 }));
 vi.mock("../language-mismatch.js", async (importOriginal) => {
   const actual = await importOriginal<typeof languageMismatch>();
@@ -23,7 +17,7 @@ vi.mock("../language-mismatch.js", async (importOriginal) => {
   };
 });
 
-// ---- 参照実装: 畳む前の `detectLanguageMismatch`（ADR 0490 の時点）の写し ----
+// ---- 参照実装: 畳む前の `detectLanguageMismatch` の写し ----
 const CJK = /[\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Han}]/gu;
 const LATIN = /(?=\p{L})\p{Script=Latin}/gu;
 const LETTER = /\p{L}/gu;

@@ -15,21 +15,9 @@ import {
 } from "./test-db.js";
 
 /**
- * `PostgresOutboxStore.fail` は、`error` に NUL（U+0000）が含まれていても終端の失敗を
- * 書ける。
- *
- * Postgres の `text` は NUL を保存できない。以前は `last_error = $1` の UPDATE そのものが
- * 失敗し、`fail()` が例外を投げていた。`tick()` はその例外を外へ投げるので、
- * - `tick()` がその場で打ち切られ、同じ batch の後ろのジョブが処理されない、
- * - 失敗したジョブは claim されたまま終端に落ちず、リースが切れるたびに再び claim されて
- *   同じ所で落ちる（`Runtime.tick` の doc「黙って何も起きないまま lease が切れる形には
- *   しない」と食い違う）。
- *
- * 実際に起きる経路: LLM の抽出結果の本文に NUL が入ると、`memories` への INSERT が失敗する。
- * drizzle のエラー文は params（その本文）をそのまま含み、`tick()` はそれを `lastError` に
- * 載せる（Issue #969 の `describeJobFailure`。params は増やしも減らしもしない）。
- * ⟹ `lastError` に NUL が入る。
- *
+ * Postgres の `text` は NUL を保存できないので、`last_error = $1` の UPDATE そのものが失敗すると、`fail()` が例外を投げ、`tick()` がその場で打ち切られて同じ batch の後ろのジョブが処理されず、
+ * 失敗したジョブは claim されたまま終端に落ちず、リースが切れるたびに再び claim されて同じ所で落ちる。
+ * 実際に起きる経路: LLM の抽出結果の本文に NUL が入ると `memories` への INSERT が失敗し、drizzle のエラー文は params（その本文）をそのまま含み、`tick()` はそれを `lastError` に載せる。
  * NUL は、目に見える6文字の `\u0000` に置き換えて書く（黙って消さない）。
  */
 
@@ -82,7 +70,6 @@ describe("PostgresOutboxStore.fail — error に NUL が含まれていても終
       complete: async () => {
         throw new Error("not used");
       },
-      // 本物の provider と同じく schema を通してから返す（NUL は schema を通る）。
       completeStructured: async (_ctx, req) =>
         req.schema.parse({ memories: [{ content: "壊れた\u0000本文", provenanceKind: "stated" }] }),
     };
@@ -105,7 +92,6 @@ describe("PostgresOutboxStore.fail — error に NUL が含まれていても終
     const first = await runtime.tick(CTX, { kinds: ["extract"], leaseMs: 1 });
     expect(first).toEqual({ processed: 0, failed: 1, unsupported: [], leaseConflicts: [] });
 
-    // 終端に落ちているので、リースが切れた後でも再び claim されない。
     const again = await outboxStore.claimBatch(CTX, {
       kinds: ["extract"],
       limit: 10,

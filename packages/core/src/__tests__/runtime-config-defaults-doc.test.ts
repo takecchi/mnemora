@@ -8,11 +8,8 @@ import { ProvenanceSchema } from "../provenance.js";
 import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * `RuntimeConfig` の欄を省いたときの既定値が、`runtime.ts` の TSDoc に書かれた値と一致することを縛る。
- * 既定の定数は公開していないので、**doc の値は `runtime.ts` の TSDoc を読んで**、**実装の値は config を省いた
- * runtime の振る舞いから**、どちらも実行時に取って突き合わせる。どちらか片方だけを直すと赤くなる。
- */
+// 既定の定数は公開していないので、doc の値は `runtime.ts` の TSDoc を読んで、実装の値は config を省いた runtime の振る舞いから、
+// どちらも実行時に取って突き合わせる。どちらか片方だけを直すと赤くなる。
 
 const RUNTIME_SOURCE = readFileSync(
   fileURLToPath(new URL("../runtime.ts", import.meta.url)),

@@ -7,30 +7,10 @@ import type { MemoryStatus, NewMemory } from "../memory.js";
 import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * `runtime.restoreArchived`（Issue #195、[ADR 0122](../../../../docs/decisions/0122-restore-archived-memory.md)）の歯。
- *
- * 設計の要点（`runtime.ts` の `RestoreArchivedOutcome`/`restoreArchived` の doc コメント参照）:
- * - `archived` → `active` の明示的な復帰のみ。`MemoryStore` に新しい任意メソッドを足していない
- *   ——既存の必須メソッド `updateStatusWithEvent`（ADR 0031）で表現できる compare-and-swap。
- * - `memory_events` へ `kind: 'restored'`（ADR 0122 が `MemoryEventKind` へ足した新しい値）を
- *   同一トランザクションで積む。
- * - 冪等寄りの設計: 既に `archived` でない対象は書き込みをせず `status_not_archived` を返す。
- * - `recall()` 側は一切変更していない——歯②（下の「往復」節）で裏取りする。
- * - **⚠ 2026-09 訂正（マネージャー決定、Issue #196 / [ADR 0153](../../../../docs/decisions/0153-recall-decay-floor-gate.md)）:
- *   `decay_floor_at` は動かす。** ADR 0122 の当初決定（復帰の直後に `sweepArchive` を
- *   同じ `now` で呼べば再び archived になりうる、というドキュメント化した既知の相互作用）は
- *   ADR 0153 が覆した——`restoreArchived` は `status` の復帰に続けて `reinforce` も呼ぶ。
- *   下の「往復」節の最後の歯がこの新しい挙動（再び archived にならないこと）を検査する。
- *
- * `@mnemora/testkit` には依存しない（`forget.test.ts` と同じ理由。`runtime-fakes.ts` 冒頭の
- * コメント参照）。
- */
-
 const ctx: Ctx = { tenantId: "tenant-1" };
 const NOW = new Date("2026-06-01T00:00:00.000Z");
-// 作成時刻は最初の強化より前に置く——reinforce は起点（lastReinforcedAt ?? recordedAt）より新しい at だけを
-// 書く（Issue #1093）ので、作成と同じミリ秒の強化は書かれない。
+// 作成時刻は最初の強化より前に置く: reinforce は起点（lastReinforcedAt ?? recordedAt）より新しい at だけを
+// 書くので、作成と同じミリ秒の強化は書かれない。
 const RECORDED_AT = new Date(NOW.getTime() - 24 * 60 * 60 * 1000);
 
 function newMemory(overrides: Partial<NewMemory> = {}): NewMemory {
@@ -272,9 +252,8 @@ describe("runtime.restoreArchived — reason / actor", () => {
 
 describe("runtime.restoreArchived — 並行（updateStatusWithEvent が MemoryStatusConflictError を投げる）", () => {
   /**
-   * `getMany` で読んだ後、実際に `updateStatusWithEvent` を撃つまでの間に別の書き込みが
-   * 割り込んだ状況を、既存のテスト用フック `FakeMemoryStore.beforeUpdateStatus`
-   * （`forget.test.ts`・`runtime.test.ts` の TOCTOU の歯と同じもの）で再現する。
+   * `getMany` で読んだ後、`updateStatusWithEvent` を撃つまでの間に別の書き込みが割り込んだ状況を、
+   * テスト用フック `FakeMemoryStore.beforeUpdateStatus` で再現する。
    */
   it("再読すると active になっている（別の呼び出しが先に復帰させていた）⟹ status_not_archived(status: 'active')", async () => {
     const { runtime, stores } = buildRuntime();
@@ -379,8 +358,7 @@ describe("runtime.restoreArchived — reinforce が失敗しても status の復
 
     const result = await runtime.restoreArchived(ctx, { memoryId: memory.id });
 
-    // 🔴 status の復帰は既に成功しているので kind は "restored" のまま——
-    // reinforce の失敗で "failed" に落ちない（マネージャー決定の核）。
+    // status の復帰は既に成功しているので kind は "restored" のまま。reinforce の失敗で "failed" に落ちない。
     expect(result.outcomes).toEqual([
       {
         memoryId: memory.id,
@@ -390,7 +368,6 @@ describe("runtime.restoreArchived — reinforce が失敗しても status の復
       },
     ]);
 
-    // status の書き込みそのものは reinforce の失敗と無関係に成立している。
     const stored = await stores.memoryStore.get(ctx, memory.id);
     expect(stored?.status).toBe("active");
   });
@@ -423,15 +400,6 @@ describe("runtime.restoreArchived — reinforce が失敗しても status の復
 });
 
 describe("runtime.restoreArchived — 往復（sweepArchive → archived → restoreArchived → recall、ADR 0114/ADR 0122）", () => {
-  /**
-   * 🔴 この歯が「往復」そのものである（オーナー側条件3）。片道（archived にするだけ、
-   * または active に戻すだけ）ではなく、掃引で archived になったものが実際に
-   * restoreArchived で戻り、`recall()` に再び現れることを1本で確認する。
-   *
-   * 同時に `docs/recall.md` §5 の被覆不変条件（`index.totalInScope` と `groups` の総和が
-   * 一致する）が、この往復の前後で崩れていないことも見る——`recall-runtime.ts` を
-   * 一切変更していないので、崩れようがないはずだが、それを主張ではなく実測で示す。
-   */
   it("sweepArchive で archived になった Memory は restoreArchived で active に戻り、recall() に再び現れる", async () => {
     const { runtime, stores } = buildRuntime();
     const memory = await stores.memoryStore.createMemory(
@@ -444,20 +412,15 @@ describe("runtime.restoreArchived — 往復（sweepArchive → archived → res
     );
     await stores.vectorStore.upsert(ctx, stores.embeddingProvider.space, memory.id, [1, 0]);
 
-    // ⚠ 2026-09（ADR 0153・Issue #196）追記: このフィクスチャは `sweepArchive` の
-    // 選定条件（decayFloorAt <= now）を満たすために意図的に「既に減衰しきっている」
-    // 状態で作る——この describe が検査したい対象は `status` の往復
-    // （active → archived → active）であって、忘却ゲートではない。**ゲートは既定で
-    // 有効**なので、ここで `includeFullyDecayed: true` を渡さないと、忘却ゲートに
-    // 阻まれて往復の「前」（0番）から既にこの Memory が現れず、テストの前提が壊れる。
+    // このフィクスチャは `sweepArchive` の選定条件（decayFloorAt <= now）を満たすために意図的に「既に減衰しきっている」状態で作る。
+    // 検査したいのは `status` の往復であって忘却ゲートではない。ゲートは既定で有効なので、`includeFullyDecayed: true` を
+    // 渡さないと、往復の前（0番）から既にこの Memory が現れず、テストの前提が壊れる。
     const recallOpts = { vector: [1, 0], includeFullyDecayed: true };
 
-    // 0. 往復の前: recall に出る。totalInScope はこの1件を含む。
     const before = await runtime.recall(ctx, recallOpts);
     expect(before.memories.map((m) => m.memoryId)).toContain(memory.id);
     const totalInScopeBefore = before.index.totalInScope;
 
-    // 1. 掃引（ADR 0114）。
     const swept = await runtime.sweepArchive(ctx, { now: NOW, limit: 10 });
     expect(swept).toEqual({
       supported: true,
@@ -467,7 +430,6 @@ describe("runtime.restoreArchived — 往復（sweepArchive → archived → res
     const afterSweep = await stores.memoryStore.get(ctx, memory.id);
     expect(afterSweep?.status).toBe("archived");
 
-    // 2. recall から消え、archived として filtered に計上され、totalInScope が1件分減る。
     const duringArchive = await runtime.recall(ctx, recallOpts);
     expect(duringArchive.memories.map((m) => m.memoryId)).not.toContain(memory.id);
     expect(duringArchive.omitted).toContainEqual({
@@ -479,7 +441,6 @@ describe("runtime.restoreArchived — 往復（sweepArchive → archived → res
     });
     expect(duringArchive.index.totalInScope).toBe(totalInScopeBefore - 1);
 
-    // 3. 明示的に呼び戻す（ADR 0122、本 PR の主題）。
     const restored = await runtime.restoreArchived(ctx, { memoryId: memory.id });
     expect(restored.outcomes).toEqual([
       { memoryId: memory.id, kind: "restored", previousStatus: "archived" },
@@ -488,10 +449,6 @@ describe("runtime.restoreArchived — 往復（sweepArchive → archived → res
     const afterRestore = await stores.memoryStore.get(ctx, memory.id);
     expect(afterRestore?.status).toBe("active");
 
-    // 4. recall() に戻り、archived の filtered 計上が消え、totalInScope が元に戻る
-    // （被覆不変条件: groups の総和 === totalInScope は、recall-runtime.ts を一切
-    // 変更していないため常に成り立つが、その値そのものが往復の前後で復元することを
-    // ここで実測する）。
     const after = await runtime.recall(ctx, recallOpts);
     expect(after.memories.map((m) => m.memoryId)).toContain(memory.id);
     expect(after.omitted).not.toContainEqual(
@@ -501,10 +458,6 @@ describe("runtime.restoreArchived — 往復（sweepArchive → archived → res
   });
 
   it("⚠ 訂正済みの相互作用（ADR 0153・Issue #196）: 復帰は reinforce も行うため、同じ now で sweepArchive をもう一度呼んでも再び archived にならない", async () => {
-    // この歯はかつて逆のことを検査していた（ADR 0122 の当初決定「decay_floor_at は
-    // 動かさない」の下では、同じ now での2回目の sweepArchive が即座に再び archived に
-    // していた）。ADR 0153 がその決定を覆したので、期待値も逆になる——「動かなくなった」
-    // のではなく「動くようになった」ことを固定する。
     const { runtime, stores } = buildRuntime();
     const memory = await stores.memoryStore.createMemory(
       ctx,
@@ -516,18 +469,14 @@ describe("runtime.restoreArchived — 往復（sweepArchive → archived → res
     const betweenSweeps = await stores.memoryStore.get(ctx, memory.id);
     expect(betweenSweeps?.status).toBe("active");
 
-    // reinforce が成功したこと自体を outcome から確認する（reinforceError が無いこと）。
     expect(restoreResult.outcomes).toEqual([
       { memoryId: memory.id, kind: "restored", previousStatus: "archived" },
     ]);
-    // decayFloorAt が「いま」より先へ動いたこと（reinforce が実際に効いたことの直接証拠）。
     expect(betweenSweeps?.decayFloorAt.getTime()).toBeGreaterThan(NOW.getTime());
 
     const secondSweep = await runtime.sweepArchive(ctx, { now: NOW, limit: 10 });
 
-    // 🔴 ADR 0153 が変えた点そのもの: 以前はここで [memory.id] を返し、即座に再び
-    // archived にしていた。reinforce 込みの復帰は decayFloorAt を「いま」より先へ
-    // 動かすので、同じ now では二度と sweepArchive の対象にならない。
+    // reinforce 込みの復帰は decayFloorAt を「いま」より先へ動かすので、同じ now では二度と sweepArchive の対象にならない。
     expect(secondSweep.archived.map((a) => a.memoryId)).toEqual([]);
     const afterSecondSweep = await stores.memoryStore.get(ctx, memory.id);
     expect(afterSecondSweep?.status).toBe("active");
@@ -545,15 +494,12 @@ describe("runtime.restoreArchived — 往復（sweepArchive → archived → res
     );
     await stores.vectorStore.upsert(ctx, stores.embeddingProvider.space, memory.id, [1, 0]);
 
-    // 段0（復帰前）: 既定（忘却ゲート有効）では返らない——これは ADR 0153 が意図した
-    // 挙動であり、includeFullyDecayed:true が要る（buildRuntime の他の歯が検査済み）。
+    // 段0（復帰前）: 既定（忘却ゲート有効）では返らないので、includeFullyDecayed:true が要る。
     const before = await runtime.recall(ctx, { vector: [1, 0] });
     expect(before.memories.map((m) => m.memoryId)).not.toContain(memory.id);
 
     await runtime.sweepArchive(ctx, { now: NOW, limit: 10 });
 
-    // 段1（archived 中）: 既定でも includeFullyDecayed:true でも返らない
-    // （status ゲートで落ちる。これは ADR 0153 と無関係）。
     const duringArchive = await runtime.recall(ctx, {
       vector: [1, 0],
       includeFullyDecayed: true,
@@ -562,19 +508,15 @@ describe("runtime.restoreArchived — 往復（sweepArchive → archived → res
 
     await runtime.restoreArchived(ctx, { memoryId: memory.id });
 
-    // 段2（復帰後）: 🔴 includeFullyDecayed を渡していないのに現れる。これが
-    // 「reinforce を挟んだことで decayFloorAt が先へ進んだ」ことの、recall() 経由での
-    // 直接証拠である——この歯の非対称（復帰前は opt-out が要るが、復帰後は要らない）
-    // そのものが、今回の修正が効いていることの証拠になる（マネージャー指示）。
+    // 段2（復帰後）: includeFullyDecayed を渡していないのに現れる。これが「reinforce を挟んだことで decayFloorAt が先へ進んだ」
+    // ことの、recall() 経由での直接証拠になる。
     const after = await runtime.recall(ctx, { vector: [1, 0] });
     expect(after.memories.map((m) => m.memoryId)).toContain(memory.id);
   });
 });
 
 describe("runtime.restoreArchived — CAS が破れた後の再読そのものが失敗する", () => {
-  /**
-   * `forget.test.ts` の同名の describe と同じ理由（「例外はこのメソッドの外へは投げない」）。
-   */
+  /** `forget.test.ts` の同名の describe と同じ理由（例外はこのメソッドの外へは投げない）。 */
   it("2件目の再読で get が投げても [restored, failed, not_attempted]・例外は伝播しない", async () => {
     const { runtime, stores } = buildRuntime();
     const m1 = await stores.memoryStore.createMemory(ctx, newMemory({ status: "archived" }));
@@ -614,8 +556,8 @@ describe("runtime.restoreArchived — CAS が破れた後の再読そのもの�
 
 describe("runtime.restoreArchived — ループ前の読みが失敗する（Issue #964）", () => {
   /**
-   * `forget.test.ts` の同名の describe と同じ理由。`restoreArchived` はループ前に
-   * `getMany` に加えて活動時計（`getDecayClock`）も読む——どちらの失敗も同じ打ち切りに落とす。
+   * `forget.test.ts` の同名の describe と同じ理由。`restoreArchived` はループ前に `getMany` に加えて活動時計（`getDecayClock`）も読む。
+   * どちらの失敗も同じ打ち切りに落とす。
    */
   it("getMany が投げても [failed, not_attempted, not_attempted]・例外は伝播せず・書き込み0件", async () => {
     const { runtime, stores } = buildRuntime();

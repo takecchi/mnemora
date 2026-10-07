@@ -4,12 +4,6 @@ import {
   isMemoryStatusConflictError,
 } from "../interfaces/memory-store.js";
 
-/**
- * `MemoryStatusConflictError` の文面。どの口（`updateStatus`・`updateStatusWithEvent`・
- * `markContestedPair` など）から投げても同じ文面になるので、特定の口の名前を名乗らない。
- * 文面に載せるのは「何が・どの記憶で・期待と実際」までで、直し方（読み直して判断し直す）も書く。
- * 例外の種類（`name`・`kind`・`memoryId`・`expectedStatus`・`observedStatus`）は文面とは別に守る。
- */
 describe("MemoryStatusConflictError の文面と種類", () => {
   it("どの口から投げても同じ名乗りで、特定の口（updateStatus）の名前を名乗らない", () => {
     const error = new MemoryStatusConflictError("m-1", "archived", "active");

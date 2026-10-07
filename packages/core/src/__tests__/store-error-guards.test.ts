@@ -34,10 +34,8 @@ import {
   foreignRecallOutputValidation,
 } from "./foreign-realm-errors.js";
 
-/**
- * ADR 0418: store 例外は `kind`（値）を持ち、判定関数は「`kind`、無ければ `name`」で見る。
- * 実処理への効き（tick / restoreArchived）は `foreign-realm-store-errors.test.ts` が見る。
- */
+// store 例外は `kind`（値）を持ち、判定関数は「`kind`、無ければ `name`」で見る。
+// 実処理への効き（tick / restoreArchived）は `foreign-realm-store-errors.test.ts` が見る。
 
 const cases = [
   {
@@ -64,7 +62,6 @@ const cases = [
     guard: isSourceMemoryForgottenError,
     make: () => new SourceMemoryForgottenError("createMemoryWithOutbox", ["m"]),
   },
-  // ADR 0420: superseded・全件 CAS 弾かれの打ち切り。
   {
     name: "SourceMemoryStatusChangedError",
     kind: "source_memory_status_changed",
@@ -80,7 +77,6 @@ const cases = [
     guard: isMemoryPurgeConflictError,
     make: () => new MemoryPurgeConflictError("m", "active", null),
   },
-  // ADR 0418 追記（2026-09-30）: runtime が instanceof で分岐していなかった2クラス。
   {
     name: "ContestedWithoutCompanionError",
     kind: "contested_without_companion",
@@ -93,14 +89,12 @@ const cases = [
     guard: isRecallOutputValidationError,
     make: () => new RecallOutputValidationError([], "r"),
   },
-  // ADR 0433 決定3: 未登録の埋め込み空間。
   {
     name: "EmbeddingSpaceNotRegisteredError",
     kind: "embedding_space_not_registered",
     guard: isEmbeddingSpaceNotRegisteredError,
     make: () => new EmbeddingSpaceNotRegisteredError({ provider: "p", model: "m", dimensions: 3 }),
   },
-  // ADR 0435: claim key の索引の上限。
   {
     name: "ClaimKeyIndexLimitError",
     kind: "claim_key_index_limit",

@@ -21,16 +21,7 @@ import {
   TEST_EMBEDDING_SPACE,
 } from "./test-db.js";
 
-/**
- * 北極星「目指す姿」の項目1（言ったことを、次の日も覚えている）を名指しで縛る（Issue #387、
- * `docs/north-star-paths.md` の項目1）。振る舞いは変えていない。Postgres と testkit の fixture で同じ。
- *
- * 注入した時計で `observe` し、時計を1日より先へ進めてから `recall` しても、その記憶が返る。
- * テナント設定は既定のまま（壁時計・既定の半減期）で、`includeFullyDecayed` も渡さない。
- *
- * 陽性対照として、同じ時計を減衰の床より先へ進めると `filtered(decayed)` で落ちることも見る
- * ——注入した時計が recall の減衰ゲートまで届いていなければ、1日後に返るのは当たり前だからである。
- */
+/** 陽性対照として、同じ時計を減衰の床より先へ進めると `filtered(decayed)` で落ちることも見る。注入した時計が recall の減衰ゲートまで届いていなければ、1日後に返るのは当たり前だから。 */
 
 const llm: LLMProvider = {
   complete: async () => ({ content: "unused" }),
@@ -86,11 +77,7 @@ const ctx: Ctx = { tenantId: "north-star-item1-next-day" };
 const HOUR_MS = 3_600_000;
 const DAY_MS = 24 * HOUR_MS;
 
-/**
- * 手で進める時計。壁時計より少し先から始める（歴史的な理由で残している。今は outbox の
- * `available_at` も注入した時計に従うので、壁時計より過去でも embed ジョブは取れる。ADR 0559、
- * `injected-clock-reach.postgres.test.ts` の 2.）。
- */
+/** 手で進める時計。 */
 function manualClock() {
   let t = Date.now() + 1000;
   return {

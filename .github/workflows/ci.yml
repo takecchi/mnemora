@@ -4,9 +4,18 @@ on:
   push:
     branches: [main]
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+# 同じ PR の実行は後勝ちにする(新しい push が来たら古い実行を取り消す)。main への push は
+# 走っている実行を切らず、待ちは GitHub が群ごとに最新の1本だけ残す。runner の同時ジョブ数は
+# アカウント(takecchi)全体で共有なので、取り消さない古い実行は alteroid 側の CI まで待たせる。
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'push' && github.ref || github.head_ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name != 'push' }}
 
 jobs:
   build:
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     name: typecheck / lint / test / build
     runs-on: ubuntu-latest
     steps:
@@ -58,7 +67,7 @@ jobs:
       - name: "publish 梱包の門（pack:check）を毎PRのCIでも走らせる（Issue #241）"
         # このジョブに足す（独立ジョブにしない）理由: pack:check は各 publish
         # 対象パッケージの `prepack`（`tsc -p tsconfig.build.json`）を経由して
-        # 自分で dist を作り直す（scripts/check-publish-pack.mjs 冒頭のコメント）ため、
+        # 自分で dist を作り直す（`pnpm pack` が `prepack` を走らせる）ため、
         # 直前の Build ステップの成果物に依存しない。だから独立ジョブにしても
         # チェックアウト・install・build を丸ごとやり直すだけで意味が薄く、
         # このジョブの末尾に1ステップ足すほうが CI 時間の増分が小さい。
@@ -85,6 +94,7 @@ jobs:
         run: node scripts/public-api-breaking-diff.mjs >> "$GITHUB_STEP_SUMMARY"
 
   postgres:
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     name: packages/postgres (本物の Postgres + pgvector, server_encoding=${{ matrix.serverEncoding }})
     runs-on: ubuntu-latest
     # `fail-fast: false` を必ず付ける: SQL_ASCII 脚が落ちても UTF8 脚の証拠(artifact/
@@ -186,7 +196,7 @@ jobs:
     needs: postgres
     # 🔴 `postgres` ジョブ(matrix)の一部の脚が落ちても、このジョブは必ず走る——
     # 「揃って別々に走ったか」を測れるだけの artifact は、失敗した run にも残りうる
-    if: always()
+    if: always() && (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -220,6 +230,7 @@ jobs:
             >> "$GITHUB_STEP_SUMMARY"
 
   bullmq:
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     name: "packages/bullmq（本物の Postgres + 本物の Redis）"
     runs-on: ubuntu-latest
     services:
@@ -285,6 +296,7 @@ jobs:
         run: pnpm --filter @mnemora/bullmq run test:redis
 
   cjs-require-smoke:
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     # 既存の `scripts/check-consumer-install.mjs`（ADR 0346）は同じ約束をより広い範囲
     # （型・ESM 経路・入口一覧の突き合わせも）で確かめるが、npm registry から約550MB を
     # 取り直し・ロックファイル無しで依存の範囲を解決するため、既定の CI には入れていない
@@ -315,6 +327,7 @@ jobs:
         run: pnpm run check:cjs-require-smoke
 
   example-chat:
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     # 🔴🔴 ⛔ 直上の `name:` は変えない —— この文字列は branch protection の
     # required status check の*文脈名*そのものである【実測、2026-09-23】:
     #   gh api repos/takecchi/mnemora/branches/main/protection/required_status_checks
@@ -552,6 +565,7 @@ jobs:
           if-no-files-found: ignore
 
   root-gate-db-stage:
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     name: ルートの test 門の DB 段（DATABASE_URL 在りで順方向に実測、ADR 0015）
     runs-on: ubuntu-latest
     # `pnpm run test` 全体ではなく DB 段だけを直接呼ぶ: 型検査・lint・format・
@@ -699,7 +713,7 @@ jobs:
     # `compare-embedding-output-fingerprints.mjs` が「比較できなかった」と
     # 名乗るだけであり(一致とも不一致とも言わない)、それ自体はこのジョブを
     # 落とさない(⛔ 門ではない)。
-    if: always()
+    if: always() && (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -723,6 +737,7 @@ jobs:
             >> "$GITHUB_STEP_SUMMARY"
 
   retrieval-quality:
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     name: 想起の質を実 embedding（記録の再生）で実測し、値を残す（ADR 0088）
     runs-on: ubuntu-latest
     # ⛔ **このジョブは門ではない。**基準値と違っても落ちない。
@@ -812,6 +827,7 @@ jobs:
           if-no-files-found: ignore
 
   retrieval-rank-listing:
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     name: "固定回帰ケースと同じ条件で probe ごとの順位を一覧にする（Issue #572、ADR 0276 追記。⛔ 門ではない）"
     runs-on: ubuntu-latest
     # ⛔ **このジョブは門ではない。**
@@ -881,6 +897,7 @@ jobs:
           if-no-files-found: ignore
 
   identifier-probes:
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     name: 識別子・固有名詞 probe（#106）を @mnemora/local-embedding で実測し、値を残す
     runs-on: ubuntu-latest
     # ⚠ **なぜ閾値の門にしないか**: ADR 0088 が `retrieval-quality` について
@@ -1023,6 +1040,7 @@ jobs:
           if-no-files-found: ignore
 
   numeral-token-probes:
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     name: "単独トークンの数詞・記号索引 probe（ADR 0135 / Issue #109）を @mnemora/local-embedding で実測し、値を残す"
     runs-on: ubuntu-latest
     # ⚠ **なぜ閾値の門にしないか**: `identifier-probes` と同じ理由——この bench の
@@ -1137,6 +1155,7 @@ jobs:
           if-no-files-found: ignore
 
   correction-candidate-probes:
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     name: "訂正の相手探し（Issue #369 (C)、ADR 0232/0291/0321）を @mnemora/local-embedding で実測し、値を残す"
     runs-on: ubuntu-latest
     # ⚠ **なぜ閾値の門にしないか**: `identifier-probes`/`numeral-token-probes` と同じ理由
@@ -1234,6 +1253,7 @@ jobs:
           if-no-files-found: ignore
 
   association-probes:
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     name: "連想枠（ADR 0151 / Issue #291）が想起の質を動かすかを @mnemora/local-embedding で実測し、値を残す"
     runs-on: ubuntu-latest
     # 🔴 **このジョブは門ではない。**probe は12件(ブリッジ語の字種3カテゴリ×4件)であり、
@@ -1340,6 +1360,7 @@ jobs:
           if-no-files-found: ignore
 
   consolidation-cost:
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     name: "Runtime.consolidate() が「載る量」に効くかを実測し、値を残す（Issue #136）"
     runs-on: ubuntu-latest
     # ⚠ **なぜ閾値の門にしないか**: 標本は probe 7件・haystack由来の filler 群であり、
@@ -1447,6 +1468,7 @@ jobs:
           if-no-files-found: ignore
 
   archive-sweep-cost:
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     name: "掃引(Runtime.sweepArchive)が「載る量」/hit@k に効くかを実測し、値を残す（Issue #209）"
     runs-on: ubuntu-latest
     # ⚠ **なぜ閾値の門にしないか**: ADR 0088 §2 が retrieval 系を門にしない理由
@@ -1555,6 +1577,7 @@ jobs:
           if-no-files-found: ignore
 
   time-term:
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     name: "時間項(freshness/decay)が順位を動かすかを実測し、値を残す（ADR 0058 / Issue #217）"
     runs-on: ubuntu-latest
     # ⚠ **なぜ閾値の門にしないか**: 標本は probe 8件であり、ADR 0033 §3 の規律
@@ -1634,6 +1657,7 @@ jobs:
           if-no-files-found: ignore
 
   validity:
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     name: "validAt ゲート(Issue #202 第2弾)が候補の有無を動かすかを実測し、値を残す（Issue #280）"
     runs-on: ubuntu-latest
     # ⚠ **なぜ閾値の門にしないか**: 標本は probe 2件であり、ADR 0033 §3 の規律

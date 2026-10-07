@@ -3,6 +3,7 @@ import type { Ctx } from "../ctx.js";
 import type { NewMemory } from "../memory.js";
 import { createRuntime } from "../runtime.js";
 import { defaultDecayStrategy } from "../strategies/decay.js";
+import { createObservedMemory } from "./observed-memory.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
 const NOW = new Date("2026-06-01T00:00:00.000Z");
@@ -63,11 +64,15 @@ async function setup() {
     hashContent: (content: string) => `sha256(${content})`,
     clock: { now: () => NOW },
   });
-  const first = await stores.memoryStore.createMemory(ctx, newMemory("hash-1"));
+  const first = await createObservedMemory(stores.memoryStore, ctx, newMemory("hash-1"));
   await stores.vectorStore.upsert(ctx, stores.embeddingProvider.space, first.id, [1, 0]);
-  const second = await stores.memoryStore.createMemory(ctx, newMemory("hash-2"));
+  const second = await createObservedMemory(stores.memoryStore, ctx, newMemory("hash-2"));
   await stores.vectorStore.upsert(ctx, stores.embeddingProvider.space, second.id, [0.8, 0.6]);
-  await stores.memoryStore.createMemory(ctx, newMemory("hash-3", { embeddingStatus: "pending" }));
+  await createObservedMemory(
+    stores.memoryStore,
+    ctx,
+    newMemory("hash-3", { embeddingStatus: "pending" }),
+  );
   return { stores, runtime };
 }
 

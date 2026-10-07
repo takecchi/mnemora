@@ -2,12 +2,10 @@ import { describe, expect, it } from "vitest";
 import { defaultScoringStrategy } from "../strategies/scoring.js";
 
 /**
- * ADR 0474: `RecallQuery.tags` の数え方の、今の振る舞いを縛る歯（`docs/recall.md` §7、`RecallQuery.tags` の TSDoc）。
- *
- * `tagMatch = 1 + 0.1 × m`。`m` はクエリの `tags` の**要素ごと**に、記憶の `tags` に完全一致で含まれるかを
- * 数えた数で、**クエリ側の重複は重複のまま数える**。記憶側の重複は1回に数える。
- * これは「約束」ではなく今の振る舞いの記録である（重複を1つに数えるよう改めると、重複したクエリタグを渡している
- * 呼び出し側の順位が変わる）。変えるときは、この歯と ADR 0474 を一緒に見直すこと。
+ * `tagMatch = 1 + 0.1 × m`。`m` はクエリの `tags` の要素ごとに、記憶の `tags` に完全一致で含まれるかを数えた数で、
+ * クエリ側の重複は重複のまま数える。記憶側の重複は1回に数える。
+ * これは「約束」ではなく今の振る舞いの記録である（重複を1つに数えるよう改めると、重複したクエリタグを渡している呼び出し側の順位が変わる）。
+ * 変えるときは、この歯を意図して書き換えること。
  */
 function tagMatch(memoryTags: string[], queryTags: string[]): number {
   const recordedAt = new Date("2026-01-01T00:00:00.000Z");

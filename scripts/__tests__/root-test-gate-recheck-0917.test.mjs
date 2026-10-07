@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { gateExitCode, summarizeStages } from "../root-test-gate.mjs";
 import { spawnSyncWithDeadline } from "./spawn-with-deadline.mjs";
+import { isDraftOnlyJobIf } from "../ci-draft-skip-lib.mjs";
 
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
 const scriptsDir = join(repoRoot, "scripts");
@@ -203,12 +204,14 @@ describe("ci.yml の build ジョブの Test 段が、ルートの test 門を�
     expect(body.filter((l) => /^\s+if:/.test(l))).toEqual([]);
   });
 
-  it("R17: build ジョブ自体が continue-on-error・if を宣言しない（required の `typecheck / lint / test / build` を黄色にしない）", () => {
+  it("R17: build ジョブ自体が continue-on-error・if を宣言しない（required の `typecheck / lint / test / build` を黄色にしない。draft の PR でだけ飛ばす1行は除く）", () => {
     const job = code(jobLines("build"));
     const jobHeader = job.slice(
       0,
       job.findIndex((l) => /^ {4}steps:/.test(l)),
     );
-    expect(jobHeader.filter((l) => /^ {4}(continue-on-error|if):/.test(l))).toEqual([]);
+    expect(
+      jobHeader.filter((l) => /^ {4}(continue-on-error|if):/.test(l) && !isDraftOnlyJobIf(l)),
+    ).toEqual([]);
   });
 });

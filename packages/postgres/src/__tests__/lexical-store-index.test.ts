@@ -9,23 +9,9 @@ import { DEFAULT_MIGRATIONS_DIR } from "../migrate.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
 /**
- * 「対照」テストが `idx_memories_lexical` を作り直すための DDL。**マイグレーションファイル
- * から切り出して読む**——ここに DDL を書き写すと `migrations/0025_*.sql` を直したときに
- * この復元だけ古い定義のまま静かにずれる（`outbox-claim-lease-index.test.ts` の
- * `MIGRATION_0002_SQL` と同じ理由）。
- *
- * `idx_memories_lexical` は `migrations/0008_*.sql` が最初に作るが、
- * `migrations/0025_lexical_tsvector_fallback.sql`（Issue #1222）が `DROP INDEX` の後に
- * 新しい式（`mnemora_lexical_tsvector(content)`）で作り直す——`resetTestDatabase()` が
- * 全 migration を順に適用した後の実際の索引定義は 0025 のものである。**⟹ 0008 ではなく
- * 0025 の `CREATE INDEX` 文を切り出す**（0008 の文をそのまま流すと、既に `DROP INDEX`
- * 済みの古い式で索引を作ってしまい、以後 `PostgresLexicalStore.search` が実際に使う式
- * （0025 の式）とずれた索引を「対照」が残すことになる）。
- *
- * migration 0025 は `CREATE FUNCTION`（非冪等）・`DO`（`ALTER FUNCTION`）・
- * `DROP INDEX`・`CREATE INDEX` の4文を持つ——ファイル全体を流し直すと関数が既に
- * 存在してエラーになる（関数は「対照」テストでも落としていない）ため、
- * ファイル末尾の `CREATE INDEX ...` 文だけを切り出す。
+ * 「対照」テストが `idx_memories_lexical` を作り直すための DDL。マイグレーションファイルから切り出して読む（書き写すと、migration を直したときにこの復元だけ古い定義のまま静かにずれる）。
+ * `migrations/0025_*.sql` は `CREATE FUNCTION`（非冪等）を持つので、ファイル全体を流し直さず、末尾の `CREATE INDEX ...` 文だけを切り出す。
+ * 0008 の文は `DROP INDEX` 済みの古い式で索引を作ってしまい、`search` が実際に使う式（0025 の式）とずれるので使わない。
  */
 const MIGRATION_0025_SQL = readFileSync(
   join(DEFAULT_MIGRATIONS_DIR, "0025_lexical_tsvector_fallback.sql"),
@@ -36,40 +22,19 @@ const CREATE_INDEX_SQL = MIGRATION_0025_SQL.slice(
 );
 
 /**
- * `idx_memories_lexical`（`migrations/0008_memories_lexical_index.sql`）が
- * `PostgresLexicalStore.search`（`buildLexicalSearchSelect`、`../lexical-store.js`）の
- * 述語で実際に使われることの実測（ADR 0084、Issue #106）。
+ * 本体と同じ `SELECT` を `EXPLAIN` する（テスト側に述語を書き写さない）。
+ * `filter.status` に `['active', 'contested']` を明示して渡す。`idx_memories_lexical` は `WHERE status IN ('active', 'contested')` の部分索引で、クエリ側がこの2値だけに絞ってはじめて索引の述語を含意できる。
  *
- * **本体と同じ `SELECT` を `EXPLAIN` する**——テスト側に述語を書き写さない
- * （`memories-requeue-embed-index.test.ts` の `explainTargetSelect` と同じ理由・同じ形。
- * `buildLexicalSearchSelect` の doc コメント参照）。
- *
- * `filter.status` に `['active', 'contested']` を明示して渡す——`idx_memories_lexical` は
- * `WHERE status IN ('active', 'contested')` の部分索引であり、クエリ側がこの2値だけに
- * 絞ってはじめて索引の述語を含意できる（`filter.status` を渡さない/この2値以外を含む
- * 場合は、この部分索引だけでは正しさは変わらないが速さの保証は無い——
- * `interfaces/lexical-store.ts` の doc が言う「各フィールドを adapter が実際に適用する」
- * とは独立の話である）。
- *
- * ⚠ **この歯はプランナの選択を assert している**——版・統計・データ規模に依存する
- * （`recall-gate-index.test.ts` / `memories-requeue-embed-index.test.ts` と同じ留保）。
- * 赤くなったら疑うもの: (1) 自分の変更 (2) 実行中の Postgres のメジャー版
- * (3) ANALYZE / 統計情報。⟹ まず `origin/main` で対照を取ること。
+ * ⚠ この歯はプランナの選択を assert しており、版・統計・データ規模に依存する。赤くなったら、自分の変更の前に Postgres のメジャー版・ANALYZE・統計情報を疑い、まず `origin/main` で対照を取ること。
  */
 
 const TENANT = "lexical-index-tenant";
-// GIN の部分索引を Seq Scan より優先させるため、行数を多めに用意する
-// （recall-gate-index.test.ts / memories-requeue-embed-index.test.ts と同じ勘所）。
+// GIN の部分索引を Seq Scan より優先させるため、行数を多めに用意する。
 const ROW_COUNT = 20_000;
 
 /**
- * `memories` に大量行を投入する。定常状態に近づけるため、大半を `active`、少量を
- * `contested`（部分索引の対象に残るが稀）、残りを索引対象外の状態に散らす
- * （`memories-requeue-embed-index.test.ts` の `seedManyMemories` と同じ考え方）。
- *
- * クエリ語「obsidian shards」を含む行は 50 行に1行（2%）だけにする——語彙一致の選択性が
- * 高い状態（ほとんどの行は一致しない）を再現するため。含まない行は語彙が全く重ならない
- * 日本語の埋め文で埋める（正規化の対象にも実際になる、この歯が測りたい経路そのもの）。
+ * `memories` に大量行を投入する。大半を `active`、少量を `contested`、残りを索引対象外の状態に散らす。
+ * クエリ語「obsidian shards」を含む行は 50 行に1行（2%）だけにして、語彙一致の選択性が高い状態を再現する。含まない行は語彙が全く重ならない日本語の埋め文で埋める。
  */
 async function seedManyMemories(pool: Pool, tenant: string, rowCount: number): Promise<void> {
   await pool.query(
@@ -110,8 +75,7 @@ async function seedManyMemories(pool: Pool, tenant: string, rowCount: number): P
     `,
     [tenant, rowCount],
   );
-  // 統計情報が無い/古いと、プランナが誤った行数見積もりで Seq Scan や無関係な索引を選ぶ
-  // （recall-gate-index.test.ts / memories-requeue-embed-index.test.ts と同じ勘所）。
+  // 統計情報が無い/古いと、プランナが誤った行数見積もりで Seq Scan や無関係な索引を選ぶ。
   await pool.query("ANALYZE memories");
 }
 
@@ -125,7 +89,6 @@ async function explainSearch(): Promise<string> {
   const select = buildLexicalSearchSelect("obsidian shards", {
     limit: 50,
     filter: { tenantId: ctx.tenantId, status: ["active", "contested"] },
-    // `PostgresLexicalStore.search` は `ctx.tenantId` も渡す（Issue #1050）——同じ形で見る。
     ctxTenantId: ctx.tenantId,
   });
   const result = await db.execute(sql`EXPLAIN (FORMAT TEXT) ${select}`);
@@ -162,9 +125,7 @@ describe("idx_memories_lexical（ADR 0084、Issue #106）", () => {
       console.log(`=== EXPLAIN（idx_memories_lexical 無し、対照）===\n${plan}`);
       expect(plan).toMatch(/Seq Scan on memories/);
     } finally {
-      // マイグレーションファイルから切り出した DDL で元に戻す（CREATE_INDEX_SQL の doc
-      // 参照）——DROP したままだと同じプロセス内で後から走る他のテストまで索引の無い
-      // 状態を引きずる（`memories-requeue-embed-index.test.ts` と同じ理由）。
+      // マイグレーションファイルから切り出した DDL で元に戻す。DROP したままだと、同じプロセス内で後から走る他のテストまで索引の無い状態を引きずる。
       await pool.query(CREATE_INDEX_SQL);
     }
   }, 60_000);

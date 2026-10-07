@@ -8,15 +8,6 @@ import { createRuntime } from "../runtime.js";
 import { defaultDecayStrategy } from "../strategies/decay.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * LLM が空白だけの本文（`content`）を返したら、`""` と同じ LLM の失敗として扱う（Issue #1065）。
- *
- * 3スキーマ（抽出・consolidate・reflect）はどれも `content: z.string().min(1)` で、`""` は
- * スキーマ不一致＝LLM の失敗になる。LLM が返した空白だけの文字列を「無い」と同じに扱う前例
- * （digest の `resolveDigest`、claim key の `deriveClaimKeys`）に揃え、空白だけの本文も `""` と
- * 同じ経路へ落とす。本物の store を通す歯は `packages/postgres/src/__tests__/llm-blank-content.postgres.test.ts`。
- */
-
 const ctx: Ctx = { tenantId: "tenant-1" };
 const NOW = new Date("2026-06-01T00:00:00.000Z");
 /** 半角空白・全角空白（U+3000）・改行・タブ。`trim()` で空になる。 */

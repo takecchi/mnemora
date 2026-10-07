@@ -5,23 +5,7 @@ import { PostgresMemoryStore } from "../memory-store.js";
 import { PostgresLexicalStore } from "../lexical-store.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
-/**
- * `LexicalFilter` の各フィールドが `PostgresLexicalStore.search` で実際に効くことの実測
- * （ADR 0084、Issue #106）。`packages/postgres/src/__tests__/vector-search-subject.test.ts` /
- * `vector-search-provenance.test.ts`（`VectorFilter` の同種の歯）の作法に倣う——
- * ただし `LexicalStore` は ANN の「over-fetch の窓」という構造を持たないため、
- * ここでは crowd/small のような窓落ちの実演はせず、「絞ると消える/絞らないと残る」を
- * 直接確認する形にしている。
- *
- * `occurredAfter`/`occurredBefore` の境界は ADR 0039（両端包含、`>=`/`<=`、
- * `COALESCE(occurred_at, recorded_at)`）——`vector-store.ts` の period 押し下げと
- * 同じ境界であることを、同じ形の歯で確認する
- * （`packages/testkit/src/vector-store-conformance.ts` の同種の歯と同型）。
- *
- * 全ての歯で共通のクエリ語 "obsidian shards" を使い、`content` にその語を含めることで
- * 語彙一致自体は常に成立させ、`filter` だけが結果を左右するようにしている——語彙一致と
- * filter の効果を混同しないため。
- */
+/** 全ての歯で共通のクエリ語 "obsidian shards" を使い、`content` にその語を含めることで語彙一致自体は常に成立させ、`filter` だけが結果を左右するようにしている（語彙一致と filter の効果を混同しないため）。 */
 
 const TENANT = "lexical-filter-tenant";
 const QUERY = "obsidian shards";

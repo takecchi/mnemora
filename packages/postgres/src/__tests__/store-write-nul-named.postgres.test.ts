@@ -17,18 +17,16 @@ import { PostgresMemoryStore } from "../memory-store.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
 /**
- * ADR 0499（ADR 0456 M4・ADR 0446 の材料）: 書き込みの口に NUL（U+0000）が入ったとき、DB の生の例外
+ * 書き込みの口に NUL（U+0000）が入ったとき、DB の生の例外
  * （`DrizzleQueryError`。message は `Failed query: … params: …` で、params に利用者の値が載る）ではなく、
  * 何が悪いかを名指しした `Error`（`<欄> must not contain NUL characters (U+0000)`）で断る。
  * 読み取りの口（`read-scope-filter-nul.postgres.test.ts`）と同じ形である。
  *
- * 断る入力は増えない（直す前も同じ入力は例外で落ちていた）。例外の形が変わるだけで、何も書かれないことも変わらない。
  * 各口を testkit の InMemory にも同じ入力で流し、2実装が同じ欄名で断ることを縛る。
  * 各 it は、陽性対照（NUL を含まない・対になったサロゲートを含む同じ形の入力が通る）も持つ。
  *
  * `content` の NUL も対象（`digest` は、LLM が返さないとき本文から作られるので、本文の NUL は digest にも入る。`digest` だけ
- * 名指しにすると、本文の NUL を「digest が悪い」と説明してしまう）。保存できない候補を落とすときの説明
- * （`droppedCandidates`）が変わることは、`observe-unsaveable-candidate.postgres.test.ts` が縛っている。
+ * 名指しにすると、本文の NUL を「digest が悪い」と説明してしまう）。
  */
 
 const A: Ctx = { tenantId: "write-nul-a" };
@@ -122,8 +120,6 @@ async function caught(run: () => Promise<unknown>): Promise<unknown> {
   });
   return thrown;
 }
-
-// ---- memory_events に書く口（イベントの digestSnapshot・meta・actor）----
 
 interface EventCase {
   /** 準備（記憶・状態づくり。ここで積まれるイベントは数えない）をして、イベントを差して書く関数を返す。 */
@@ -312,7 +308,6 @@ for (const [kitName, makeKit] of KITS) {
         const before = await snapshotOf(kit);
         const error = await caught(() => go(patch));
         expectNamed(error, field);
-        // 何も書かれない: イベントは増えず、記憶の数も status も動かない。
         expect(await snapshotOf(kit)).toEqual(before);
       });
     }
@@ -340,8 +335,6 @@ async function listAll(kit: Kit): Promise<MemoryId[]> {
   const rows = await db.execute(sql`SELECT id FROM memories WHERE tenant_id = ${A.tenantId}`);
   return rows.rows.map((r) => (r as { id: MemoryId }).id);
 }
-
-// ---- memories に書く口（digest・tags・attributes・claim key・extractorVersion・provenance）----
 
 const MEMORY_POISON: Array<[string, Partial<NewMemory>, RegExp, Partial<NewMemory>]> = [
   ["content", { content: NUL }, /content/, { content: PAIR }],
@@ -486,8 +479,6 @@ for (const [kitName, makeKit] of KITS) {
     });
   });
 }
-
-// ---- observations・recalls に書く口（ADR 0505。ADR 0456 M4 の残り）----
 
 const OBSERVATION_NUL_CASES: Array<[string, Partial<NewObservation>, RegExp]> = [
   ["payload の値", { payload: { text: NUL } }, /payload/],

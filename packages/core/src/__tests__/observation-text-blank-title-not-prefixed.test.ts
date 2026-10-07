@@ -2,13 +2,6 @@ import { describe, expect, it } from "vitest";
 import type { Observation } from "../observation.js";
 import { observationPayloadText } from "../observation-text.js";
 
-/**
- * `extractTitle: true` のとき、`title` は「空でない文字列のときだけ」本文の前置きになる
- * （`Observation.title` の TSDoc）。`String.prototype.trim` で空になる値（空白・改行・タブ・U+3000 など。
- * ADR 0502 が `content` 等の「空白」と定めたのと同じ定義）だけの `title` は空とみなし、前置きにしない
- * （断るのではなく、無視する。ADR 0517）。
- */
-
 function documentObservation(payload: Record<string, unknown>): Observation {
   return {
     id: "obs-1",

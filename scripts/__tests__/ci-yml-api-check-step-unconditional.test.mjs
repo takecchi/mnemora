@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { isDraftOnlyJobIf } from "../ci-draft-skip-lib.mjs";
 
 /** YAML は構造として解析せず文字列で見る（依存追加はオーナー専権）。キーを引用符で囲む書き方（`"if":`）とフロー形式（`{ … }`）も落とさないよう、キー名の周りを広めに見る。 */
 
@@ -70,8 +71,8 @@ describe("ci.yml の api:check の段は、条件づけも握り潰しもされ�
 describe("ci.yml の build ジョブそのものが、条件づけも握り潰しもされていない", () => {
   const jobKeys = jobLines.filter((l) => /^ {4}\S/.test(l));
 
-  it("job に `if:` が無い", () => {
-    expect(jobKeys.filter((l) => KEY("if").test(l))).toEqual([]);
+  it("job に `if:` が無い（draft の PR でだけ飛ばす1行は除く）", () => {
+    expect(jobKeys.filter((l) => KEY("if").test(l) && !isDraftOnlyJobIf(l))).toEqual([]);
   });
 
   it("job に `continue-on-error` が無い", () => {

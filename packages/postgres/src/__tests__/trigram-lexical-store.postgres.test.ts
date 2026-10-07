@@ -13,31 +13,15 @@ import {
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
 /**
- * `PostgresTrigramLexicalStore`（Issue #278、ADR 0319）の DB 段の歯。
+ * `PostgresTrigramLexicalStore` の DB 段の歯。
  *
- * **⚠ この歯は `server_encoding` に依って前提が変わる**
- * （[ADR 0103](../../../docs/decisions/0103-negative-tooth-declares-its-precondition.md)の
- * 規律——否定を主張する歯は、その否定が依存している前提を自分で測って名乗る）。
+ * **⚠ この歯は `server_encoding` に依って前提が変わる**（否定を主張する歯は、その否定が
+ * 依存している前提を自分で測って名乗る）。
  * `.github/workflows/ci.yml` の `postgres` ジョブは `UTF8` / `SQL_ASCII`(+`--locale=C`) の
  * 2脚を matrix で走らせる。このファイルは**どちらの脚で走っているかを実行時に測り**、
  * 測った結果に応じて別の主張を検査する——「スキップ」ではなく、**どちらの脚でも必ず
  * 意味のある assertion を通す**（`lexical-store-identifier.test.ts` が
  * `nonAsciiIsIndexed` の分岐で採っているのと同じ形）。
- *
- * 【実測、この PR の作業者が手元で確認】(`initdb --locale=C.UTF-8 --encoding=UTF8` /
- * `initdb --locale=C --encoding=SQL_ASCII`、PostgreSQL 17):
- *
- * | server_encoding | `probeTrigramLexicalSupport` |
- * |---|---|
- * | UTF8 | `{ ok: true }`（`CREATE EXTENSION pg_trgm` が通り、自己一致検査も1になる） |
- * | SQL_ASCII（`--locale=C`） | `{ ok: false, reason: "server_encoding_not_utf8" }` |
- *
- * **⚠ 追加で手元だけ確認したこと（このファイルの歯には含めていない）**: 同一クラスタ内に
- * `ENCODING=UTF8 LOCALE=C` の DB を別途作ると、`server_encoding` は `UTF8` を通過するが
- * 自己一致検査が 0 になり `locale_no_japanese_trigrams` で弾かれる
- * （[ADR 0084](../../../docs/decisions/0084-lexical-recall-channel.md) §3.2 の「`C`
- * ロケールで黙って0件になる」の再現）。CI の2脚には無い regime のため、この
- * postgres.test.ts には歯を足していない——ADR 0319「測定」節に手順を書いてある。
  */
 
 const TENANT = "trigram-lexical-tenant";
@@ -111,10 +95,6 @@ describe("PostgresTrigramLexicalStore — opt-in pg_trgm 語彙照合(Issue #278
         }),
       );
 
-      // これは lexical-store-reporter-questions.test.ts の歯6が
-      // `expect(hits).toEqual([])` を主張しているのと**同じクエリ**である。
-      // その歯（PostgresLexicalStore 経由）は変えていない——ここで検査しているのは
-      // opt-in の PostgresTrigramLexicalStore 経由の別の adapter である。
       const hits = await trigramStore.search(ctx, "田中さんについて何か言ってましたか", {
         limit: 10,
         filter: { tenantId: TENANT },
@@ -164,7 +144,7 @@ describe("PostgresTrigramLexicalStore — opt-in pg_trgm 語彙照合(Issue #278
         }),
       );
 
-      // Issue #106 の報告者が書いた形そのもの（ADR 0092 の OR + 被覆率の主対象）。
+      // 報告者が書いた形そのもの（OR + 被覆率の主対象）。
       const query = "PROJ-1234について前に何か言ってたはず";
       const baseHits = await baseStore.search(ctx, query, {
         limit: 10,
@@ -175,24 +155,21 @@ describe("PostgresTrigramLexicalStore — opt-in pg_trgm 語彙照合(Issue #278
         filter: { tenantId: TENANT },
       });
 
-      // 集合として同じ（誰が一致したか）。
       expect(new Set(trigramHits.map((h) => h.memoryId))).toEqual(
         new Set(baseHits.map((h) => h.memoryId)),
       );
       expect(baseHits.map((h) => h.memoryId)).toContain(target.id);
 
       // coverage は ASCII 側の意味論を書き換えていないので同じ値になるはず
-      // （このクエリは非 ASCII の項が無いため、trigram 側の分母への寄与が0で、
-      // ADR 0092 の式とバイトレベルで同じ計算になる）。
+      // （このクエリは非 ASCII の項が無いため、trigram 側の分母への寄与が0）。
       const baseTarget = baseHits.find((h) => h.memoryId === target.id);
       const trigramTarget = trigramHits.find((h) => h.memoryId === target.id);
       expect(baseTarget).toBeDefined();
       expect(trigramTarget).toBeDefined();
       expect(trigramTarget!.coverage).toBeCloseTo(baseTarget!.coverage, 10);
     } else {
-      // UTF8 以外では PostgresTrigramLexicalStore.create 自体が使えないため
-      // （このファイル冒頭の doc「なぜ全体を弾くか」）、ASCII 部分の比較はそもそも
-      // 成立しない。ここでは probe が安定して同じ理由を返すことだけを再確認する。
+      // UTF8 以外では PostgresTrigramLexicalStore.create 自体が使えないため、ASCII 部分の比較は
+      // そもそも成立しない。ここでは probe が安定して同じ理由を返すことだけを再確認する。
       expect(probe.reason).toBe("server_encoding_not_utf8");
     }
   });
@@ -204,7 +181,6 @@ describe("PostgresTrigramLexicalStore — opt-in pg_trgm 語彙照合(Issue #278
     const probe = await probeTrigramLexicalSupport(db);
 
     if (probe.ok) {
-      // 閾値0（何でも通す）と、既定値（0.3）を比較する。
       const permissive = await PostgresTrigramLexicalStore.create(db, { threshold: 0 });
       const defaultStore = await PostgresTrigramLexicalStore.create(db, {
         threshold: DEFAULT_TRIGRAM_WORD_SIMILARITY_THRESHOLD,
@@ -229,8 +205,7 @@ describe("PostgresTrigramLexicalStore — opt-in pg_trgm 語彙照合(Issue #278
         filter: { tenantId: TENANT },
       });
 
-      // 閾値0なら「田中さん」を含まない一般的な日本語文もノイズとして拾ってしまう
-      // （このファイル冒頭で参照している ADR 0319 の実測どおり）。既定の閾値では拾わない。
+      // 閾値0なら「田中さん」を含まない一般的な日本語文もノイズとして拾ってしまう。既定の閾値では拾わない。
       expect(permissiveHits.length).toBeGreaterThan(defaultHits.length);
     } else {
       expect(probe.reason).toBe("server_encoding_not_utf8");

@@ -18,25 +18,19 @@ import {
 } from "./test-db.js";
 
 /**
- * recall の絞り込み（attributes・labels・期間）の**振る舞い**を、選択率の3段（ほぼ全件・1%・0件）で縛る。
+ * recall の絞り込み（attributes・labels・期間）の振る舞いを、選択率の3段（ほぼ全件・1%・0件）で縛る。
+ * 0件のときの名乗り方は、labels と期間は `filtered`（`condition` は `'taxonomy'` / `'period'`）、attributes は `omitted` が空
+ * （attributes はスコープの定義の一部なので omitted に出さない）。
  *
- * 見るのは次の3点だけである:
- * 1. **該当が在るのに黙って0件にならない**（#363 と同じ形。ADR 0026 / 0193 / 0284）
- * 2. **別テナントの行が結果に出ない**（ADR 0007）
- * 3. **0件のときの名乗り方**: labels は `filtered`（`condition: 'taxonomy'`、ADR 0323）、
- *    期間は `filtered`（`condition: 'period'`、ADR 0059）、attributes は `omitted` が空
- *    （ADR 0312 決定6——attributes はスコープの定義の一部なので omitted に出さない）
- *
- * **計画の形（どの索引か・Seq Scan か）は縛らない。**プランナの見積もりで切り替わり、揺らぐため
- * （【実測 2026-09-27】同じ問い合わせでも、別テナントの行数で計画が変わった。記録は Issue #363 のコメント）。
+ * 計画の形（どの索引か・Seq Scan か）は縛らない。プランナの見積もりで切り替わって揺らぐため
+ * （同じ問い合わせでも、別テナントの行数で計画が変わる）。
  *
  * ## 分布（小さく・決定的に）
- * - 自テナント 400 行。`i % 100 === 0` の 4 行（1%）だけが `attributes.vip`・tags `rare`・
- *   2025-06-01 の出来事を持つ。全行が `attributes.region = jp`・tags `common` を持つ。
- * - 別テナント 100 行。**全行が問い合わせのベクトルとぴったり同じ向き**で、全部の絞り込みに当たる
+ * - 自テナント 400 行。`i % 100 === 0` の 4 行（1%）だけが `attributes.vip`・tags `rare`・2025-06-01 の出来事を持つ。
+ *   全行が `attributes.region = jp`・tags `common` を持つ。
+ * - 別テナント 100 行。全行が問い合わせのベクトルとぴったり同じ向きで、全部の絞り込みに当たる
  *   ——テナントの条件が抜ければ、真っ先に上位へ来る形にしてある。
- * - labels は `labels` 表に名前が在るときだけ絞り込みに参加する（ADR 0323 の参加資格）ので、
- *   両テナントに `common`・`rare` を proposed で入れる。
+ * - labels は `labels` 表に名前が在るときだけ絞り込みに参加するので、両テナントに `common`・`rare` を proposed で入れる。
  */
 
 const TENANT = "recall-filter-selectivity";
@@ -111,7 +105,6 @@ const FILTERS: Record<
     "0件": { occurredAfter: new Date("1990-01-01"), occurredBefore: new Date("1991-01-01") },
   },
 };
-/** 自テナントの中で、その選択率の絞り込みに当たる行数。 */
 const IN_SCOPE: Record<Selectivity, number> = {
   ほぼ全件: OWN_ROWS,
   "1%": OWN_ROWS / 100,
@@ -171,20 +164,16 @@ describe("recall の絞り込み × 選択率: 黙って0件にならない・�
     const result = await recall(kind, sel);
     const returnedIds = result.memories.map((m) => m.memoryId);
 
-    // 2. 別テナントの行が結果に出ない。
     expect(returnedIds.filter((id) => !ownIds.has(id))).toEqual([]);
 
     const inScope = IN_SCOPE[sel];
     if (inScope > 0) {
-      // 1. 該当が在るのに黙って0件にならない（limit と該当数の小さい方まで返る）。
       expect(result.memories).toHaveLength(Math.min(LIMIT, inScope));
       return;
     }
 
-    // 3. 0件のときの名乗り方。
     expect(result.memories).toEqual([]);
     if (kind === "attributes") {
-      // ADR 0312 決定6: attributes はスコープの定義なので omitted に出さない。
       expect(result.omitted).toEqual([]);
     } else {
       const condition = kind === "labels" ? "taxonomy" : "period";

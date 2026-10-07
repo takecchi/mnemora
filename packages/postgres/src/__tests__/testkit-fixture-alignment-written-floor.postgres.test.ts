@@ -17,9 +17,8 @@ import { PostgresTenantSettingsStore } from "../tenant-settings-store.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
 /**
- * ADR 0640（Issue #1755）: 行に日時を**書く**口が、`timestamptz` の下限（4714-11-24 BC 00:00:00 UTC）より前で、2実装（`@mnemora/postgres` と
+ * 行に日時を**書く**口が、`timestamptz` の下限（4714-11-24 BC 00:00:00 UTC）より前で、2実装（`@mnemora/postgres` と
  * `@mnemora/testkit/fixtures`）とも断る。**同じ入力を2実装へ流して**縛る——Postgres の側は実測の常設で、変われば落ちる。
- * fixture 側だけの歯（何も書かないこと・メッセージ）は `packages/testkit/src/__tests__/in-memory-fixtures-written-timestamptz-floor.test.ts`。
  * 見るのは、断ったか・何で断ったか（`range`＝下限、`other`＝別の理由）だけ。例外の文面・クラスは2実装で違う。
  */
 const ctx: Ctx = { tenantId: "written-floor-align" };

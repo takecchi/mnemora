@@ -14,13 +14,12 @@ import {
 } from "./test-db.js";
 
 /**
- * ADR 0284（#673）の約束を、ソースの文字列ではなく**実際に発行される SQL と DB の挙動**で縛る。
+ * `withRelaxedOrderScan` の `SET LOCAL` の約束を、ソースの文字列ではなく**実際に発行される SQL と DB の挙動**で縛る。
  *
  * 既存の歯（`hnsw-ef-search-window-ceiling.test.ts` 検査2）は「`SET ... hnsw.iterative_scan`
  * という文字列が `vector-store.ts` に1つある」ことしか見ない。そのため、`SET LOCAL` が `SET`
  * になっても、SELECT の後ろへ動いても、`search()`・`searchMany()` のどちらかから外れても、
- * `hnsw.max_scan_tuples` が足されても、HNSW を使わない読みまで SET が広がっても緑だった
- * （Issue #1776 の #673 のコメント。ADR 0665）。
+ * `hnsw.max_scan_tuples` が足されても、HNSW を使わない読みまで SET が広がっても緑のままになる。
  */
 
 interface Recorded {
@@ -104,7 +103,7 @@ describe("PostgresVectorStore: hnsw.iterative_scan = relaxed_order は search/se
     const { between, after } = around(records, (t) => /combined/.test(t) && /SELECT/i.test(t));
     expect(between.filter(isSet)).toEqual([RELAXED]);
     expect(after.filter(isSet)).toEqual([]);
-    // 全体でも、SET は1文だけ（`hnsw.max_scan_tuples`・`hnsw.ef_search` などを足さない。決定2）。
+    // 全体でも、SET は1文だけ（`hnsw.max_scan_tuples`・`hnsw.ef_search` などを足さない）。
     expect(records.map((r) => norm(r.text)).filter(isSet)).toEqual([RELAXED]);
   });
 

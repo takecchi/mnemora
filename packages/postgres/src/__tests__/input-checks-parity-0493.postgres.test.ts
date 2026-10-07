@@ -12,12 +12,7 @@ import {
   resetTestDatabase,
 } from "./test-db.js";
 
-/**
- * ADR 0493（穴探し60巡目）: InMemory（testkit）と Fake（core）の入力の検査の追加は、**Postgres が断る入力だけ**を断る。
- * その根拠（Postgres 側の振る舞い）を、実 Postgres で縛る。ここで断られる入力は、InMemory・Fake の歯
- * （`in-memory-input-checks-adr0493.test.ts`・`fake-input-checks-round2.test.ts`）が同じ入力で断ることを確かめている。
- * 断る側の例外の文面は Postgres のものであり、揃えていない——ここでは「断る」ことだけを見る。
- */
+/** 断る入力は、InMemory・Fake の歯が同じ入力で断ることを確かめているもの。断る側の例外の文面は Postgres のものであり、揃えていない。ここでは「断る」ことだけを見る。 */
 
 const ctx: Ctx = { tenantId: "input-checks-0493" };
 const bad = new Date("invalid");
