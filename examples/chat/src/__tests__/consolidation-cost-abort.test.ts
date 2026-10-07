@@ -5,33 +5,6 @@ import { exitCodeForConsolidationCostRun } from "../consolidation-json.js";
 import { formatConsolidationCostReport } from "../consolidation-cost-format.js";
 import { runConsolidationCost } from "../consolidation-cost.js";
 
-/**
- * `runConsolidationCost()` そのものに、round 2 で投げる runtime を注入する e2e の歯。
- *
- * **なぜこれが要るか**: `consolidation-json.test.ts` / `consolidation-cost-format.test.ts` の
- * 11本は、`describeThrownError()` / `exitCodeForConsolidationCostRun()` / 各 formatter という
- * *純関数*だけに当たっており、`runConsolidationCost()` 自身が持つ round の `for` ループの
- * **構造**(`try` がどこを囲むか・`catch` の中が `break` か `continue` か)は一切測っていない。
- * この歯は DB/LLM/embedding を実物で叩く代わりに `RunConsolidationCostOptions` の
- * `runtime`/`memoryStore`/`embeddingProvider`/`pool` を最小の偽物で埋め、
- * `runConsolidationCost()` を直接呼ぶ。
- *
- * 偽物が実装するのは、`consolidation-cost.ts` を読んで実際に呼ばれると確認した口だけ:
- * - `runtime.observe` — ingest 段で utterance 数(gold/distractor 14件 + haystack 4件)回。
- * - `runtime.tick` — `drainEmbedTicks` から。即時に `processed: 0` を返して1回で終える。
- * - `runtime.recall` — `measureRecallForRound` から probe 数(7) × round数回
- *   (`budgetLadder: []` にして unbudgeted のみに絞った)。`memories: []` を返すことで
- *   `resolveExternalId`(→ `memoryStore.get`/`getObservation`)が呼ばれない経路を選んでいる
- *   ——そのため `memoryStore` は `getMany` だけを実装する。
- * - `runtime.consolidate` — 群ごとに1回。`opts.reason`(`"consolidation-cost round N"`)から
- *   round番号を読み、round 1 は成功、round 2 は注入した例外を投げる。
- * - `memoryStore.getMany` — `measureStore`/`measureNewMemoriesEmbedding` から。全件を
- *   `status: "active"`・`embeddingStatus: "ready"` の偽 Memory として返す(→ "failed" 分岐が
- *   一度も起きないため `pool`/`lookupLatestEmbedFailureKind` は実際には呼ばれない——
- *   `pool` はダミーのまま渡す)。
- * - `embeddingProvider.space` — プロパティとして読まれるだけ(メソッド呼び出しではない)。
- */
-
 const INJECTED_TOP_MESSAGE = "e2e-injected-pg-message-5t8w-top";
 const INJECTED_MID_MESSAGE = "e2e-injected-pg-message-5t8w-mid";
 const INJECTED_INNER_MESSAGE = "e2e-injected-pg-message-5t8w-inner";
@@ -69,17 +42,6 @@ function buildFakeRuntime(): Runtime {
   let nextObserveId = 0;
   let nextConsolidatedId = 0;
 
-  // Issue #719 の歯（`drainEmbedTicks` の `expectedProcessed`）が実際に噛むようになった
-  // 後: 実物の `Runtime` は「`observe()`/`consolidate()` が積んだ embed ジョブを
-  // `tick()` が処理する」という契約を持つ（`packages/core/src/runtime.ts` — outbox
-  // 経由。`consolidate()` が `outcome: "consolidated"` を返すときは
-  // `createMemoryWithOutbox(ctx, newMemory, ['embed'])` で新しい embed ジョブを1件
-  // 積む）。この偽 `Runtime` はその契約を無視して `tick` が常に `processed: 0` を
-  // 返していたため、`runConsolidationCost` が ingest 段(`allIds.length`)・round 段
-  // (`newMemoryIdsThisRound.length`)それぞれで渡す `expectedProcessed` と噛み合わず、
-  // 実際には何も壊れていないのに `drainEmbedTicks` が例外を投げていた。⟹
-  // `observe()`/`consolidate()` が積んだ件数を `tick()` が消化して返す、最小限の
-  // 契約通りの偽物に直す。
   let pendingEmbedJobs = 0;
 
   const observe: Runtime["observe"] = async () => {
@@ -179,11 +141,9 @@ describe("runConsolidationCost: round の途中の例外を受け止める(e2e�
       haystackSize: 4,
     });
 
-    // 要求1: 終了コードが非0、stopReason が aborted_on_error。
     expect(exitCodeForConsolidationCostRun(json)).toBe(1);
     expect(json.stopReason).toBe("aborted_on_error");
 
-    // 要求2: round < 2 の行は捨てられていない(json と format 出力の両方)。
     expect(json.rounds.map((r) => r.round)).toEqual([0, 1]);
     expect(json.stoppedAfterRound).toBe(1);
 
@@ -191,7 +151,6 @@ describe("runConsolidationCost: round の途中の例外を受け止める(e2e�
     expect(report).toContain("| 0 |");
     expect(report).toContain("| 1 |");
 
-    // 要求3: 投げた例外の値(cause 連鎖・SQLSTATE・round)が残っている。
     expect(json.abort).not.toBeNull();
     expect(json.abort?.round).toBe(2);
     expect(json.abort?.sqlState).toBe(INJECTED_SQL_STATE);
