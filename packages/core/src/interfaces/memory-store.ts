@@ -1695,8 +1695,9 @@ export interface MemoryStore {
    *   （ロケール依存の自然順は実装や実行環境によってずれるため、契約に含めない）。
    * - `status` は `'registered'` か `'proposed'` のいずれか。
    * - `proposedCount` は「この名前を `tags` に含む Memory が新規作成された回数」の近似値である——**厳密な『いまこの名前を持つ生きた Memory の数』
-   *   ではない**（対象の Memory が後から `forgotten`/`archived`/`superseded` になっても減らない。ADR 0318。`purge` だけは、
-   *   その Memory の紐付けを外し、`status: 'proposed'` の行の `proposedCount` を1減らす。0 が床で、`registered` の行は減らさない。ADR 0375）。
+   *   ではない**（対象の Memory が後から `forgotten`/`archived`/`superseded` になっても減らない。ADR 0318。減らすのは `purge` と、
+   *   purge 済みの行の後始末（`scrubPurged`。ADR 0437）だけで、どちらも、その Memory の紐付けを外した本数だけ、`status: 'proposed'` の行の
+   *   `proposedCount` を減らす。0 が床で、`registered` の行は減らさない。ADR 0375）。
    * - `registeredAt` は `status: 'registered'` のときだけ非 null。
    * - テナントに1件も無ければ空配列。例外にしない。
    *

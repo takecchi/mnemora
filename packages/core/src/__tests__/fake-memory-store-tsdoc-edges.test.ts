@@ -108,6 +108,30 @@ describe("FakeMemoryStore.requeueEmbedJobs: 選び方と、古い outbox 行", (
     expect(picks).toEqual([[ties[0]], [ties[1]], [late!.id]]);
   });
 
+  // 再確かめ（2026-10-07 マージ分、#1907）。上の歯は同着が2件だけで、作成順と id の順が一致していると、
+  // id の昇順を外しても緑のままになる（この Fake の id は連番）。保持する Map の並びを id の降順に組み直し、
+  // 同着を多くして、limit で切るときに残るのが id の小さい側だと確かめる。
+  it("同着が多くても、limit で切るときは id の小さい側を選ぶ", async () => {
+    const stores = createFakeRuntimeStores();
+    const ids: string[] = [];
+    const memories = backingMemories(stores);
+    for (let i = 0; i < 8; i += 1) {
+      const created = await stores.memoryStore.createMemory(ctx, newMemory());
+      memories.get(created.id)!.updatedAt = new Date("2026-01-01T00:00:01.000Z");
+      ids.push(created.id);
+    }
+    const entries = [...memories.entries()].sort(([a], [b]) => (a < b ? 1 : a > b ? -1 : 0));
+    memories.clear();
+    for (const [id, row] of entries) memories.set(id, row);
+
+    const { memoryIds } = await stores.memoryStore.requeueEmbedJobs(ctx, {
+      statuses: ["pending"],
+      limit: 3,
+    });
+
+    expect([...memoryIds].sort()).toEqual([...ids].sort().slice(0, 3));
+  });
+
   it("失敗済みの古い embed 行には触らず、新しい行を attempts 0 で積む", async () => {
     const stores = createFakeRuntimeStores();
     const { memory, jobs } = await stores.memoryStore.createMemoryWithOutbox(ctx, newMemory(), [

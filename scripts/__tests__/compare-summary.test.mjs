@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -58,8 +58,11 @@ function writeJson(name, data) {
   return path;
 }
 
-function run(args) {
-  return spawnSyncWithDeadline(process.execPath, [script, ...args], { encoding: "utf8" });
+function run(args, options = {}) {
+  return spawnSyncWithDeadline(process.execPath, [script, ...args], {
+    encoding: "utf8",
+    ...options,
+  });
 }
 
 describe("compare-summary.mjs（子プロセスで起動）", () => {
@@ -278,6 +281,32 @@ describe("compare-summary.mjs（子プロセスで起動）", () => {
     const result = run(args);
     expect(result.status).toBe(1);
     expect(result.stderr).toContain("--measured");
+  });
+
+  // 再確かめ（2026-10-07 マージ分、#1826）。使い方の行には --measured も --baseline も入っているので、
+  // stderr のどこかに名前が在るだけでは、エラーの文がフラグを名乗らなくても通る。最初の行に限って見る。
+  it.each([
+    ["--baseline", ["--baseline", ""]],
+    ["--measured", ["--measured", ""]],
+  ])("%s が空のとき、エラーの文（最初の行）がそのフラグを名乗る（Issue #1814）", (flag, args) => {
+    const result = run(args);
+    expect(result.status).toBe(1);
+    expect(result.stderr.split("\n")[0]).toContain(flag);
+  });
+
+  // 再確かめ（#1826）。弾くのは「次のフラグ（-- 始まり）」だけで、パスの途中の -- や、
+  // 1本の - で始まる相対パスは、指定した値として読む。
+  it("--baseline の値が途中に -- を含むパス・- 1本で始まる相対パスでも、指定した値として読む（Issue #1814）", () => {
+    const measured = makeMeasured();
+    const measuredPath = writeJson("measured.json", measured);
+    mkdirSync(join(workDir, "a--b"));
+    writeJson(join("a--b", "baseline.json"), baselineFrom(measured));
+    writeJson("-baseline.json", baselineFrom(measured));
+    for (const baseline of [join(workDir, "a--b", "baseline.json"), "-baseline.json"]) {
+      const result = run(["--measured", measuredPath, "--baseline", baseline], { cwd: workDir });
+      expect(result.status, `${baseline}: ${result.stderr}`).toBe(0);
+      expect(result.stdout, baseline).toContain("## 基準値との差分");
+    }
   });
 
   it("🔴 omitted だけが相違する入力でも exit 0 のままで、stderr に鮮度の警告が出る", () => {

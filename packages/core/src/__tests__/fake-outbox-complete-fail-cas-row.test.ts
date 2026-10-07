@@ -137,4 +137,18 @@ describe("FakeOutboxStore.complete/fail — CAS で弾いたとき・通した�
       expect(outboxStore.listJobs(ctx)).toEqual(before);
     },
   );
+
+  // 再確かめ（2026-10-07 マージ分、#1885）。#1885 は「ほかの列は変えない」の歯を、約束ではないとして外した。
+  // ただし `OutboxStore.fail` の doc は「available_at の再計算はしない」と約束している。その1列だけを縛る。
+  it("fail は availableAt を再計算しない（interface の doc の約束）", async () => {
+    const { outboxStore, jobs } = await seedClaimedJobs(1);
+    const job = jobs[0]!;
+    const before = outboxStore.listJobs(ctx)[0]!.availableAt;
+
+    await outboxStore.fail(ctx, job.id, "boom", job.attempts, { at: AT });
+
+    const after = outboxStore.listJobs(ctx)[0]!;
+    expect(after.failedAt).toEqual(AT);
+    expect(after.availableAt).toEqual(before);
+  });
 });
