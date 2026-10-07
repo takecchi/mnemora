@@ -1,12 +1,6 @@
 /**
- * `scripts/check-consumer-install.mjs`（出荷パッケージ（PUBLISH_TARGETS）を repo の外に入れて、利用者の立場で
- * 型と入口を確かめる道具。ADR 0346）の、ネットワークを使わない部品。
- *
- * ## 利用者が頼ってよい入口の一覧（{@link EXPECTED_ENTRY_POINTS}）
- *
- * 各パッケージの `exports` から一覧を**導かない**。導くと、`exports` から入口を消したときに
- * 一覧からも消えて、検査が黙って通る。⟹ 一覧はここに独立に持ち、`exports` と**両向きで**突き合わせる
- * （消えた入口も、一覧に無い新しい入口も、どちらも赤にする）。新しい入口を足したら、ここにも足すこと。
+ * ⛔ 入口の一覧を `exports` から導かない。導くと、`exports` から入口を消したときに一覧からも消えて、検査が黙って通る。
+ * 一覧は独立に持ち、`exports` と両向きで突き合わせる。新しい入口を足したら `EXPECTED_ENTRY_POINTS` にも足すこと。
  */
 
 import { readFileSync } from "node:fs";
@@ -17,7 +11,6 @@ import {
   parseDeclarationFile,
 } from "./public-api-surface-lib.mjs";
 
-/** `import` で引ける入口（`./package.json` は除く）。 */
 export const EXPECTED_ENTRY_POINTS = Object.freeze([
   "@mnemora/core",
   "@mnemora/testkit",
@@ -30,9 +23,6 @@ export const EXPECTED_ENTRY_POINTS = Object.freeze([
 ]);
 
 /**
- * 1パッケージの package.json の `exports` から、`import` で引ける入口の指定子を列挙する
- * （`./package.json` は除く）。
- *
  * @param {{ name: string; exports?: Record<string, unknown> | string }} pkg
  * @returns {string[]}
  */
@@ -46,8 +36,6 @@ export function entryPointsFromExports(pkg) {
 }
 
 /**
- * 期待する入口と、tarball の `exports` から列挙した入口を両向きで突き合わせる。
- *
  * @param {readonly string[]} expected
  * @param {readonly string[]} actual
  * @returns {{ missing: string[]; unexpected: string[] }}
@@ -61,7 +49,6 @@ export function compareEntryPoints(expected, actual) {
   };
 }
 
-/** 型検査に掛ける入口ファイル（すべての入口を namespace で import し、使う）。 */
 export function buildSmokeTs(entries) {
   const lines = entries.map((spec, i) => `import * as e${i} from ${JSON.stringify(spec)};`);
   lines.push(`export const namespaces = [${entries.map((_, i) => `e${i}`).join(", ")}];`);
@@ -69,8 +56,7 @@ export function buildSmokeTs(entries) {
 }
 
 /**
- * 実行時の検査の共通部分（ESM・CommonJS の両方の smoke に埋め込む）。`mod` の名前の検査だけを持つ。
- * 名前の一覧（`valueNames[spec]`）が無い・空のときは赤にする——抜き出しが壊れて何も見ていないのに緑、を作らない。
+ * 名前の一覧が無い・空のときは赤にする(抜き出しが壊れて何も見ていないのに緑、を作らない)。
  */
 const CHECK_VALUE_NAMES_SOURCE = `function checkValueNames(spec, mod, valueNames, failures) {
   const names = valueNames[spec];
@@ -85,12 +71,8 @@ const CHECK_VALUE_NAMES_SOURCE = `function checkValueNames(spec, mod, valueNames
 }`;
 
 /**
- * 実行に掛ける ESM の入口ファイル。各入口を import し、解決先が install 先の `node_modules` の
- * 配下であること（repo へ登っていないこと）と、名前が1つ以上 export されていること、
- * **snapshot の値の名前（{@link collectEntryValueNames}）が実行時に undefined でないこと**を確かめる。
- *
  * @param {readonly string[]} entries
- * @param {Readonly<Record<string, readonly string[]>>} valueNames 入口の指定子 → 値の名前の一覧
+ * @param {Readonly<Record<string, readonly string[]>>} valueNames
  */
 export function buildSmokeMjs(entries, valueNames) {
   return `const entries = ${JSON.stringify(entries)};
@@ -120,14 +102,10 @@ console.log(\`ESM: \${entries.length} 個の入口をすべて import できた\
 }
 
 /**
- * CommonJS から全入口を `require` する `smoke.cjs` の中身。README（core・postgres の「前提」）が約束する
- * 「CommonJS からは Node 22.12 以降の `require(esm)` で読み込める」を、install 先で確かめる。
- * `smoke.mjs` と同じく、解決先が `node_modules` の配下であることと、名前が1つ以上 export されていること、
- * snapshot の値の名前が実行時に undefined でないことを見る。
- * ⚠ 型（TypeScript の `module: nodenext` から `require` したときの型解決）は見ない。
+ * ⚠ 型(TypeScript の `module: nodenext` から `require` したときの型解決)は見ない。
  *
  * @param {readonly string[]} entries
- * @param {Readonly<Record<string, readonly string[]>>} valueNames 入口の指定子 → 値の名前の一覧
+ * @param {Readonly<Record<string, readonly string[]>>} valueNames
  */
 export function buildSmokeCjs(entries, valueNames) {
   return `"use strict";
@@ -157,7 +135,9 @@ console.log(\`CommonJS: \${entries.length} 個の入口をすべて require で�
 `;
 }
 
-/** 型検査の tsconfig（`moduleResolution` ごと）。`skipLibCheck: true` は利用者の既定に合わせる。 */
+/**
+ * `skipLibCheck: true` は利用者の既定に合わせる。
+ */
 export function buildTsconfig(moduleResolution) {
   const module = moduleResolution === "node16" ? "Node16" : "ESNext";
   return `${JSON.stringify(
@@ -179,29 +159,14 @@ export function buildTsconfig(moduleResolution) {
 }
 
 /**
- * ## snapshot（`scripts/__snapshots__/public-api/*.d.ts`）から、入口ごとの「値の名前」を引く
+ * ⛔ snapshot の名前を平らに集めない。入口が再 export していない内部ファイルの宣言まで数えて、実行時に無いのが正しい名前で赤になる。
+ * 入口から `export *` / `export { … } from` / `export { X }` を辿って、実際に見える名前だけを集める。
  *
- * snapshot は、入口から辿れる宣言ファイルを `// ===== <相対パス> =====` の見出しで連結したもの
- * （`buildPublicApiSnapshotText`）である。**全部の名前を平らに集めない**——入口が再 export していない
- * 内部のファイルの宣言（testkit の `__fixtures__/*` など）まで数えてしまい、実行時に無いのが正しい名前で赤になる。
- * ⟹ 入口のファイルから、`export *` / `export { a as b } from` / `export { X }`（自分の import を再 export）を
- * 辿って、その入口から**実際に見える名前**だけを集める。TypeScript の parser だけを使う（型検査器は使わない）。
- *
- * **値と型の区別**（宣言の構文だけで決める）:
- * - 値: `export declare const/let/var`・`function`・`class`・`enum`（`const enum` は除く）。
- * - 型: `interface`・`type`、`export type { … }`、`export { type X }`、`const enum`。
- *
- * **限界**:
- * - `const enum` は実行時に実体が無い（`preserveConstEnums` を切ったビルド）ので値に数えない。数えると赤の偽陽性になる。
- *   今の snapshot には無い。
- * - `namespace`・`export =`・`export default`・`export import` は扱わない。**出たら例外で止まる**（黙って読み飛ばさない）。
- * - 値の名前が実行時に `undefined` でないことだけを見る。値の中身（関数の引数・戻り値、クラスの形）は見ない。
- *   `export declare const X: undefined` のような、実行時に undefined が正しい値があれば偽陽性になる（今は無い）。
- * - snapshot は `pnpm run build` の出力の写しであり、tarball の `.d.ts` そのものではない。
- *   snapshot が古ければ、public-api の門（`check:public-api`）が先に赤になる。
+ * 値と型は宣言の構文だけで決める。`const enum` は実行時に実体が無いので値に数えない(数えると偽陽性)。
+ * `namespace`・`export =`・`export default`・`export import` は扱わず、出たら例外で止まる(黙って読み飛ばさない)。
+ * 値の名前が undefined でないことだけを見る。
  */
 
-/** snapshot のテキストを、見出しの相対パス → SourceFile に割る。 */
 export function splitSnapshotSections(snapshotText) {
   const sections = new Map();
   const re = /^\/\/ ===== (.+) =====$/gm;
@@ -228,11 +193,9 @@ function resolveSectionPath(fromPath, specifier) {
 }
 
 /**
- * 1つの宣言ファイル（見出しの相対パス）が外へ見せる名前を、{ 名前 → 値なら true } で返す。
- *
  * @param {Map<string, ts.SourceFile>} sections
  * @param {string} path
- * @param {string[]} [stack] 循環の検出
+ * @param {string[]} [stack]
  * @returns {Map<string, boolean>}
  */
 export function exportedNamesOfSection(sections, path, stack = []) {
@@ -244,7 +207,6 @@ export function exportedNamesOfSection(sections, path, stack = []) {
   const out = new Map();
   const sub = (specifier) =>
     exportedNamesOfSection(sections, resolveSectionPath(path, specifier), here);
-  /** 自分のファイルの中の名前（export されていなくてもよい）が値か。 */
   const localIsValue = (name) => {
     for (const st of sf.statements) {
       if (
@@ -271,7 +233,6 @@ export function exportedNamesOfSection(sections, path, stack = []) {
   for (const st of sf.statements) {
     if (ts.isExportDeclaration(st)) {
       if (!st.exportClause) {
-        // export * from "./x.js"
         for (const [name, isValue] of sub(st.moduleSpecifier.text))
           if (!out.has(name)) out.set(name, isValue);
       } else if (ts.isNamedExports(st.exportClause)) {
@@ -311,7 +272,6 @@ export function exportedNamesOfSection(sections, path, stack = []) {
   return out;
 }
 
-/** 宣言文が導入する名前と、値か。宣言でない文・import は `undefined`。 */
 function declaredNames(st) {
   if (ts.isVariableStatement(st)) {
     return st.declarationList.declarations.map((d) => {
@@ -334,8 +294,7 @@ function declaredNames(st) {
 }
 
 /**
- * snapshot のテキストと入口のファイル（見出しの相対パス。例: `dist/index.d.ts`）から、
- * その入口の値の名前（重複なし・ソート済み）を返す。**空なら例外**（抜き出しが壊れたまま緑にしない）。
+ * 空なら例外にする(抜き出しが壊れたまま緑にしない)。
  *
  * @returns {string[]}
  */
@@ -354,10 +313,7 @@ export function collectEntryValueNames(snapshotText, entrySectionPath) {
 }
 
 /**
- * 入口の指定子（`@mnemora/testkit/fixtures`）ごとに、対応する snapshot と起点の `.d.ts` を決めて
- * 値の名前を引く。対応は作業ツリーの `packages/<名前>/package.json` の `exports.*.types` から取る
- * （入口の**一覧**は `EXPECTED_ENTRY_POINTS` が独立に持つ。ここで決めるのは入口ごとの起点だけ）。
- * snapshot のファイル名は `packages/<名前>` の `<名前>.d.ts`。
+ * 入口の一覧は `EXPECTED_ENTRY_POINTS` が独立に持つ。ここで決めるのは入口ごとの起点だけ。
  *
  * @param {readonly string[]} entries
  * @param {string} repoRoot
