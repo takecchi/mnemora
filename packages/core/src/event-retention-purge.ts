@@ -8,8 +8,8 @@ import { omitParamsFromError } from "./failure-description.js";
  * `MemoryStore.purgeExpiredEventsByRetention?`（任意メソッド）の有無を1つの結果に落とす
  * （[ADR 0115](../../../docs/decisions/0115-event-retention-purge.md)、
  * [ADR 0354](../../../docs/decisions/0354-atomic-event-retention-purge.md)）。
- * **`unset` と `unlimited` を同じ顔で返さない**——呼び出し側が「まだ設定していないテナント」と
- * 「明示的に無期限を選んだテナント」を区別できるようにする。
+ * **`unset` と `unlimited` を同じ顔で返さない**（「まだ設定していないテナント」と
+ * 「明示的に無期限を選んだテナント」を区別できるようにする）。
  *
  * - `{ kind: "unset" }` — テナントが event retention を一度も設定していない。
  *   **この関数が最初に読んだ値が `unset` のときは、`memoryStore` には一切触れない。**
@@ -28,7 +28,7 @@ import { omitParamsFromError } from "./failure-description.js";
  * - `{ kind: "executed"; result }` — `MemoryStore.purgeExpiredEventsByRetention` を実際に呼んだ。
  *   `result` はその戻り値そのもの（`dryRun` を含む。`result.purged` が実削除件数）。
  *   値を `"purged"` にしなかったのは、`MemoryEventKind`（`event.ts`）に同名の `"purged"`
- *   （物理削除イベント種別）があり、無関係の型なのに同じ文字面になるため。公開の値なので名前は変えない。
+ *   （物理削除イベント種別）があり、無関係の型なのに同じ文字面になるため。
  */
 export type PurgeExpiredEventsForTenantOutcome =
   | { kind: "unset" }
@@ -43,12 +43,11 @@ const EARLIEST_DATE_MS = -8.64e15;
  * `now` から `days` 日ぶん遡った cutoff（`olderThan`）を計算する（[ADR 0354](../../../docs/decisions/0354-atomic-event-retention-purge.md)）。
  *
  * `MemoryStore.purgeExpiredEventsByRetention?` を実装する各 adapter が共有する。cutoff の計算は
- * 読みと削除を1つの原子的な操作にするため store 側で行うが、「日数→`Date`、`EARLIEST_DATE_MS` への寄せ」
- * という算術は1箇所に固定し、実装ごとに書き写さない。
+ * 読みと削除を1つの原子的な操作にするため store 側で行うが、算術は1箇所に固定し、実装ごとに書き写さない。
  *
  * 日数が大きいと差が `Date` の範囲（±8.64e15 ms）を越え、Invalid Date になる
- * （約1億日から。`setEventRetention` は正の整数を上限なく受け付ける）。そのときの cutoff は
- * 「表せる最も古い時刻より前」なので、表せる最も古い時刻へ寄せる——それより古い行は無い。
+ * （約1億日から。`setEventRetention` は正の整数を上限なく受け付ける）。そのときは表せる最も古い時刻へ
+ * 寄せる（それより古い行は無い）。
  */
 export function computeEventRetentionCutoff(now: Date, days: number): Date {
   return new Date(Math.max(now.getTime() - days * 24 * 60 * 60 * 1000, EARLIEST_DATE_MS));
@@ -60,9 +59,8 @@ export function computeEventRetentionCutoff(now: Date, days: number): Date {
 export interface PurgeExpiredEventsForTenantOptions {
   /**
    * 1回の呼び出しで削除する上限。**必須・既定値なし**——
-   * {@link MemoryStore.purgeExpiredEventsByRetention} の `opts.limit` へそのまま渡す
-   * （`ClaimOutboxJobsOptions.leaseMs` と同じ理由。取り消せない削除の上限を
-   * `packages/core` が勝手に決めない）。
+   * {@link MemoryStore.purgeExpiredEventsByRetention} の `opts.limit` へそのまま渡す。
+   * 取り消せない削除の上限を `packages/core` が勝手に決めない。
    */
   limit: number;
   /**
@@ -81,8 +79,8 @@ export interface PurgeExpiredEventsForTenantOptions {
  * `MemoryStore.purgeExpiredEventsByRetention?` を呼ぶ（ADR 0115）。
  *
  * 🔴 **この関数はどこからも自動的に呼ばれない。** `runtime.tick()` にも `runtime.observe()` にも
- * 配線しない（Issue #210 設計上の注意7: 明示呼び出しのみ）。呼ぶのは運用側のスクリプト・cron・
- * 保守ジョブの責務で、`packages/core` は「呼ぶための部品」だけを提供する。
+ * 配線しない（明示呼び出しのみ）。呼ぶのは運用側のスクリプト・cron・保守ジョブの責務で、
+ * `packages/core` は「呼ぶための部品」だけを提供する。
  *
  * ⚠ **cutoff（`olderThan`）はこの関数では計算しない。** この関数自身の読みは unset/unlimited を
  * 判定するためだけで、`days` のときの保持期間の読み直し・cutoff の計算（`computeEventRetentionCutoff`）・
@@ -108,7 +106,7 @@ export async function purgeExpiredEventsForTenant(
   try {
     return await purgeExpiredEventsForTenantBody(ctx, deps, opts);
   } catch (error) {
-    // ADR 0430 決定3: 公開の独立関数が投げる例外も、drizzle の `params:` を落とす。
+    // 公開の独立関数が投げる例外も、drizzle の `params:` を落とす（ADR 0430）。
     throw omitParamsFromError(error);
   }
 }

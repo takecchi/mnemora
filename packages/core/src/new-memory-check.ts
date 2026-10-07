@@ -2,20 +2,19 @@ import { MemorySchema } from "./memory.js";
 import { ProvenanceKindSchema } from "./provenance.js";
 
 /**
- * ADR 0630: `MemoryStore` の Memory を書く口（`createMemory`・`createMemoryWithOutbox`・
- * `supersedeWithNewMemories`）が、**書いたら読み戻したときに {@link MemorySchema} を通らなくなる値**を入口で
- * 断るための、3つの実装（`@mnemora/postgres`・testkit の `InMemoryMemoryStore`・core の Fake）共通の検査。
+ * `MemoryStore` の Memory を書く口（`createMemory`・`createMemoryWithOutbox`・
+ * `supersedeWithNewMemories`）が、書いたら読み戻したときに {@link MemorySchema} を通らなくなる値を
+ * 入口で断るための、全実装共通の検査（ADR 0630）。
  *
  * 見る欄は `digest`・`contentHash`・`extractorVersion`・`claimKey`・`attributes`・`provenance` の6つだけ。
- * 判定は欄ごとに `MemorySchema` の同じ欄の schema をそのまま使う（写さない。`MemorySchema` が変われば
- * この検査も一緒に変わる）。
+ * 判定は欄ごとに `MemorySchema` の同じ欄の schema をそのまま使う（写さない）。
  *
- * ⛔ 見ないもの（ADR 0630 の範囲外）: `subjectId`（空文字を含む）・`content`・`tags` の中身・日時・
- * `strength`・`halfLifeHours`・列挙の欄（それぞれ、別の検査が既に在るか、別の担当の件である）。
- * `provenance.kind` が列挙に無い・`provenance` が `null` のときも、ここでは見ない（既存の検査が断る。文面を変えない）。
+ * 見ないもの: `subjectId`（空文字を含む）・`content`・`tags` の中身・日時・`strength`・`halfLifeHours`・
+ * 列挙の欄。`provenance.kind` が列挙に無い・`provenance` が `null` のときも、ここでは見ない
+ * （既存の検査が断る）。
  *
- * 拒むときの例外は `Error`（`<owner>: <欄> is malformed (<理由>)`）。`strength`・`halfLifeHours`・NUL・列挙の
- * 入口の検査と同じ種類・同じ形の文面である。**値そのものは message に載せない**（理由は zod の説明）。
+ * 拒むときの例外は `Error`（`<owner>: <欄> is malformed (<理由>)`）。**値そのものは message に載せない**
+ * （理由は zod の説明）。
  *
  * 呼ぶ側は、**何かを書く前に**（冪等の既存行の判定より前に）呼ぶこと。
  */
