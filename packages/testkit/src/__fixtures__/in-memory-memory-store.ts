@@ -990,7 +990,7 @@ export class InMemoryMemoryStore implements MemoryStore {
    * （空文字は参照として扱い、どのテナントの行でもないので拒む）。
    */
   private assertOwnMemoryRef(ctx: Ctx, id: MemoryId | null | undefined): void {
-    if (id === null || id === undefined) return;
+    if (id === undefined) return;
     const memory = this.memories.get(normId(id));
     if (!memory || memory.tenantId !== ctx.tenantId) {
       // Issue #1759: 参照先が無いときの message は、Postgres と同じく小文字にそろえた id を載せる（ADR 0521 の訂正）。
