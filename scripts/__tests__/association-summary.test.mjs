@@ -5,22 +5,6 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { spawnSyncWithDeadline } from "./spawn-with-deadline.mjs";
 
-/**
- * `scripts/association-summary.mjs` の歯。**本物のスクリプトを子プロセスとして
- * 実際に起動する**(`scripts/__tests__/identifier-probe-summary.test.mjs` と同じ形・
- * 同じ理由)——`association-summary-lib.test.mjs` は純関数だけを見ており、
- * 「CLI としての配線」(引数の読み方・ファイル I/O・**exit code**)はここでしか測れない。
- *
- * 🔴 **このファイルが固定している線(歯が噛むことを示す)**:
- *
- * 1. **基準値と相違しても exit 0**(⛔ 門ではない。probe 12件は ADR 0033 §3 の規律に
- *    照らして閾値判定に足る母数ではない)。
- * 2. **入力そのものが壊れていれば非0**(JSON が読めない・parse できない・必須項目が
- *    無い・本数が違う・参照整合性が壊れている・`--baseline` が壊れている)。
- *
- * DB もネットワークも要求しない——このスクリプトは JSON ファイルを最大2つ読むだけである。
- */
-
 const script = fileURLToPath(new URL("../association-summary.mjs", import.meta.url));
 
 const PROBE_IDS = [

@@ -8,23 +8,8 @@ import {
   parseSpecName,
 } from "../publish-run-coverage-lib.mjs";
 
-/**
- * `scripts/publish-run-coverage-lib.mjs`（ADR 0207「引き受けた負債」の歯）の純関数の歯。
- *
- * ⚠ このファイルは `gh` を1度も呼ばない。ログは合成した文字列で表現する
- * ——`ci-green-check-lib.test.mjs` が実際の check-runs を呼ばず合成入力で検査するのと
- * 同じ役割分担。
- *
- * 実物のログ（run `35169553262` の生ログ、`gh api repos/takecchi/mnemora/actions/jobs/…/logs
- * --allow-escape-sequences` で取得したもの）から、行の形（タイムスタンプ・`##[group]` /
- * `##[endgroup]`・ANSI で色づけされた「これから打つ script」のプレビュー行が
- * `::group::npm publish ${spec}` という未展開の文字列を含むこと）を実測したうえで、
- * 固定文字列としてここへ書き写している。
- */
-
 const TIMESTAMP = "2026-09-17T01:14:00.3481028Z ";
 
-/** 実物のログに合わせて1本分の group を組み立てる（タイムスタンプと ##[group] 形）。 */
 function githubGroup(spec, resultLine) {
   return (
     `${TIMESTAMP}##[group]npm publish ${spec}\n` +
@@ -67,8 +52,6 @@ describe("parsePublishGroups", () => {
   });
 
   it("失敗して ::endgroup:: の echo に届かない場合も、その本を1本として拾う", () => {
-    // npm publish が失敗すると `exit "${STATUS}"` が `echo "::endgroup::"` より先に
-    // 実行され、step 自体が落ちる。このケースでは以降の group も無い。
     const log =
       `${TIMESTAMP}##[group]npm publish @mnemora/core@0.1.1\n` +
       `${TIMESTAMP}npm error 403 Forbidden\n` +
@@ -80,10 +63,6 @@ describe("parsePublishGroups", () => {
   });
 
   it("『これから打つ script』のプレビュー行（未展開の ::group::npm publish ${spec}）を group と誤認しない", () => {
-    // 実物のログでは、npm publish 段の直前に runner が script 本文を
-    // ANSI エスケープ付きでそのまま印字する（`Run set -euo pipefail` group の中）。
-    // その中に `echo "::group::npm publish ${spec}"` という**未展開の**行が
-    // 文字通り含まれる——これを実在の group 開始として拾ってはならない。
     const previewLine = `${TIMESTAMP}\x1b[36;1m  echo "::group::npm publish \${spec}"\x1b[0m\n`;
     const realGroup = githubGroup(
       "@mnemora/anthropic@0.1.1",
@@ -145,11 +124,6 @@ describe("detectDryRunMarker", () => {
   });
 
   it("『これから打つ script』のプレビュー行に固定文言が含まれていても true にしない（本番 run の実測で見つかったバグ）", () => {
-    // release run 35077566069（本番、DRY_RUN=false のはず）の生ログを実測すると、
-    // "Run set -euo pipefail" group のプレビュー行に、ANSI 付き・echo "..." の形で
-    // 固定文言がそのまま現れていた——script の if 分岐に関係なく、runner が
-    // script 全文をそのまま印字するためである。ここで true を返すと、本番 run を
-    // 予行だと誤判定する。
     const previewLine = `${TIMESTAMP}\x1b[36;1m  echo "予行（--dry-run）です。registry へは何も上がりません。"\x1b[0m\n`;
     expect(detectDryRunMarker(previewLine)).toBe(false);
   });
@@ -202,7 +176,6 @@ describe("evaluatePublishRunCoverage", () => {
       githubGroup("@mnemora/core@0.1.1", "✔ @mnemora/core@0.1.1 を publish した") +
       `${TIMESTAMP}##[group]npm publish @mnemora/testkit@0.1.1\n` +
       `${TIMESTAMP}✗ @mnemora/testkit@0.1.1 の publish が失敗した（exit 1）\n`;
-    // openai は failed の後 step が落ちるためログに一度も現れない。
     const result = evaluatePublishRunCoverage(log, targets);
     expect(result.verdict).toBe("fail");
     expect(result.perTarget.find((p) => p.name === "@mnemora/testkit").outcome).toBe("failed");

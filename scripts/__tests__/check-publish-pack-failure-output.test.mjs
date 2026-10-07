@@ -5,31 +5,8 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { spawnSyncWithDeadline } from "./spawn-with-deadline.mjs";
 
-/**
- * `scripts/check-publish-pack.mjs` の**失敗（EXIT=1）側の実行時出力**の歯
- * （ADR 0255 が反例として名指しし、ADR 0259 が実行時出力へ焼いた断り）。
- *
- * ## ⭐ なぜ `check-publish-pack.test.mjs` と別のファイルなのか
- *
- * 🔴 **`scripts/__tests__/publish-targets.test.mjs` が `check-publish-pack.test.mjs` の
- * ソースを正規表現で走査し、そこに直書きされた `{ name: "@mnemora/…", dir: "packages/…" }`
- * の件数が `PUBLISH_TARGETS` と一致することを測っている**（写しがずれたまま気づかないのを
- * 防ぐ歯）。⟹ 下の合成フィクスチャ（実在しない publish 対象を1件だけ持つ
- * `publish-targets.mjs` を組み立てる）を同じファイルへ置くと、**その走査が7件を数えて落ちる。**
- * ⛔ 走査される側の書き方を変えて避けるのではなく（それは既存の歯の目をくぐる形になる）、
- * **走査の対象ではないファイルへ置く**。⚠ 【実測】この衝突は手元の名指し実行では出ず、
- * CI が最初に見つけた（Issue #580 / PR #582）。
- */
+/** `check-publish-pack.test.mjs` とは別のファイルにする。`publish-targets.test.mjs` がそちらのソースを正規表現で走査して直書きの `{ name, dir }` の件数を数えるので、合成フィクスチャを同じファイルへ置くと7件を数えて落ちる。 */
 
-/**
- * ⚠ この門が見ていない範囲——失敗（EXIT=1）側の実行時出力を測る歯。
- *
- * 本物の `.mjs` を一時ディレクトリへコピーし、合成環境で動かす。`publish-targets.mjs` を
- * 「存在しないディレクトリを指す1パッケージだけの合成版」へ差し替えると、
- * `pnpm pack` の spawn 自体が ENOENT で失敗し（`cwd` が存在しないため）、
- * `packOne()` が投げた例外を `violations` へ積んで exit 1 になる——本物の
- * `pnpm pack` プロセスは1つも起動しないので速い（手元で実測 約40ms）。
- */
 describe("scripts/check-publish-pack.mjs（合成 publish-targets.mjs で失敗分岐を実行時に測る）", () => {
   /** @type {string | undefined} */
   let workDir;

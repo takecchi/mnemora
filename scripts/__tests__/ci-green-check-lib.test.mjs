@@ -7,13 +7,6 @@ import {
   verdict,
 } from "../ci-green-check-lib.mjs";
 
-/**
- * `scripts/ci-green-check-lib.mjs`（判定そのものの集合演算）の歯。
- *
- * ⚠ このファイルは `gh` を1度も呼ばない。実際の check-runs は合成した入力で表現する
- * ——`generate-adr-index-lib.test.mjs` が実ファイルを読まないのと同じ役割分担。
- */
-
 describe("summarizeCheckRuns", () => {
   it("全件 completed かつ success なら pending も nonSuccess も空", () => {
     const result = summarizeCheckRuns([
@@ -61,11 +54,6 @@ describe("verdict", () => {
   });
 
   describe("total===0 の理由分岐（mergeable_state, Issue #615）", () => {
-    // 背景: base と衝突している（mergeable_state=dirty）と、GitHub は merge ref を
-    // 作れず pull_request の run が永久に作られない。旧来の理由「まだ登録されていない
-    // 可能性がある」は「待て」と読めるが、dirty のときは待っても来ない
-    // （Issue #615 実測: d03a4a0 で20分・3d551ab で22分、待っても0件のままだった）。
-
     it("⭕ dirty: 待てと読める文言を含まず、衝突を名指しする。status は pending のまま", () => {
       const result = verdict([], ["a"], "dirty");
       expect(result.status).toBe("pending");
@@ -126,8 +114,6 @@ describe("verdict", () => {
   });
 
   it("全完了だが1件でも success でなければ red（run 全体ではなく job 単位で見る）", () => {
-    // Issue #228 観測2 の再現: run 全体は failure でも、他のジョブは success ということが
-    // あるが、ここでの判定対象はあくまで job（check run）単位の集合である。
     const result = verdict(
       [
         { name: "typecheck / lint / test / build", status: "completed", conclusion: "failure" },
@@ -164,7 +150,6 @@ describe("verdict", () => {
         { name: "job3", status: "completed", conclusion: "success" },
         { name: "job4", status: "completed", conclusion: "success" },
         { name: "job5", status: "completed", conclusion: "success" },
-        // postgres-regime-coverage はまだ登録されていない（needs: postgres の依存元待ち）
       ];
       const result = verdict(checkRuns, requiredContexts);
       expect(result.status).toBe("pending");
@@ -247,7 +232,6 @@ describe("summarizeRequiredContexts", () => {
   });
 
   it("同名の check-run が複数在るとき、全部が completed かつ success でなければ満たしたとみなさない", () => {
-    // 再実行のような状況: 同名 "a" の1回目が failure、2回目（再実行）が success。
     const result = summarizeRequiredContexts(
       [
         { name: "a", status: "completed", conclusion: "failure" },
@@ -255,8 +239,6 @@ describe("summarizeRequiredContexts", () => {
       ],
       ["a"],
     );
-    // 「同名の全部が success」でなければ満たされたとみなさない仕様——1回目の failure が
-    // nonSuccess に残る（missing には入らない。名前自体は存在するため）。
     expect(result.missing).toEqual([]);
     expect(result.nonSuccess).toEqual([{ name: "a", conclusion: "failure" }]);
   });

@@ -6,16 +6,6 @@ import {
   extractResultsTable,
 } from "../identifier-probes-readme-freshness-lib.mjs";
 
-/**
- * `identifier-probes-readme-freshness-lib.mjs`（Issue #425、ADR 0201 の系譜）の歯の足し
- * （Issue #1815、09/16 マージ分の #434 の確かめ直し）。
- *
- * 既存の `identifier-probes-readme-freshness.test.mjs` は、群数・probe 件数（片方）・hit@1 の数・群一覧表の抜けだけを
- * 「ずれ」として検知していた。見出しの欠落・一覧表の余分な群・実測表の行の欠落や余分・hit@10・MRR・分母のずれ・
- * 節や表の終わりの切り方は、変異が素通りした。ここでは合成データで足す。実装は変えない。
- * **これはクローン（miku）の判断で足した歯で、オーナーの判断ではない**（ADR 0220）。
- */
-
 const FIXTURE_README = `
 ## \`identifier-probes\`: fixture
 

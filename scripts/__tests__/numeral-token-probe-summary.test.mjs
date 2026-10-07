@@ -5,21 +5,6 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { spawnSyncWithDeadline } from "./spawn-with-deadline.mjs";
 
-/**
- * `scripts/numeral-token-probe-summary.mjs` の歯(ADR 0135)。**本物のスクリプトを
- * 子プロセスとして実際に起動する**(`identifier-probe-summary.test.mjs` と同じ形)——
- * `numeral-token-probe-summary-lib.test.mjs` は純関数だけを見ており、
- * 「CLI としての配線」(引数の読み方・ファイル I/O・**exit code**)はここでしか測れない。
- *
- * 🔴 **このファイルが固定している線**:
- *
- * 1. **基準値と相違しても exit 0**(⛔ 門ではない。ADR 0135 §4-8)。
- * 2. **`status: "weights_unavailable"` でも exit 0**、かつ比較を1つも出さない。
- * 3. **入力そのものが壊れていれば非0**。
- *
- * DB もネットワークも要求しない。
- */
-
 const script = fileURLToPath(new URL("../numeral-token-probe-summary.mjs", import.meta.url));
 
 function makeGroup(overrides = {}) {

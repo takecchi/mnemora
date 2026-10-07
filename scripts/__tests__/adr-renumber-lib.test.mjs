@@ -9,16 +9,6 @@ import {
   rewriteReferencesInText,
 } from "../adr-renumber-lib.mjs";
 
-/**
- * `scripts/adr-renumber-lib.mjs`（採番を「マージ直前」に確定させる設計の純関数側）
- * の歯（Issue #295、ADR 0179）。
- *
- * このファイルは実際の `docs/decisions/` を1バイトも読まない——合成データだけで
- * 検査する。既存の173本の ADR を動かさないことは、CLI 側
- * （`scripts/adr-renumber.mjs`）が「このブランチが追加したファイルだけ」を
- * 対象にする設計そのもので担保しており、ここでは対象にしない。
- */
-
 describe("parseAdrFilename", () => {
   it("4桁番号 + slug + .md を分解する", () => {
     expect(parseAdrFilename("0146-recall-association-unprompted.md")).toEqual({
@@ -189,7 +179,6 @@ describe("addedLineNumbers — origin/main から継承した行を巻き込ま�
   });
 
   it("既存ファイルへの1行挿入は、その行番号だけを返す（前後の既存行は含まない）", () => {
-    // 元ファイルは3行、2行目の直後に1行挿入した想定（--unified=0 はコンテキストを持たない）。
     const diff = ["@@ -2,0 +3 @@", "+inserted"].join("\n");
     expect(addedLineNumbers(diff)).toEqual(new Set([3]));
   });
@@ -209,7 +198,6 @@ describe("addedLineNumbers — origin/main から継承した行を巻き込ま�
   });
 
   it("応用: origin/main 由来の行に同居する衝突番号の言及は、追加行番号に含まれないので書き換え対象から外れる", () => {
-    // 1行目は origin/main から継承（変更なし）、2行目だけこのブランチが追加した想定。
     const diff = ["@@ -1,0 +2 @@", "+新しい行に ADR 0146 への言及がある"].join("\n");
     const added = addedLineNumbers(diff);
     expect(added.has(1)).toBe(false); // 継承した1行目は対象外
@@ -248,8 +236,6 @@ describe("renumberedReferenceWarning — 付け替えたときだけ PR タイ�
   });
 
   it("⛔ gh を呼べという指示は含むが、この関数自身は gh を実行しない（文字列を返すだけ）", () => {
-    // 純関数であることの確認——副作用が無いことは型シグネチャからも自明だが、
-    // 「文字列を組み立てるだけ」であることをここでも明示する。
     const warning = renumberedReferenceWarning([{ oldNumber: "0001", newNumber: "0002" }]);
     expect(typeof warning).toBe("string");
   });
@@ -261,9 +247,6 @@ describe("renumberedReferenceWarning — 付け替えたときだけ PR タイ�
 });
 
 describe("findUnrewrittenAdrReferences — rewriteReferencesInText が届かない略記の連なりを検出する", () => {
-  // 🔴 陽性対照: PR #614 が実際に `main`（74c5295）へ焼いた文字列そのもの。
-  // 事後に PR #618（bf6e9e7）が人手で 0271 -> 0272 に直すまで、無関係な
-  // ADR 0271（Issue #608 項目①、PR #612）を指したまま残っていた。
   const bakedLine1 = "（ADR 0269 の対象外、ADR 0270 / 0271 も引き継がない）。";
   const bakedLine2 =
     'describe("Runtime の非中核メソッド件数が、生きた文書に焼き込まれていない（ADR 0269 引き受けた負債、ADR 0270 / 0271）", () => {';
@@ -284,8 +267,6 @@ describe("findUnrewrittenAdrReferences — rewriteReferencesInText が届かな�
 
   it("rewriteReferencesInText を先に通してから当てても、同じ0271が残っている（実際の配線と同じ順序）", () => {
     const { text: rewritten } = rewriteReferencesInText(bakedLine1, renames0271to0272);
-    // rewriteReferencesInText 自体は「ADR 」に直接続く1個目（0270）しか見ないので、
-    // このケースでは何も変わらない——0270 は renames の対象外だから。
     expect(rewritten).toBe(bakedLine1);
     const hits = findUnrewrittenAdrReferences(rewritten, renames0271to0272);
     expect(hits.map((h) => h.oldNumber)).toContain("0271");
@@ -302,8 +283,6 @@ describe("findUnrewrittenAdrReferences — rewriteReferencesInText が届かな�
   });
 
   it("⛔ 巻き込まない3: 連なりの中の、付け替え対象でない番号（他人の ADR）は報告しない", () => {
-    // renames は 0271 -> 0272 だけを付け替えている。連なりの中の 0270 は
-    // 誰も付け替えていない他人の ADR なので、報告に混ざってはいけない。
     const hits = findUnrewrittenAdrReferences(bakedLine1, renames0271to0272);
     expect(hits.map((h) => h.oldNumber)).not.toContain("0270");
     expect(hits.map((h) => h.oldNumber)).not.toContain("0269");

@@ -5,21 +5,6 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { spawnSyncWithDeadline } from "./spawn-with-deadline.mjs";
 
-/**
- * `scripts/correction-candidate-probe-summary.mjs` の歯（ADR 0291/0321）。**本物の
- * スクリプトを子プロセスとして実際に起動する**（`numeral-token-probe-summary.test.mjs`
- * と同じ形）——「CLI としての配線」（引数の読み方・ファイル I/O・**exit code**）は
- * ここでしか測れない。
- *
- * 🔴 **このファイルが固定している線**:
- *
- * 1. **基準値と相違しても exit 0**（⛔ 門ではない。ADR 0291 §4 決定7）。
- * 2. **`status: "weights_unavailable"` でも exit 0**、かつ比較を1つも出さない。
- * 3. **入力そのものが壊れていれば非0**。
- *
- * DB もネットワークも要求しない。
- */
-
 const script = fileURLToPath(new URL("../correction-candidate-probe-summary.mjs", import.meta.url));
 
 function makeSummary(overrides = {}) {
@@ -160,18 +145,6 @@ describe("correction-candidate-probe-summary.mjs(子プロセスで起動)", () 
   });
 });
 
-/**
- * ADR 0333 §3.2 案2「別名 `protectionMargin` を新設し `intrusionMargin` は凍結」——
- * `protectionMarginStats` は `intrusionMarginStats` と並べて出すが、🔴 **`DIFF_FIELDS`
- * （基準値との一致/相違判定）には加えていない**。この節はその2点を固定する:
- *
- * 1. measured に `protectionMarginStats` があれば、B群の表に intrusionMargin と
- *    並んで出る。
- * 2. `protectionMarginStats` が基準値と実測でどれだけ違っても、既存の「一致(差分なし)」
- *    判定・exit code は1つも動かない——差の大きさに関わらず「参考」節にだけ現れる。
- *
- * ⭐ **この歯が実際に噛むことを、変異試験で示した**（報告に記録）。
- */
 describe("protectionMargin(ADR 0333 案2)は並べて出るが、DIFF_FIELDS には入らない", () => {
   it("--measured だけでも、protectionMarginStats があれば B群の表に並べて出る", () => {
     const measured = makeMeasured({
@@ -197,7 +170,6 @@ describe("protectionMargin(ADR 0333 案2)は並べて出るが、DIFF_FIELDS に
         protectionMarginStats: { count: 24, mean: 0.030195, stdDev: 0.022252, min: -0.008776 },
       }),
     });
-    // baseline は measured と同じ値から作るが、protectionMarginStats を持たない旧い形にする。
     const baselineSnapshot = structuredClone(measured);
     delete baselineSnapshot.summary.protectionMarginStats;
     const result = run([
@@ -218,7 +190,6 @@ describe("protectionMargin(ADR 0333 案2)は並べて出るが、DIFF_FIELDS に
       }),
     });
     const baseline = baselineFrom(measured);
-    // protectionMarginStats だけを大きく変える(他の DIFF_FIELDS 対象は一致させたまま)。
     baseline.snapshot.summary.protectionMarginStats = {
       count: 24,
       mean: -999,
@@ -232,13 +203,8 @@ describe("protectionMargin(ADR 0333 案2)は並べて出るが、DIFF_FIELDS に
       writeJson("baseline.json", baseline),
     ]);
     expect(result.status, result.stderr).toBe(0);
-    // ⭐ 陽性対照: DIFF_FIELDS に本当に入っていたら、ここは「相違した項目が」に
-    // なるはずである(下の変異試験で実際に確認する)。protectionMarginStats は
-    // DIFF_FIELDS の対象外なので、他のすべてのフィールドが一致していればここは
-    // 「一致(差分なし)」のままになる。
     expect(result.stdout).toContain("一致(差分なし)");
     expect(result.stdout).not.toContain("相違した項目が");
-    // 「参考」節には両方の値が出る(指数表記、`formatMargin` と同じ桁数)。
     expect(result.stdout).toContain("参考: protectionMargin");
     expect(result.stdout).toContain("-9.990e+2");
   });

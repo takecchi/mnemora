@@ -8,24 +8,8 @@ import {
   formatComparisonReport,
 } from "../check-required-status-checks-lib.mjs";
 
-/**
- * `scripts/check-required-status-checks-lib.mjs` の純関数の歯。
- *
- * ⚠ このファイルはネットワークにも `gh` にも触れない。本物の branch protection と
- * 一致しているかは `pnpm check:required-status-checks` の仕事であり（ADR 0279）、
- * **ここで測るのは突き合わせの判定ロジックだけである。**
- *
- * 🔴 4つを必ず固定する（依頼の要求。ADR 0279「決めたこと」）:
- * 1. 宣言と protection が一致 → match
- * 2. 1本ずれている → mismatch（不足・余分・文字違いの3形）
- * 3. protection が読めない → undetermined（match へ倒れない）
- * 4. 宣言の contexts が空のとき、素通りしない（真空で真にならない）
- */
-
 const ROOT = fileURLToPath(new URL("../..", import.meta.url));
 
-/** 本物の `gh api .../branches/main/protection` と同じ形（`required_status_checks` の下に
- * `contexts` と `checks` の両方を持つ）。 */
 function protectionWith(names, checkNames = names) {
   return {
     required_status_checks: {
@@ -141,7 +125,6 @@ describe("compareRequiredStatusChecks: 4つの固定ケース", () => {
       );
       expect(result.verdict).toBe("mismatch");
       expect(result.missing).toEqual([]);
-      // "c" は checks 側にしか無いので names には含まれ、extra として出る。
       expect(result.extra).toEqual(["c"]);
       expect(result.disagreement).not.toBeNull();
       const text = formatComparisonReport(result);
@@ -156,16 +139,13 @@ describe("compareRequiredStatusChecks: 4つの固定ケース", () => {
     const text = formatComparisonReport(result);
     expect(text).toContain("保留（undetermined）");
     expect(text).toContain("これは「ずれていない」ではない");
-    // ⚠ 素の "match" や "一致" を含めないこと —— 保留の文言が偶然にも
-    // 「一致」を含んでいたら、雑な substring 判定で緑と誤認されうる。
+    // 素の "match" や "一致" を含めない。保留の文言が「一致」を含むと、雑な substring 判定で緑と誤認されうる。
     expect(text).not.toContain("一致（match）");
   });
 
   describe("【4】宣言の contexts が空のとき、素通りしない（真空で真にならない）", () => {
     it("宣言が空 + protection も空 → 両方向の集合一致では match に見えてしまう組み合わせでも mismatch", () => {
       const result = compareRequiredStatusChecks([], contextsFromProtection(protectionWith([])));
-      // 素の両方向集合比較（missing/extra 双方が空）だけを見ると "match" に化ける
-      // はずの入力——これが緑にならないことを固定する。
       expect(result.missing).toEqual([]);
       expect(result.extra).toEqual([]);
       expect(result.verdict).toBe("mismatch");
@@ -182,8 +162,6 @@ describe("compareRequiredStatusChecks: 4つの固定ケース", () => {
     });
 
     it("宣言が空 + protection が読めない(null) → mismatch を優先する（undetermined ではない）", () => {
-      // 宣言そのものが壊れているときは、protection が読めるかどうかを問う前に
-      // 「宣言が壊れている」ことを名乗る——空の宣言を undetermined の陰に隠さない。
       const result = compareRequiredStatusChecks([], null);
       expect(result.verdict).toBe("mismatch");
       expect(result.verdict).not.toBe("match");

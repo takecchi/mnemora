@@ -9,14 +9,6 @@ import {
   validateMeasured,
 } from "../compare-summary-lib.mjs";
 
-/**
- * Issue #242: `compare-summary-lib.mjs`(純関数の側)の歯。DB を要求しない。
- *
- * ⭐ **最重要の検査**: `turnCount` をキーに `CompareRowJson` の全欄を比べること、
- * 一致すれば1行・相違すれば展開すること(`time-term-summary-lib.mjs`/
- * `archive-sweep-cost-summary-lib.mjs` の対応する歯と同じ形)。
- */
-
 function makeRow(overrides = {}) {
   return {
     fillerPairs: 4,
@@ -48,7 +40,6 @@ function makeMeasured(overrides = {}) {
   };
 }
 
-/** 実測から基準値ファイルの形(`rows` 配列)を作る。 */
 function baselineFrom(measured) {
   return { rows: measured.rows.map((r) => structuredClone(r)) };
 }
@@ -254,21 +245,7 @@ describe("computeComparison", () => {
   });
 });
 
-/**
- * ⭐ **Issue #477 の陽性対照を、恒久的な歯として固定する。**
- *
- * この repo の `main`（`dd9ec8e` 時点）の `computeRegressions()` は、**同一の実測**に対し
- * 基準値の側だけを差し替えると次のように振る舞っていた（探り棒で逐語に記録した）:
- *
- * - 基準値12行（現物）× 実測11行が退行 ⟹ **11件検出（赤）**
- * - 基準値を `turnCount=2` の**1行だけ**にする ⟹ **0件（緑）**、`validateBaseline` は `ok: true`
- * - 基準値 `rows: []` ⟹ **0件（緑）**、`validateBaseline` は `ok: true`
- *
- * ⟹ **「退行が0件」と「1件も比較していない」が同じ顔で出ていた。**
- * 下の歯は、その3本を `evaluateCompare` の語彙で言い直したものである。
- */
 describe("evaluateCompare（⭐ 門の判定。Issue #477 の陽性対照）", () => {
-  /** 実測の `turnCount=10` の行だけを退行させる（`turnCount=2` は据え置く）。 */
   function measuredWithOneRegression() {
     const measured = makeMeasured();
     measured.rows[1].mnemoraShareOfNaiveChars = 5;
@@ -287,7 +264,6 @@ describe("evaluateCompare（⭐ 門の判定。Issue #477 の陽性対照）", (
   it("🔴【本題】基準値が1行だけなら indeterminate（緑にしない。(あ)では閉じない窓）", () => {
     const measured = measuredWithOneRegression();
     const baseline = { rows: [structuredClone(makeRow({ turnCount: 2, fillerPairs: 0 }))] };
-    // 🔴 (あ)（validateBaseline に空 rows 検査を足す）はこの窓を閉じない——現に通る。
     expect(validateBaseline(baseline).ok).toBe(true);
     const result = evaluateCompare(measured, baseline);
     expect(result.verdict).toBe("indeterminate");
@@ -298,8 +274,6 @@ describe("evaluateCompare（⭐ 門の判定。Issue #477 の陽性対照）", (
   it("🔴【本題2】基準値が空配列なら indeterminate（validateBaseline は通したままで落ちる）", () => {
     const measured = measuredWithOneRegression();
     const baseline = { rows: [] };
-    // ⭐ (い) が (あ) を包含している証拠——`validateBaseline` に空 rows 検査を足さなくても、
-    // 空の基準値は「1会話長も比較していない」として判定不能へ落ちる。
     expect(validateBaseline(baseline).ok).toBe(true);
     const result = evaluateCompare(measured, baseline);
     expect(result.verdict).toBe("indeterminate");
@@ -333,19 +307,13 @@ describe("evaluateCompare（⭐ 門の判定。Issue #477 の陽性対照）", (
   });
 
   it("⛔ 下限に件数を焼き込んでいない（両側が同じ1行だけでも pass になる）", () => {
-    // 期待する行数（`DEFAULT_COMPARE_SEQUENCE` の12点）は TypeScript 側に在り、
-    // `scripts/*.mjs` からは引けない。⟹ 下限は「実測側の集合」と「基準値側の集合」の
-    // 一致だけから取る。この歯は、件数がコードに焼き込まれていないことを固定する。
+    // 期待する行数は TypeScript 側にあり `scripts/*.mjs` から引けないので、件数はコードに焼き込まない。
     const measured = makeMeasured({ rows: [makeRow({ turnCount: 2, fillerPairs: 0 })] });
     const result = evaluateCompare(measured, baselineFrom(measured));
     expect(result.verdict).toBe("pass");
   });
 });
 
-/**
- * ⭐ Issue #403: 基準値の「鮮度」——⭐門(`evaluateCompare`)が見ない欄(`omitted` 等)の
- * 相違を検出する。⛔ **判定ではない**——この関数は `verdict`/exit code を持たない。
- */
 describe("evaluateBaselineFreshness", () => {
   function baselineWithProvenance(measured, provenance) {
     return { ...baselineFrom(measured), provenance };
@@ -465,7 +433,6 @@ describe("buildSummaryMarkdown", () => {
     const markdown = buildSummaryMarkdown({ measured, baseline: baselineFrom(makeMeasured()) });
     expect(markdown).toContain("判定不能(比較していない会話長が在る)");
     expect(markdown).toContain("この会話長は比較していない");
-    // ⛔ 以前の文言（推測で補っていた）が復活していないこと。
     expect(markdown).not.toContain("新しい会話長か、基準値がまだ追随していない");
   });
 

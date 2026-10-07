@@ -3,14 +3,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
-/**
- * `docs/conformance.md` §3「`.github/workflows/ci.yml` に、この4つの env は設定値として1つも無い」を縛る。
- * live の歯（実 API・実 ONNX）を開く env が CI に設定されると、§3 の「構造的に一度も走らない歯」の前提が崩れ、
- * 鍵が在れば課金も起きうる（同節の ADR 0019 §5c）。ci.yml は読むだけで、変えない。
- *
- * コメント（行頭の `#` と、空白に続く `#` 以降）は取り除いてから見る——ci.yml はこれらの名前を
- * コメントの中で何度も説明しているので、そのまま探すと必ず当たる（下の陽性対照）。
- */
+/** ci.yml はこれらの名前をコメントの中で何度も説明しているので、コメントを取り除いてから見る。そのまま探すと必ず当たる。 */
 
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
 const ciYml = readFileSync(join(repoRoot, ".github/workflows/ci.yml"), "utf8");

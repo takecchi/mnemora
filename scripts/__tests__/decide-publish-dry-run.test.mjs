@@ -5,19 +5,6 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { spawnSyncWithDeadline } from "./spawn-with-deadline.mjs";
 
-/**
- * `scripts/decide-publish-dry-run.mjs`（`.github/workflows/publish.yml` の CLI 入口）の歯。
- *
- * `scripts/__tests__/publish-dry-run.test.mjs` は判定関数 `decideDryRun()` を直接検査するが、
- * ここでは**本物のスクリプトを子プロセスとして起動し**、workflow が実際に依拠する2点——
- *
- * 1. `$GITHUB_OUTPUT` に `dry_run=true`/`dry_run=false` が書かれること
- * 2. 想定外の入力のときだけ stdout に `::warning::` が出ること（5番目の固定対象）
- *
- * を測る。差し替えず本物を起動するのは `scripts/__tests__/run-db-tests.test.mjs` と
- * 同じ理由——「CLI がその通りに配線されているか」は、判定関数だけを見ていては分からない。
- */
-
 const script = fileURLToPath(new URL("../decide-publish-dry-run.mjs", import.meta.url));
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
 
@@ -74,9 +61,6 @@ describe("scripts/decide-publish-dry-run.mjs（CLI として起動したとき�
     expect(result.stdout).not.toContain("::warning::");
   });
 
-  /**
-   * ⭐⭐ 芯（3番目 + 5番目）。想定外の値のときだけ、予行に倒れ、かつ ::warning:: が出ること。
-   */
   it("workflow_dispatch × 想定外の dry_run ⟹ GITHUB_OUTPUT に dry_run=true、::warning:: が出る", () => {
     const { result, output } = run({ eventName: "workflow_dispatch", dryRunInput: "" });
     expect(result.status).toBe(0);

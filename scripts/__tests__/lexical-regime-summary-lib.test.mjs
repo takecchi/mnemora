@@ -5,16 +5,6 @@ import {
   validateMeasured,
 } from "../lexical-regime-summary-lib.mjs";
 
-/**
- * `lexical-regime-summary-lib.mjs`(純関数の側)の歯。DB を要求しない
- * ——`consolidation-cost-summary-lib.test.mjs`/`identifier-probe-summary-lib.test.mjs`
- * と同じ分担・同じ理由(Issue #148)。
- *
- * 🔴 **ここで固定する一番大事な性質**: `validateMeasured` は regime の値
- * (`server_encoding`/`nonAsciiIsIndexed` がどちらか)を一切見ない。検査するのは
- * 「値が空・欠けていないか」という構造だけであり、**これは値の門ではない**。
- */
-
 function makeValid(overrides = {}) {
   return {
     schemaVersion: 2,
@@ -88,7 +78,6 @@ describe("validateMeasured", () => {
     expect(validateMeasured(makeValid({ serverEncoding: "UTF8" })).ok).toBe(true);
   });
 
-  // 🔴 Issue #148 ②: lcCollate / lcCtype / defaultTextSearchConfig を測るだけの軸として足した。
   it("lcCollate が空文字だと ok: false", () => {
     const result = validateMeasured(makeValid({ lcCollate: "" }));
     expect(result.ok).toBe(false);
@@ -187,7 +176,6 @@ describe("buildSummaryMarkdown", () => {
     expect(markdown).toContain("門ではない");
   });
 
-  // 🔴 Issue #148 ②
   it("lc_collate / lc_ctype / default_text_search_config を出す", () => {
     const markdown = buildSummaryMarkdown(makeValid(), "UTF8");
     expect(markdown).toContain("en_US.UTF-8");

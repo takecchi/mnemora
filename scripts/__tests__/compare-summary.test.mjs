@@ -5,32 +5,6 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { spawnSyncWithDeadline } from "./spawn-with-deadline.mjs";
 
-/**
- * `scripts/compare-summary.mjs` の歯。**本物のスクリプトを子プロセスとして実際に
- * 起動する**(`time-term-summary.test.mjs`/`identifier-probe-summary.test.mjs`と
- * 同じ形・同じ理由)——`compare-summary-lib.test.mjs` は純関数だけを見ており、
- * 「CLI としての配線」(引数の読み方・ファイル I/O・**exit code**)はここでしか測れない。
- *
- * 🔴 **このファイルが固定している線**:
- *
- * 1. **⭐ `compare` は他5本と違い門である(ADR 0133)**——`mnemoraShareOfNaiveChars` が
- *    基準値より悪化(増加)した、または `factStatementSurvived` が true→false に
- *    退行したら非0で終わる。
- * 2. **それ以外の相違(`naiveChars` 等、退行の判定対象外の欄)だけなら exit 0**。
- *    改善(`mnemoraShareOfNaiveChars` が減った / `factStatementSurvived` が
- *    false→true)も exit 0。
- * 3. **`--baseline` を省略すれば exit 0**——基準値が無ければ退行の判定そのものが
- *    できない(門として機能しない)。
- * 4. **入力そのものが壊れていれば非0**(JSON が読めない・parse できない・rows が
- *    欠ける・`--baseline` が壊れている)。
- * 5. **🔴 実測と基準値の `turnCount` 集合が一致しなければ exit 2(判定不能)**
- *    (Issue #477)。⛔ **判定不能を 0 に倒さない**——「比較していない」を
- *    「退行が無い」と同じ顔で出さないため。終了コードの語彙
- *    (pass=0 / fail=1 / 判定不能=2)は `check-publish-run-coverage.mjs` に揃えてある。
- *
- * DB もネットワークも要求しない——このスクリプトは JSON ファイルを最大2つ読むだけである。
- */
-
 const script = fileURLToPath(new URL("../compare-summary.mjs", import.meta.url));
 
 function makeRow(overrides = {}) {
@@ -167,16 +141,6 @@ describe("compare-summary.mjs（子プロセスで起動）", () => {
     expect(result.stdout).toContain("naiveChars");
   });
 
-  /**
-   * ⭐ **Issue #477 の陽性対照を、CLI の終了コードとして固定する。**
-   *
-   * `main`（`dd9ec8e` 時点）では、基準値を1行だけ／空配列にすると、**同じ実測が
-   * 退行していても** `computeRegressions` が0件を返し、この CLI は **exit 0（緑）**
-   * を出していた（探り棒で逐語に記録した）。いまは exit 2（判定不能）である。
-   *
-   * ⛔ **判定不能を 0 に倒さない**（`check-publish-run-coverage.mjs` と同じ語彙:
-   * pass=0 / fail=1 / 判定不能=2）。
-   */
   it("🔴【本題】基準値が1行だけなら exit 2（判定不能。緑にしない）", () => {
     const measured = makeMeasured();
     measured.rows[1].mnemoraShareOfNaiveChars = 5; // turnCount=10 が退行している
@@ -292,12 +256,6 @@ describe("compare-summary.mjs（子プロセスで起動）", () => {
     expect(result.status).not.toBe(0);
   });
 
-  /**
-   * 🔴 Issue #1814: `--baseline` を**空の値で**渡すと、渡さない場合と同じ扱いになり
-   * exit 0 で終わっていた——⭐門が黙って外れる。`--baseline "$BASELINE"` のように
-   * 変数展開が空になる書き方で踏む。空の値・値が無い・値の位置に次のフラグが来るは、
-   * どれも「指定した」側であり、使い方の誤りとして exit 1 にする。
-   */
   it.each([
     ["空の値", ["--baseline", ""]],
     ["値が無い（末尾）", ["--baseline"]],
@@ -322,10 +280,6 @@ describe("compare-summary.mjs（子プロセスで起動）", () => {
     expect(result.stderr).toContain("--measured");
   });
 
-  /**
-   * ⭐ Issue #403: 基準値の鮮度は⭐門が見ない欄(`omitted` 等)の相違を stderr へ
-   * 警告として出す。⛔ **門ではない**——終了コードは変えない。
-   */
   it("🔴 omitted だけが相違する入力でも exit 0 のままで、stderr に鮮度の警告が出る", () => {
     const baseline = baselineFrom(makeMeasured());
     const measured = makeMeasured();

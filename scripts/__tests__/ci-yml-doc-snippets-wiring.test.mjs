@@ -2,19 +2,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
-/**
- * ⭐ **この歯が測っているもの**（ADR 0345）
- *
- * **`.github/workflows/ci.yml` の `build` ジョブが、`pnpm run check:doc-snippets`
- * （`scripts/check-doc-snippets.mjs`）を `Build` ステップより後で走らせていること。**
- *
- * `check-doc-snippets-lib.test.mjs` は部品を合成の入力で確かめるだけで、`ci.yml` を読まない。
- * ⟹ 誰かがこの段を落としても、`Build` より前へ動かしても（`dist` が無くて全部の片が
- * 解決できずに落ちる）、別ジョブへ切り出しても（required status check の文脈名とずれる）、
- * そちらは緑のまま通る。
- *
- * ⚠ YAML は構造として解析していない（`ci-yml-api-check-wiring.test.mjs` と同じ判断）。
- */
+/** YAML は構造として解析せず文字列で見る。 */
 
 const workflow = readFileSync(
   fileURLToPath(new URL("../../.github/workflows/ci.yml", import.meta.url)),

@@ -5,20 +5,6 @@ import {
   findNameDeclarations,
 } from "../workflow-name-comment-lib.mjs";
 
-/**
- * `scripts/workflow-name-comment-lib.mjs` の境界の歯。
- *
- * ⭐ **この歯が測っているもの**: 「引用符の有無」と「`#` の直前が半角空白か全角文字か」の
- * 組み合わせを、合成した YAML 断片で機械的に確かめる。実物の `.github/workflows/**` に
- * この歯を当てるのは `scripts/__tests__/workflow-name-comment-wiring.test.mjs` であり、
- * ここでは重複しない——ここは lib の**判定ロジックそのもの**を、`ci.yml` を1バイトも
- * 読まずに測る(`lexical-regime-coverage-lib.test.mjs` と同じ分担)。
- *
- * ⭐ **境界の核心(`ci.yml:518` 型)**: `#` が在ることそのものではなく、「その直前が
- * YAML の空白(半角スペース/タブ)かどうか」で判定が変わる。全角の `（` は空白ではない
- * ——ここを取り違えると `ci.yml:518` のような健全な行を誤検出して赤くなる。
- */
-
 describe("classifyNameValue — 境界の4形(依頼の表そのもの)", () => {
   it("① 引用符付き・# 在り → safe(引用符の中なのでコメントにならない)", () => {
     const result = classifyNameValue('"…値を残す（Issue #136）"');

@@ -2,30 +2,9 @@ import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
-/**
- * ADR 索引の運用の案内の文面が、元の規範（「ADR を足す PR の作成者は索引を触らない・自分で直さない。
- * マージする側が直前に再生成する」）へ**戻っていない**ことの歯（#1503 の確かめ直しで見つかった穴）。
- *
- * #1503 は、案内の文面を実際の運用（ADR を足す PR の側で生成器を当てて索引も commit し、
- * `adr-index-freshness` を PR 上で緑にしてからマージする）に合わせて直した。ところが既存の歯は
- * 索引の「表」と判定の関数を見るだけで、案内の文面は誰も読まない——文面を元に戻しても緑のままだった。
- * 戻ったときの害は大きい（文面どおりに読んで「作成者は触らない」と止まり、CI の赤を直さない担当が出る）。
- *
- * ⚠ **文面の全体は縛らない。**縛るのは約束の核だけである。
- *   1. 元の規範を**規範として**書いた句が無い（「作成者は…触らない／直さない」。ただし、
- *      ADR 本文の読み方として**引用符つきで**言及するのは良い——今の文面がそうしている）。
- *   2. 「PR の側で」と、2026-09-30 の追記への指し示しが在る。
- * ちょっとした言い換えでは落ちない。逆に、元の規範に戻せば落ちる。
- *
- * 対象は、生成領域の外にある3か所: `docs/decisions/README.md` の「一覧」節の冒頭、
- * `docs/autonomy.md` §4.0、`scripts/generate-adr-index.mjs` の冒頭コメント。
- * 追記の本体（ADR 0137・0192 の末尾）が在ることも見る。
- */
-
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
 const read = (relativePath) => readFileSync(`${repoRoot}${relativePath}`, "utf8");
 
-/** 見出し `startMarker` から、次の `endMarker` の手前まで。 */
 function sliceBetween(text, startMarker, endMarker) {
   const start = text.indexOf(startMarker);
   expect(start, `${startMarker} が見つからない`).toBeGreaterThanOrEqual(0);
@@ -34,16 +13,15 @@ function sliceBetween(text, startMarker, endMarker) {
   return text.slice(start, end);
 }
 
-/** 引用符つきの読み方（「作成者は触らない」と読める、など）は、規範ではなく言及なので除く。 */
 function withoutQuotedReadings(text) {
   return text.replace(/「作成者は[^」]*」/g, "");
 }
 
-// 元の規範の核。「作成者(は|が)…触らない／直さない／直してはいけない／実行しない」の形。
 const OLD_NORM =
   /作成者(?:は|が|自身は)[^。\n]{0,30}(?:触らない|直さない|直してはいけない|実行しない)/;
 const OLD_NORM_MERGER = /マージする側が[^。\n]{0,20}(?:再生成|生成して)/;
 
+/** 文面の全体は縛らない。縛るのは約束の核だけにして、ちょっとした言い換えでは落ちないようにする。 */
 const places = [
   {
     name: "docs/decisions/README.md 「一覧」節の冒頭",

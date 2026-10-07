@@ -8,13 +8,6 @@ import {
   validateMeasured,
 } from "../retrieval-quality-summary-lib.mjs";
 
-/**
- * `retrieval-quality-summary-lib.mjs`(純関数の側)の歯。DB を要求しない。
- *
- * `retrieval-quality-summary.test.mjs`(本物のスクリプトを子プロセスで起動する歯)とは
- * 別の観点——ここは「組み立てのロジックそのもの」だけを見る。
- */
-
 function makeArm(overrides = {}) {
   return {
     armLabel: "A: 擬似LLM+擬似埋め込み",
@@ -200,7 +193,6 @@ describe("buildLexicalChannelWarningSection — 向きを反転させた警告(A
     expect(section).toContain("lexicalMatchRows=0");
     expect(section).toContain("recalledRows=70");
     expect(section).toContain("ADR 0108");
-    // 🔑 赤の意味(コードを読まずに分かること)。
     expect(section).toContain("これは失敗ではない");
     expect(section).toContain("測り直すこと");
   });
@@ -239,7 +231,6 @@ describe("buildLexicalChannelWarningSection — 向きを反転させた警告(A
   });
 });
 
-/** `termDistinct` を持つ arm を作る補助(ADR 0109)。 */
 function makeArmWithTermDistinct(overrides = {}) {
   return makeArm({
     termDistinct: [
@@ -298,7 +289,6 @@ describe("buildConstantTermSection — 非門の節(ADR 0109)", () => {
     expect(section).toContain("候補間で値が動いていない項がある");
     expect(section).toContain("tagMatch");
     expect(section).toContain("strength");
-    // similarity/decay/freshness は1通りではないので列挙されない。
     const armLine = section
       .split("\n")
       .find((line) => line.startsWith(`- ${arms[0].armLabel}:`) && line.includes("tagMatch"));
@@ -365,9 +355,6 @@ describe("buildConstantTermSection — 非門の節(ADR 0109)", () => {
   });
 
   it("exit code には触れない(呼び出し側の契約——このテストは文字列を返すだけであることの確認)", () => {
-    // buildConstantTermSection は process.exit を一切呼ばない純関数である。
-    // 呼べば副作用としてテストプロセスごと落ちるはずなので、正常に return することが
-    // 「exit code に触れていない」ことの検査になる。
     expect(() => buildConstantTermSection([makeArmWithTermDistinct()])).not.toThrow();
   });
 });

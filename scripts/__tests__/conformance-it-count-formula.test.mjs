@@ -4,18 +4,6 @@ import { fileURLToPath } from "node:url";
 import ts from "typescript";
 import { describe, expect, it } from "vitest";
 
-/**
- * `docs/conformance.md` §1 の「it の数え方の式」が、適合テスト（`packages/testkit/src/*-conformance.ts`）の
- * it の宣言を1つも取りこぼさないことを縛る。§1 は「別名が増えたら、この式の `maybe[A-Za-z]*It` に当たらない
- * 名前でないかを確かめること」を手作業にしていた——ここでそれを機械で見る。
- *
- * - 式は文書から読む（文書の式が変われば、この歯も変わった式を見る）。
- * - 適合テストの中身は読むだけで、変えない。
- * - 数えるもの: 文として書かれた呼び出しのうち、呼び先の根が `it` か、`it` を値に持つ別名であるもの
- *   （`it(`・`it.skip(`・`it.skipIf(…)(`・`it.each(…)(`・`maybeIt(` など）。TypeScript で構文解析して数え、
- *   式の数と突き合わせる。
- */
-
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
 const conformanceDoc = readFileSync(join(repoRoot, "docs/conformance.md"), "utf8");
 const suiteDir = join(repoRoot, "packages/testkit/src");
@@ -28,7 +16,6 @@ function formulaFromDoc() {
   return new RegExp(m[1]);
 }
 
-/** `it` を値に持つ別名（`const maybeIt = cond ? it : it.skip;` など）の名前。 */
 function aliasesOf(sf) {
   const names = new Set();
   const mentionsIt = (node) => {
@@ -57,7 +44,6 @@ function aliasesOf(sf) {
   return names;
 }
 
-/** 呼び先の根の識別子（`it.skipIf(x)(…)` → `it`）。 */
 function calleeRoot(expr) {
   let e = expr;
   for (;;) {

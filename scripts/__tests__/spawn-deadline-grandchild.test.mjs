@@ -10,13 +10,7 @@ import {
   spawnSyncWithDeadline,
 } from "./spawn-with-deadline.mjs";
 
-/**
- * 期限を超えて子を止めたとき、**子が起こした子（孫）も残らない**こと。
- *
- * 【実測 2026-09-28】子だけに SIGKILL を送る形では、孫は残る。`bash -c "<孫を起こす>; echo done"` を
- * `spawnSync(…, { timeout: 1000, killSignal: "SIGKILL" })` で起こすと、1004 ms で ETIMEDOUT が返り、孫は生きていた
- * （bash が1つのコマンドだけなら exec して子そのものになるので、孫にならない。2つ目のコマンドを置くと fork する）。
- */
+// 子だけに SIGKILL を送る形では孫が残る（bash が2つ目のコマンドを持つと fork するため）。
 
 function isAlive(pid) {
   try {
@@ -27,7 +21,6 @@ function isAlive(pid) {
   }
 }
 
-/** SIGKILL の配達は非同期なので、死ぬまで少し待つ（上限つき）。 */
 async function diesWithin(pid, ms) {
   const until = Date.now() + ms;
   while (Date.now() < until) {
@@ -40,19 +33,16 @@ async function diesWithin(pid, ms) {
 function setup() {
   const dir = mkdtempSync(join(tmpdir(), "spawn-deadline-grandchild-"));
   const pidFile = join(dir, "grandchild.pid");
-  // 孫: 自分の pid を書いて、終わらない。
   const grandchild = join(dir, "grandchild.mjs");
   writeFileSync(
     grandchild,
     `import { writeFileSync } from "node:fs"; writeFileSync(${JSON.stringify(pidFile)}, String(process.pid)); setInterval(() => {}, 1000);\n`,
   );
-  // node の子: 孫を起こして、自分も終わらない。
   const child = join(dir, "child.mjs");
   writeFileSync(
     child,
     `import { spawn } from "node:child_process"; spawn(process.execPath, [${JSON.stringify(grandchild)}], { stdio: "ignore" }); setInterval(() => {}, 1000);\n`,
   );
-  // bash の子: 孫を起こしてから、2つ目のコマンドを待つ（fork させる）。
   const bashScript = `${JSON.stringify(process.execPath)} ${JSON.stringify(grandchild)}; echo done`;
   return { dir, pidFile, child, bashScript };
 }
@@ -98,7 +88,6 @@ describe("期限を超えて止めたとき、孫も残らない", () => {
     const { dir, pidFile, bashScript } = setup();
     let pid;
     try {
-      // `execSync` は `/bin/sh -c` を挟む。同じコマンドの文字列を、そのシェルに渡す。
       expect(() => execSyncWithDeadline(bashScript, { timeoutMs: 1_500, stdio: "pipe" })).toThrow(
         /秒で終わらなかった/,
       );

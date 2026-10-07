@@ -7,35 +7,7 @@ import { validateBaseline, validateMeasured } from "../association-summary-lib.m
 import { blankOutWorkflowComments } from "../workflow-comment-blank-lib.mjs";
 import { spawnSyncWithDeadline } from "./spawn-with-deadline.mjs";
 
-/**
- * ⭐ **この歯が測っているもの(消す前に読むこと)**
- *
- * **`.github/workflows/ci.yml` の `association-probes` ジョブ(Issue #291)が、実際に
- * `scripts/association-summary.mjs` へ、bench が書く JSON と同じパスで `--measured` を
- * 渡していること**、そして **`MNEMORA_ASSOCIATION_JSON`(bench の書き先)と artifact の
- * `path`、`MNEMORA_LOCAL_EMBEDDING_CACHE_DIR`(モデル重みの置き場所)と
- * `actions/cache` の `path` が、それぞれ同じ場所を指していること**。
- *
- * ⚠ **これは `association-summary.test.mjs`/`association-summary-lib.test.mjs` の
- * 重複ではない**(`ci-yml-identifier-probes-wiring.test.mjs` の docstring と同じ理由)。
- * その2本は**入力を自分で作って**要約の中身と exit code を測る——**どちらも `ci.yml` を
- * 1バイトも読まない。**⟹ 誰かが `ci.yml` から summary ステップの `--measured` を
- * 打ち間違えても、`MNEMORA_ASSOCIATION_JSON` の書き先と artifact の `path` をずらしても、
- * `MNEMORA_LOCAL_EMBEDDING_CACHE_DIR` とキャッシュの `path` をずらしても、**その2本は
- * 緑のまま通る。**⟹ **配線が閉じていることを、配線の側で固定する。**
- *
- * ⚠ **YAML は構造として解析していない(文字列で見ている)。**
- * `ci-yml-identifier-probes-wiring.test.mjs`/`ci-yml-retrieval-wiring.test.mjs` と
- * 同じ判断で、歯のために YAML パーサの依存を足していない(依存追加はオーナー専権。
- * `docs/autonomy.md`)。**だからこの歯は書き方の変更に弱い。**壊れたときは
- * 「配線が変わった」か「書き方が変わった」かを見て、**配線が変わっていないなら
- * 取り出し方のほうを直すこと(歯を消さないこと)。**
- *
- * `examples/chat/association-baseline.json`(ADR 0385。CI `ubuntu-latest` での実測から
- * 手作業で置いた)ができたので、`ci-yml-identifier-probes-wiring.test.mjs` と同じ形で
- * `--baseline` の配線(コミット済みの基準値ファイルを指しているか・そのファイルが
- * `validateBaseline` を通るか)もここで固定する。
- */
+/** YAML は構造として解析せず文字列で見る（依存追加はオーナー専権）。壊れたときは、配線が変わったのか書き方が変わったのかを見て、配線が変わっていないなら取り出し方を直す。 */
 
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
 const workflowPath = fileURLToPath(new URL("../../.github/workflows/ci.yml", import.meta.url));
@@ -44,8 +16,6 @@ const workflow = readFileSync(workflowPath, "utf8");
 const JOB_ID = "association-probes";
 
 /**
- * `jobs:` の下の1ジョブ(`  <id>:` から、次の同じ深さの `  <id>:` まで)を切り出す。
- *
  * @param {string} yaml
  * @param {string} jobId
  */
@@ -69,9 +39,6 @@ function extractJob(yaml, jobId) {
 }
 
 /**
- * `steps:` を段へ切り分け、各段の `name` / `env` / `run` だけを取り出す
- * (`ci-yml-identifier-probes-wiring.test.mjs` の `parseSteps` と同じ形)。
- *
  * @param {string} jobBlock
  * @returns {{ name: string, env: Record<string, string>, run: string }[]}
  */
@@ -99,7 +66,6 @@ function parseSteps(jobBlock) {
 
   for (let i = stepsAt + 1; i < lines.length; i += 1) {
     const line = lines[i];
-    // `- name: 値` は引用符付き("…")のことも無しのこともある——両方拾う。
     const nameMatched = /^ {6}- name: (?:"([^"]*)"|(.*))$/.exec(line);
     if (nameMatched) {
       flush();
@@ -152,17 +118,10 @@ const summaryStep = steps.find((step) => step.run.includes("association-summary.
 const artifactStep = steps.find((step) => step.name.includes("成果物として残す"));
 const cacheStep = steps.find((step) => step.name.includes("キャッシュ"));
 
-/** 基準値ファイル(本物。ADR 0385)。差分の有無を作り分けるための土台にも使う。 */
 const baselineRelativePath = "examples/chat/association-baseline.json";
 const baseline = JSON.parse(readFileSync(join(repoRoot, baselineRelativePath), "utf8"));
 
-/**
- * ある段の生テキスト(`- name: <name>` から次の段の `- name:` まで)を切り出し、
- * コメントを空白へ潰したものを返す(`ci-yml-identifier-probes-wiring.test.mjs` の
- * `extractStepBlock` と同じ形・同じ理由——実キーと地の文コメントの引用を区別する)。
- *
- * @type {{ stepName: string, unhandled: { lineNumber: number, reason: string, line: string }[] }[]}
- */
+/** @type {{ stepName: string, unhandled: { lineNumber: number, reason: string, line: string }[] }[]} */
 const stepBlockCommentUnhandled = [];
 
 /**
@@ -196,13 +155,11 @@ function blockDeclaresAlways(blankedBlock) {
   return /^\s*if:\s*always\(\)\s*$/m.test(blankedBlock);
 }
 
-/** `with:` の `path:`/`key:` を読む(段のブロックはコメントを潰した後のテキスト)。 */
 function readWithField(blankedBlock, field) {
   const matched = new RegExp(`^\\s*${field}:\\s*(.+)$`, "m").exec(blankedBlock ?? "");
   return matched ? matched[1].trim() : undefined;
 }
 
-/** `--baseline <path>` を yml から読む(引用符あり・なしの両方を拾う)。 */
 function summaryStepBaselinePath() {
   const matched = /--baseline\s+(?:"([^"]+)"|([^\s\\]+))/.exec(summaryStep?.run ?? "");
   return matched ? (matched[1] ?? matched[2]) : undefined;
@@ -271,12 +228,7 @@ describe("ci.yml の association-probes ジョブの配線(Issue #291)", () => {
   });
 
   it("⛔ MNEMORA_PROVIDER_SOURCE / OPENAI_API_KEY を渡していない(local embedding は鍵を要求しない)", () => {
-    // 🔴 素朴な toContain は使わない——このジョブ自身の地の文コメントが
-    // 「なぜこの2つを渡していないか」を説明するために、まさにこの2つの識別子を
-    // 引用している(`identifier-probes` ジョブの先例と同じ書き方)。コメントを
-    // 潰してから見る(`blankOutWorkflowComments`。実キーとコメントの引用を区別する
-    // ため、`ci-yml-identifier-probes-wiring.test.mjs` の `blockDeclaresAlways` と
-    // 同じ判断)。
+    // 素朴な toContain は使わない。このジョブの地の文コメントがこの2つの識別子を引用しているので、コメントを潰してから見る。
     const { text: blanked } = blankOutWorkflowComments(jobBlock);
     expect(blanked).not.toContain("MNEMORA_PROVIDER_SOURCE");
     expect(blanked).not.toContain("OPENAI_API_KEY");
@@ -305,17 +257,12 @@ describe("ci.yml の association-probes ジョブの配線(Issue #291)", () => {
   });
 
   it("🔴 要約の段が --baseline をコミット済みの基準値ファイルへ渡している(ADR 0385)", () => {
-    // ⭐ **これが「輪が閉じている」ことの固定点**(`ci-yml-identifier-probes-wiring
-    // .test.mjs` と同じ形)。この行が消えると、値が動いても誰も気づかず、
-    // 誰も基準値を更新せず、新しい値が PR の diff に現れなくなる。
     expect(summaryStepBaselinePath(), "要約の段に --baseline の指定が無い").toBe(
       baselineRelativePath,
     );
   });
 
   it("🔴 --baseline が指すファイルが、実際に validateBaseline を通る", () => {
-    // パスが合っていても中身が要約の期待する形でなければ、CI では
-    // 「基準値 JSON が使えない」で非0になる——それは repo に置いてある時点で分かる。
     const result = validateBaseline(baseline);
     expect(result.ok, result.ok ? "" : result.error).toBe(true);
   });
@@ -338,11 +285,6 @@ describe("ci.yml の association-probes ジョブの配線(Issue #291)", () => {
     }
   });
 
-  /**
-   * yml から取り出した要約の段を、実際に走らせる(`ci-yml-identifier-probes-wiring
-   * .test.mjs` の `runSummaryStepFromWorkflow` と同じ形)。まだ `--baseline` が無いので、
-   * ここでは measured JSON の正当性だけを見る。
-   */
   function runSummaryStepFromWorkflow(measured) {
     const workspace = mkdtempSync(join(tmpdir(), "mnemora-assoc-wiring-"));
     try {
