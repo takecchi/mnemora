@@ -4,28 +4,11 @@ import ts from "typescript";
 import { describe, expect, it } from "vitest";
 
 /**
- * Issue #1040: node-postgres（`pg`）は `Date` のパラメータを**プロセスのローカル時刻**の
- * 文字列にし、時差を分に切り捨てて送る。プロセスの TZ が Asia/Tokyo のとき、1888年より前の
- * 日時は59秒ずれて保存されていた。直し方は「`Date` を `pg` に渡さず、必ず
- * `toPgTimestamp`（`mapping.ts`）を通す」であり、76か所を直した（PR #1052）。
+ * node-postgres（`pg`）は `Date` のパラメータをプロセスのローカル時刻の文字列にし、時差を分に切り捨てて送る。直し方は「`Date` を `pg` に渡さず、必ず `toPgTimestamp`（`mapping.ts`）を通す」。
+ * この歯は、生の `Date` が SQL に戻ってくるのを止める。`src/`（`__tests__` を除く）を TypeScript の型検査器にかけ、タグ付きテンプレートの埋め込み式と `sql.param(...)` / `.query(...)` / `.execute(...)` の引数に、型が `Date` を含む式が1つも無いことを確かめる。
  *
- * この歯は、生の `Date` が SQL に戻ってくるのを止める。`src/`（`__tests__` を除く）を
- * TypeScript の型検査器にかけ、次の位置に**型が `Date` を含む式**が1つも無いことを確かめる。
- *
- * - タグ付きテンプレート（`` sql`...${x}...` ``）の埋め込み式
- * - `sql.param(...)` / `.query(...)` / `.execute(...)` の引数（タグ付きテンプレートそのものを除く）
- *
- * 「`Date` を含む」は、`Date` そのもの・`Date` を含む union / intersection・`Date` の
- * 配列 / tuple・制約が `Date` の型引数である。
- *
- * ⚠ **捕まらないもの**:
- * - **型が `any` の式**。`any` を経由して `Date` が入ると（`as any`・型の無い行の値・
- *   `JSON.parse` の結果など）、この歯は何も言わない。型が `unknown` の式も同じである。
- * - `Date` をプロパティに持つオブジェクト（`{ at: Date }` をそのまま渡す）。
- * - 上の位置以外から `pg` に届く値（例: 自前の関数で包んでから `pool.query` に渡す）。
- *   ただし `.query` / `.execute` の引数としては、上の規則で見る。
- * - 実行時の値。これは静的な検査であり、DB の往復は `timestamp-write-process-tz.postgres.test.ts`
- *   が見る。
+ * ⚠ 捕まらないもの: 型が `any` / `unknown` の式（`as any`・`JSON.parse` の結果など）、`Date` をプロパティに持つオブジェクト、上の位置以外から `pg` に届く値、実行時の値。
+ * これは静的な検査であり、DB の往復は `timestamp-write-process-tz.postgres.test.ts` が見る。
  */
 
 const PACKAGE_DIR = fileURLToPath(new URL("../..", import.meta.url));
@@ -184,7 +167,6 @@ describe("生の Date を SQL に渡さない（Issue #1040。Date は toPgTimes
     const result = scan(program, (f) => path.normalize(f) === fileName);
 
     expect(result.sites.map((s) => s.text)).toEqual(["t", "at", "maybe ?? null", "[at]", "[at]"]);
-    // `any` を経由した `loose` は拾えない（doc の「捕まらないもの」）。
     expect(result.sites.map((s) => s.text)).not.toContain("loose");
   });
 });

@@ -8,16 +8,9 @@ import { POOL_ERROR_WARNING_HEAD } from "../pool-error-warning.js";
 import { requireDatabaseUrl } from "./test-db.js";
 
 /**
- * `mnemora-postgres-migrate` の Pool の、待機中の接続が DB 側から切られたとき（ADR 0448）。
- *
- * CLI は `createPostgresClient` を使わず自前の `Pool` を作る。pg の `Pool` は、待機中の接続が切られると
- * `error` を emit し、リスナーが無ければ Node のプロセスごと落ちる。CLI の Pool に待機中の接続が在る時間は
- * 短い（`runMigrations` が接続を返してから `runAnalyzeMemories`・`pool.end()` までの間だけ）ので、
- * 実際に落ちる窓は狭い。それでも、DB の再起動・フェイルオーバーがその窓に当たると、終了コードも
- * 台帳の状態も報告されずに落ちる。
- *
- * 切り方は `pg_terminate_backend`（`pool-idle-connection-loss.test.ts` と同じ）。直列群に入れてある
- * （`vitest.config.mts`）。
+ * CLI は `createPostgresClient` を使わず自前の `Pool` を作る。pg の `Pool` は、待機中の接続が切られると `error` を emit し、リスナーが無ければ Node のプロセスごと落ちる。
+ * 窓は狭い（`runMigrations` が接続を返してから `runAnalyzeMemories`・`pool.end()` までの間だけ）が、DB の再起動・フェイルオーバーがその窓に当たると、終了コードも台帳の状態も報告されずに落ちる。
+ * 切り方は `pg_terminate_backend`。直列群に入れてある（`vitest.config.mts`）。
  */
 const execFileAsync = promisify(execFile);
 const PACKAGE_ROOT = fileURLToPath(new URL("../../", import.meta.url));

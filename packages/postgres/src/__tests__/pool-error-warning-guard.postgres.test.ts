@@ -7,34 +7,13 @@ import { POOL_ERROR_WARNING_PREFIX } from "../pool-error-warning.js";
 import { requireDatabaseUrl } from "./test-db.js";
 
 /**
- * `setup-pool-error-warning-guard.ts`（`vitest.config.mts` の `setupFiles`）が、実際に
- * 「本来 `onPoolError`/`pool.on("error", …)` を持つべきテストが持っていない」ことを
- * 見えない形で通り過ぎさせないことを、本物の vitest を子プロセスで走らせて実測する
- * （ADR 0020 の動的な歯・`scripts/__tests__/no-unhandled-errors.test.mjs` と同じ形）。
+ * `setup-pool-error-warning-guard.ts`（`vitest.config.mts` の `setupFiles`）が、本来 `onPoolError`/`pool.on("error", …)` を持つべきテストが持っていないことを見えない形で通り過ぎさせないことを、本物の vitest を子プロセスで走らせて実測する。
+ * `DATABASE_URL` が要る（`onPoolError` を渡さず `createPostgresClient` を作り、待機中の接続を `pg_terminate_backend` で実際に切る必要があるため）。
  *
- * `DATABASE_URL` が要る——`onPoolError` を渡さず `createPostgresClient` を作り、
- * 待機中の接続を `pg_terminate_backend` で実際に切る必要があるため。
+ * `.tmp/` 配下に使い捨ての vitest 設定 + フィクスチャを書く。設定の `setupFiles` には本物のガードファイル（絶対パス）を指す（コピーではなく実物を参照するので、ガードファイル自身の変更がそのままこの歯に反映される）。
+ * フィクスチャは `onPoolError` を渡さず `createPostgresClient` を作り、自分の待機中の接続を切って、既定の警告が出る猶予を待つだけ。本物の `pnpm exec vitest run` を子プロセスとして起動し、exit code が非0になり、出力に unhandled error の報告が含まれることを確かめる。
  *
- * ## この歯がすることの流れ
- *
- * 1. `.tmp/` 配下に使い捨ての vitest 設定 + フィクスチャを書く。設定の `setupFiles` には
- *    **本物の** `src/__tests__/setup-pool-error-warning-guard.ts`（絶対パス）を指す
- *    ——コピーではなく実物を参照するので、このガードファイル自身の変更がそのまま
- *    この歯に反映される。
- * 2. フィクスチャは `onPoolError` を渡さず `createPostgresClient` を作り、`pg_terminate_backend`
- *    で自分の待機中の接続を切って、既定の警告が出る猶予を待つだけ（アサーション自体は
- *    何もしなくてよい——既定の警告が守りによって例外に変わり、vitest の外側の結果を壊す）。
- * 3. 本物の `pnpm exec vitest run` を子プロセスとして起動し、**exit code が非0**になり、
- *    出力に vitest の unhandled error の報告が含まれることを確かめる。
- *
- * ## 変異試験（この歯自身が実際に効いていることの確認。手元で実施・記録のみ。恒久的な変更ではない）
- *
- * - 生成する設定の `setupFiles` からこのガードファイルの参照を外すと、この歯は赤くなる
- *   （既定の警告がただの `console.warn` のまま素通りし、フィクスチャは exit 0 で終わるため）。
- * - `client.ts` の `pool.listenerCount("error") === 1` の判定を外しても、この歯自体は
- *   赤くならない（このフィクスチャはそもそも `pool.on("error", …)` を追加で付けていない
- *   ので、二重抑制の有無に関わらず既定の警告が出る）——その分岐の変異は
- *   `readme-unbound-promises.postgres.test.ts` の C-1/C-2 が縛る。
+ * `client.ts` の `pool.listenerCount("error") === 1` の判定を外してもこの歯は赤くならない（このフィクスチャは `pool.on("error", …)` を追加で付けていない）。その分岐は `readme-unbound-promises.postgres.test.ts` の C-1/C-2 が縛る。
  */
 describe("setup-pool-error-warning-guard.ts: 既定の pool error 警告が漏れたら vitest を非0で落とす", () => {
   let fixtureDir: string | undefined;
@@ -70,7 +49,6 @@ describe("setup-pool-error-warning-guard.ts: 既定の pool error 警告が漏�
         "export default defineConfig({",
         "  test: {",
         '    include: ["*.fixture.test.mjs"],',
-        // 本物のガードファイルを絶対パスで参照する（コピーしない）。
         `    setupFiles: [${JSON.stringify(guardSetupFile)}],`,
         "  },",
         "  resolve: {",
@@ -104,7 +82,6 @@ describe("setup-pool-error-warning-guard.ts: 既定の pool error 警告が漏�
         '      "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE application_name = $1",',
         "      [applicationName],",
         "    );",
-        // 既定の警告（守りによって例外に変わる）が実際に発火するまで待つ。
         "    await sleep(1500);",
         "  } finally {",
         "    await admin.pool.end();",
@@ -153,13 +130,7 @@ describe("setup-pool-error-warning-guard.ts: 既定の pool error 警告が漏�
 describe("setup-pool-error-warning-guard.ts: 本物の vitest 設定に載っていて、examples/chat の複製が正本と一致する", () => {
   const repoRoot = fileURLToPath(new URL("../../../../", import.meta.url));
 
-  /**
-   * `setupFiles` は、トップレベルの `test.setupFiles`（`examples/chat` はこちら）だけでなく、
-   * `test.projects[].test.setupFiles`（`packages/postgres` は Issue #1277 / ADR 0371 以降
-   * こちら——並列 project と直列 project のそれぞれが自分の `setupFiles` を持つ）にも
-   * 載りうる。両方を合わせて返す——「守りが実際に効く setupFiles のどこかに載っている」
-   * ことを見たいのであって、どちらの形で書かれているかは見ない。
-   */
+  /** `setupFiles` は、トップレベルの `test.setupFiles` と `test.projects[].test.setupFiles` のどちらにも載りうる。両方を合わせて返す（どちらの形で書かれているかは見ない）。 */
   async function setupFilesOf(configPath: string): Promise<string[]> {
     const mod = (await import(configPath)) as {
       default: {

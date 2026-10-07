@@ -16,22 +16,12 @@ const migration0032Sql = (): string =>
 const PURGE_INDEXES = ["idx_recalls_by_created", "idx_outbox_completed"];
 
 /**
- * ADR 0404 / ADR 0412 の実測（`purgeCompletedJobs` が対象を選ぶ SELECT の計画）を、歯にする。
+ * `buildPurgeCompletedJobsTargetSelect` の返り値をそのまま `EXPLAIN` する（述語を書き写さない）。
+ * outbox の既存の索引はどれも `completed_at IS NULL` の部分索引（未処理の行のための索引）で、`completed_at IS NOT NULL` の問い合わせには使えない。`idx_outbox_completed` が無いと、対象が 0 件でも表を全部読む。縛るのは次の3つ。
  *
- * 本体が打つ SELECT は `buildPurgeCompletedJobsTargetSelect`（`../outbox-store.js`）が組み立てる。
- * **この検査はその関数の返り値をそのまま `EXPLAIN` する**——述語を書き写さない。
- *
- * outbox の既存の索引はどれも `completed_at IS NULL` の部分索引（未処理の行のための索引）で、
- * `completed_at IS NOT NULL` の問い合わせには使えない。ADR 0412 の索引
- * `idx_outbox_completed (tenant_id, completed_at, id) WHERE completed_at IS NOT NULL` が無いと、
- * 対象が 0 件でも表を全部読む。縛るのは次の3つ。
- *
- * 1. **後・対象あり**: Index Scan になり、`Sort` も `Seq Scan` も無い。
- * 2. **後・対象 0 件**: 同じく `Seq Scan` が無く、`EXPLAIN (ANALYZE, BUFFERS)` の読んだバッファが
- *    表のページ数よりはるかに小さい（表を全部は読まない）。
- * 3. **前（陽性対照）**: 索引を落とすと `Seq Scan` になり、対象 0 件でも読んだバッファが表のページ数
- *    に近づく。これが無いと、1・2 の「無い／小さい」は「測る関数が別の SELECT を返している」
- *    「そもそも表が小さい」ときも緑になる。
+ * 1. 後・対象あり: Index Scan になり、`Sort` も `Seq Scan` も無い。
+ * 2. 後・対象 0 件: 同じく `Seq Scan` が無く、`EXPLAIN (ANALYZE, BUFFERS)` の読んだバッファが表のページ数よりはるかに小さい（表を全部は読まない）。
+ * 3. 前（陽性対照）: 索引を落とすと `Seq Scan` になり、対象 0 件でも読んだバッファが表のページ数に近づく。これが無いと、1・2 の「無い／小さい」は「測る関数が別の SELECT を返している」「そもそも表が小さい」ときも緑になる。
  *
  * 索引は `finally` で作り直す。全文を `console.log` で出力する。
  */
@@ -66,9 +56,7 @@ async function seedOutbox(pool: Pool): Promise<void> {
 }
 
 const CTX: Ctx = { tenantId: TENANT };
-// 対象あり: 古い側の 2/3 ほどが対象。limit は ADR 0404 の測定と同じ 100。
 const WITH_TARGETS = { olderThan: new Date(Date.now() - (ROWS_PER_TENANT / 3) * 1000), limit: 100 };
-// 対象 0 件: 全行より古い時刻を切り口にする。
 const NO_TARGETS = { olderThan: new Date(Date.now() - 10 * 365 * 24 * 3600 * 1000), limit: 100 };
 
 type PlanNode = {
@@ -152,8 +140,6 @@ describe("outbox の完了済みジョブ掃除の対象選択（ADR 0404 / ADR 
     expect(plan["Actual Rows"]).toBe(0);
     expect(text).toMatch(/Index (Only )?Scan using idx_outbox_completed on outbox/);
     expect(text).not.toContain("Seq Scan");
-    // 陽性対照の側（下の it）が表の 90% 以上を読むことを示す。ここは「表のページ数」との比で縛る
-    // （絶対数だと行数を変えたときに意味が変わる）。
     expect(tablePages).toBeGreaterThan(500);
     expect(buffers).toBeLessThan(tablePages * 0.02);
   }, 120_000);

@@ -4,13 +4,7 @@ import type { Ctx } from "@mnemora/core";
 import { PostgresOutboxStore } from "../outbox-store.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
-/**
- * `PostgresOutboxStore.fail`（PR #1060）の約束: `error` の NUL（U+0000）だけを、目に見える6文字の
- * `\u0000` に置き換えて書く（黙って消さない）。それ以外の文字は変えない。
- * `outbox-fail-nul-last-error.postgres.test.ts` は NUL が1つの例だけを見る。ここは、
- * NUL が複数ある・バックスラッシュや前後の空白・本物の `\u0000`（6文字の文字列）を含む `error` で、
- * 置き換えが「全部の NUL」「NUL だけ」であることを固定する。
- */
+/** `outbox-fail-nul-last-error.postgres.test.ts` は NUL が1つの例だけを見る。ここは、NUL が複数ある・バックスラッシュや前後の空白・本物の `\u0000`（6文字の文字列）を含む `error` で、置き換えが「全部の NUL」「NUL だけ」であることを固定する。 */
 
 const CTX: Ctx = { tenantId: `outbox-fail-nul-forms-${randomUUID()}` };
 
@@ -53,10 +47,8 @@ describe("PostgresOutboxStore.fail: last_error に書く文字列は、NUL だ�
   });
 
   it("NUL 以外は変わらない：バックスラッシュ・前後の空白・改行・本物の \\u0000（6文字）", async () => {
-    // 本物の「\u0000」6文字（NUL ではない）と、バックスラッシュ、前後の空白、改行を含む。
     const literal = " lead\\x \\u0000 end\n tail ";
     expect(await failWith(literal)).toBe(literal);
-    // NUL と同居しても、NUL 以外の文字は同じ。
     expect(await failWith(" a\\b\u0000c\\u0000 ")).toBe(" a\\b\\u0000c\\u0000 ");
   });
 });

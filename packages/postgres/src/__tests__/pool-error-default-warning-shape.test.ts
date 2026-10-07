@@ -2,15 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createPostgresClient } from "../client.js";
 import { POOL_ERROR_WARNING_HEAD } from "../pool-error-warning.js";
 
-/**
- * `createPostgresClient` の pool が `error` を emit したとき、既定の警告の形。
- * DB には繋がない（`pool.emit` で直接起こす）——接続を切る本物の実験は
- * `readme-unbound-promises.postgres.test.ts` の A〜C が見ている。
- *
- * 見ているのは、警告が名乗る中身である。
- * - 1つ目の引数は、固定の頭 + `: ` + `error.message`（message が落ちると、原因が読めない警告になる）
- * - 2つ目の引数は、`error` そのもの（`code`（SQLSTATE）はここでだけ読める）
- */
+/** DB には繋がない（`pool.emit` で直接起こす）。警告が名乗る中身を見る: 1つ目の引数は固定の頭 + `: ` + `error.message`（message が落ちると原因が読めない警告になる）、2つ目の引数は `error` そのもの（`code`（SQLSTATE）はここでだけ読める）。 */
 
 function poolError(): Error & { code: string } {
   return Object.assign(new Error("boom: connection terminated"), { code: "57P01" });

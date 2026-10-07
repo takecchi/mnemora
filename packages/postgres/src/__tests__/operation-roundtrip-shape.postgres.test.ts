@@ -21,21 +21,10 @@ import {
 } from "./test-db.js";
 
 /**
- * recall 以外の操作の DB 往復数の「形」を縛る歯（recall は `recall-roundtrip-count.postgres.test.ts`、
- * restoreSuperseded は `restore-superseded-roundtrip-count.postgres.test.ts`）。
- *
- * **往復数そのものも時間も固定しない**（実装の細部や CI の揺れで動くため。
- * `recall-roundtrip-count.postgres.test.ts` の「何を固定するか」と同じ考え方）。
- * 同じ操作を件数 N だけ変えて呼び、次のどちらかの形だけを見る:
- *
- * - **N に比例しない**: N を変えても往復数が等しい。
- * - **1件あたりの増分が一定**: N=1→5 と N=5→20 で、1件あたりの往復の増分が等しい。
- *   これらの操作は、1件ずつ CAS で書く（forget/purge/restoreArchived、ADR 0087 など）・
- *   ジョブを1件ずつ処理する（tick）・抽出した候補を1件ずつ書く（observe/reextract）設計なので、
- *   N に比例すること自体は本来の形である。この歯が捕まえるのは、それが **N の2乗**
- *   （1件ごとに N に比例する処理が挟まる形）へ崩れる回帰である。
- *
- * 【実測 2026-09-27、main 44b9326】どの操作も下の形を満たしていた（数は PR 本文に控えてある）。
+ * 往復数そのものも時間も固定しない（実装の細部や CI の揺れで動くため）。同じ操作を件数 N だけ変えて呼び、次のどちらかの形だけを見る:
+ * - N に比例しない: N を変えても往復数が等しい。
+ * - 1件あたりの増分が一定: N=1→5 と N=5→20 で、1件あたりの往復の増分が等しい。これらの操作は1件ずつ CAS で書く・ジョブを1件ずつ処理する・抽出した候補を1件ずつ書く設計なので、N に比例すること自体は本来の形である。
+ *   この歯が捕まえるのは、それが N の2乗（1件ごとに N に比例する処理が挟まる形）へ崩れる回帰である。
  */
 
 const ctx: Ctx = { tenantId: "operation-roundtrip-shape", subjectId: "s1" };
@@ -98,17 +87,6 @@ interface Kit {
   memoryStore: PostgresMemoryStore;
 }
 
-/**
- * runtime の時計を少し先へ進める。歴史的な理由で残している（今は outbox のジョブの
- * `available_at` も注入した時計に従う。ADR 0355・0559）。
- * 当時は `available_at` が DB の `now()` で書かれ、`tick()` は runtime の時計の「いま」と比べて
- * claim していた。DB の時計が Node の時計よりわずかに先に進んでいると、作った直後のジョブが
- * まだ claim できず、tick の往復数がそのぶん減って「1件あたりの増分」が揺れた
- * （【実測 2026-09-27】CI で `tick（embed）` が N=1→5 で 3.75、N=5→20 で 5.33 になった——
- * N=5 の回だけジョブが1件 claim されなかった形。手元で runtime の時計を2秒過去にずらすと、
- * tick の2本だけが同じように赤になった。この実測は ADR 0355 より前のもの）。
- * ずれの大きさに依存しないよう、十分先（60秒）にしてある。
- */
 const CLOCK_AHEAD_MS = 60_000;
 
 async function kit(): Promise<Kit> {
@@ -275,7 +253,6 @@ describe("1件あたりの往復の増分が一定（N の2乗へ崩れない）
     const t1 = await tripsFor(prepare, 1);
     const t5 = await tripsFor(prepare, 5);
     const t20 = await tripsFor(prepare, 20);
-    // 意味のある比較であることの検算: N を増やすと往復は実際に増えている（定数の操作ではない）。
     expect(t5).toBeGreaterThan(t1);
     expect((t20 - t5) / 15).toBe((t5 - t1) / 4);
   });
