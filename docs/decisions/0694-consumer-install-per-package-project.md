@@ -68,3 +68,17 @@ ADR 0346 の表を置き換える。【実測 2026-10-07、main `7d6486e4` を�
 
 - 兄弟の出荷パッケージが、`dependencies` ではなく `peerDependencies` で `@mnemora/*` に頼る形になったとき。そのときは決定2の「頼る tarball」の選び方を見直す。
 - 時間が利用者の基準（リリース前の手順として許せる長さ）を超えたとき。
+
+## 追記（2026-10-07、[PR #1121 の確かめ直し](https://github.com/takecchi/mnemora/pull/1121#issuecomment-6040077851)）: 陽性対照に P3o・P6eo を足す
+
+本文の「陽性対照の表の今の姿」の3つでは、道具の本体の2つの壊れ方を見分けられない。見分けるための対照を2つ足す。クローン miku の判断で、オーナーの判断ではない。【実測 2026-10-07、main `29eef8cf` の道具】どれも保存した元のファイルへ戻し、`cmp` で一致を確かめた。
+
+| 対照 | 何を変えるか | 元の道具での結果 | 見分ける本体の壊れ方 |
+|---|---|---|---|
+| P3o. openai の `dependencies` から `zod` を消す | `packages/openai/package.json` の `dependencies` から `"zod"` の行を消す | exit 1（openai のプロジェクトの ESM・CommonJS だけが赤） | `--install-strategy=nested` を外す（T1）。外すと、openai のプロジェクトに一緒に入る core の `zod` が上へ巻き上がり、openai がそれで解決して exit 0 になる |
+| P6eo. openai の `import` 条件だけを壊す | `packages/openai/package.json` の `exports["."]` に `"import": "./dist/nope.js"` を足す（`require`・`default` はそのまま） | exit 1（openai のプロジェクトの ESM だけが赤） | ESM の段の失敗で終了コードを立てない（T5）、ESM の段に入口を渡さない（S1）。外すと exit 0 になる |
+
+- 本文の対照3（core の `zod` を消す）は T1 を見分けない。core のプロジェクトには兄弟が居ないので、nested の有無に関わらず core のプロジェクトが赤になるためである。
+- core の `import` 条件を壊す対照は T5 を見分けない。core に頼るほかのパッケージの段も赤になり、ESM の段の終了コードを立てなくても exit 1 のままになるためである。
+- ⟹ `nested` は、パッケージごとに分けた今も要る。兄弟の `@mnemora/*` と同じ依存を持つパッケージの宣言漏れは、`nested` が無いと兄弟の依存で解決されて見逃す。
+- リリース前に対照を当てるときは、本文の3つにこの2つを足して5つを当てる。本文は書き換えていない。
