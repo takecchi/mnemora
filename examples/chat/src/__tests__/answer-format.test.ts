@@ -6,7 +6,6 @@ import {
   formatAnswerQualityBanner,
 } from "../answer-format.js";
 
-// 既定の道でバナーが出ないことだけを歯にすると「バナーを廃止した」と区別できない。deterministic では出ることを別に固定する。
 describe("formatAnswerQualityBanner — 陽性対照（バナーは廃止されていない）", () => {
   it("⭐ deterministic では ⛔⛔⛔ バナーが出る（これが偽になったら、バナーが壊れている）", () => {
     const banner = formatAnswerQualityBanner("deterministic");
