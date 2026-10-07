@@ -3,21 +3,13 @@ import type { LLMCassetteSection } from "./cassette.js";
 import { llmCassetteKey } from "./cassette.js";
 
 /**
- * 記録した実 API の応答を再生する `LLMProvider`（ADR 0051）。
- *
- * **`DeterministicLLMProvider` の代わりではない。**あちらは発話をそのまま content にして
- * 40文字で切るだけで、抽出をしていない。こちらは**記録元の本物のモデル（同梱のカセットでは `gpt-4o-mini`）が
- * 実際に返した抽出結果をそのまま返す**。
- *
- * **記録に無い入力に対しては例外を投げる**（`RecordedEmbeddingProvider` と同じ理由）。
+ * 記録した実 API の応答を再生する `LLMProvider`（ADR 0051）。`DeterministicLLMProvider` と違い、
+ * 記録元の本物のモデルが返した抽出結果をそのまま返す。記録に無い入力には例外を投げる。
  */
 export interface RecordedLLMProviderOptions {
   /** 再生するカセットの LLM の節。 */
   section: LLMCassetteSection;
-  /**
-   * 呼び出し側が期待するモデル名。指定すると、記録元と食い違ったときに構築時に落ちる
-   * （`RecordedEmbeddingProvider.expectedSpace` と同じ狙い）。
-   */
+  /** 期待するモデル名。指定すると、記録元と食い違ったときに構築時に落ちる。 */
   expectedModel?: string | undefined;
 }
 
@@ -63,22 +55,12 @@ export class RecordedLLMProvider implements LLMProvider {
         "RecordedLLMProvider: complete() の記録が LLMResponse の形をしていない。カセットが壊れている。",
       );
     }
-    // ADR 0500: 記録の参照を返さない（呼び出し側が書き換えても、次の再生に漏れない。本物の provider は呼び出しごとに新しい値を返す）。
     return structuredClone(entry.value) as LLMResponse;
   }
 
-  /**
-   * **記録した値を、呼び出し側の `schema` で必ず検証し直す。**
-   *
-   * 鍵にはスキーマを含めていない（`llmCassetteKey` 参照）。そのため、記録したあとに
-   * `ExtractionResultSchema` が変わると、**古い形の値が新しいコードへ黙って流れ込む**
-   * 経路が生じる。ここで毎回検証することで、その食い違いは「順位が微妙に変わる」ではなく
-   * **例外**として現れる。`DeterministicLLMProvider` が `safeParse` で同じことを
-   * しているのと同じ規律である。
-   */
+  /** 記録した値を、呼び出し側の `schema` で毎回検証し直す。鍵にスキーマを含めないので、スキーマが変わったときに古い形の値が黙って流れ込むのを防ぐ。 */
   async completeStructured<T>(_ctx: Ctx, req: StructuredRequest<T>): Promise<T> {
     const entry = this.lookup(req.prompt);
-    // ADR 0500: 複製を検証する。schema が値を作り直さない欄（`z.unknown()` など）は、記録の参照のまま通り抜けるため。
     const parsed = req.schema.safeParse(structuredClone(entry.value));
     if (!parsed.success) {
       throw new Error(
@@ -91,11 +73,7 @@ export class RecordedLLMProvider implements LLMProvider {
   }
 }
 
-/**
- * 記録に無かった入力を、例外の文面に載せる形にする。本文を丸ごと載せない——長い発話や
- * 文書を入れると例外文（とそれを写すログ・CI の出力）が本文で埋まるため、先頭 80 文字と
- * 全体の長さだけを出す。どの入力かを見分けるには、これで足りる。
- */
+/** 例外の文面に載せる入力は先頭 80 文字と全体の長さだけにする: 本文を丸ごと載せると、例外文とそれを写すログが本文で埋まる。 */
 function describeRecordedInput(text: string): string {
   const LIMIT = 80;
   const chars = Array.from(text);

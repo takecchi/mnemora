@@ -1,12 +1,6 @@
 import { expect } from "vitest";
 
-/**
- * 適合テストが「保存の形で区別できない識別子を、入口で断る」ことを見るための入力と検査
- * （内部の道具。`index.ts` から export しない）。
- *
- * 断る対象は、孤立サロゲート（対をなさない UTF-16 のサロゲートコードユニット）と NUL（U+0000）を含む識別子。
- * 対をなすサロゲート（絵文字など）は識別子として受け付ける（`WELL_FORMED_NON_BMP_IDENTIFIER`）。
- */
+/** 孤立サロゲートと NUL（U+0000）を含む識別子。対をなすサロゲートは受け付ける。内部の道具で、`index.ts` から出さない。 */
 export const MALFORMED_IDENTIFIER_CASES: ReadonlyArray<readonly [label: string, value: string]> = [
   ["孤立した上位サロゲート", "id-\uD800"],
   ["孤立した下位サロゲート", "id-\uDC00"],
@@ -18,7 +12,7 @@ export const MALFORMED_IDENTIFIER_CASES: ReadonlyArray<readonly [label: string, 
 /** 対をなすサロゲートを含む（BMP の外の文字）。識別子として受け付ける。 */
 export const WELL_FORMED_NON_BMP_IDENTIFIER = "id-\u{1F600}";
 
-/** 例外の `kind`（ADR 0418 の作法。`instanceof` を使わない）。 */
+/** 例外の `kind`。`instanceof` を使わない。 */
 export const MALFORMED_IDENTIFIER_KIND = "malformed_identifier";
 
 /** `promise` が reject し、その例外が `kind: "malformed_identifier"` で、message に入力値を含まないこと。 */
