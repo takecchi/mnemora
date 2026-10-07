@@ -4,38 +4,32 @@ import { matchesStoreErrorKind } from "./store-error-kind.js";
 import type { RecallOutputValidation, RecallOutputValidationIssue } from "./recall.js";
 
 /**
- * `recall()` の戻り値を検証するときの倒れ方（Issue #131、ADR 0098）。
+ * `recall()` の戻り値を検証するときの倒れ方（ADR 0098）。
  *
- * - `"off"` — 検証しない。`RecallResult.outputValidation` は無い（`undefined`）。
- * - `"report"` — 検証し、結果を `RecallResult.outputValidation` に載せて返す。
- *   **例外は投げない**——落ちても `recall()` は resolve する。
- * - `"throw"` — 検証し、落ちていたら {@link RecallOutputValidationError} を投げる
- *   （resolve しない）。
+ * - `"off"` — 検証しない。`RecallResult.outputValidation` は `undefined`。
+ * - `"report"` — 検証し、結果を `RecallResult.outputValidation` に載せる。**例外は投げない。**
+ * - `"throw"` — 検証し、落ちていたら {@link RecallOutputValidationError} を投げる。
  *
- * **既定は `"report"`である**（{@link DEFAULT_RECALL_OUTPUT_VALIDATION}）。`recall()` は
- * 使う側の主経路であり、既定を `"throw"` にすると「いままで（誤った値のまま）動いていた
- * 呼び出しが例外になる」という公開 API の破壊的変更になる——`docs/autonomy.md` §3 は
- * 破壊的変更をオーナーの判断としている（ADR 0098 参照）。
+ * **既定は `"report"`**（{@link DEFAULT_RECALL_OUTPUT_VALIDATION}）。既定を `"throw"` にすると、
+ * 動いていた呼び出しが例外になる公開 API の破壊的変更になるため。
  */
 export type RecallOutputValidationMode = "off" | "report" | "throw";
 
-/** {@link RecallOutputValidationMode} の既定値。ADR 0098 の芯——既定では投げない。 */
+/** {@link RecallOutputValidationMode} の既定値。 */
 export const DEFAULT_RECALL_OUTPUT_VALIDATION: RecallOutputValidationMode = "report";
 
 /**
- * `validateRecallOutput` が `mode: "throw"` で検証に落ちたときに投げる例外（Issue #131、ADR 0098）。
+ * `validateRecallOutput` が `mode: "throw"` で検証に落ちたときに投げる例外（ADR 0098）。
  *
- * `recallId` を持つ理由: 検証は段6（`MemoryStore.createRecall`）が既に書き込まれた**後**に
- * 走る。⟹ `"throw"` モードでは「`recalls` の行は書かれたのに、呼び出し側は例外を受け取る」
- * という状態になる——この不一致を呼び出し側が調べられるように、`recallId` を例外へ載せて
- * 相関を取れるようにしてある（ADR 0098「引き受けた負債」）。
+ * 検証は段6（`MemoryStore.createRecall`）の書き込みの**後**に走る。`"throw"` でも `recalls` の行は
+ * 残るので、`recallId` で呼び出し側が相関を取れる。
  */
 export class RecallOutputValidationError extends Error {
   /** 判別子。クラスが2つの版に分かれても読める値（ADR 0418）。判定は `instanceof` ではなく {@link isRecallOutputValidationError} で行う。 */
   readonly kind = "recall_output_validation" as const;
   /** 検証に落ちた箇所の一覧（`path` と `message`）。 */
   readonly issues: readonly RecallOutputValidationIssue[];
-  /** 既に書き込まれた `recalls` の行の id（上の doc: 例外でも記録は残る）。 */
+  /** 既に書き込まれた `recalls` の行の id。 */
   readonly recallId: string;
 
   constructor(issues: readonly RecallOutputValidationIssue[], recallId: string) {
@@ -51,9 +45,7 @@ export class RecallOutputValidationError extends Error {
 
 /**
  * 受け取ったものが {@link RecallOutputValidationError} かを、**`instanceof` を使わずに**判定する（ADR 0418）。
- *
- * `kind` を見て、`kind` が無ければ `name` を見る。core が2つの版に分かれていても、
- * `kind` がまだ無い古い版の core が投げたものでも効く。
+ * core が2つの版に分かれていても、`kind` がまだ無い古い版が投げたものでも効く。
  */
 export function isRecallOutputValidationError(
   value: unknown,
@@ -61,7 +53,6 @@ export function isRecallOutputValidationError(
   return matchesStoreErrorKind(value, "recall_output_validation", "RecallOutputValidationError");
 }
 
-/** zod の `safeParse` が返す `error.issues` を {@link RecallOutputValidationIssue} へ写す。 */
 function toValidationIssues(error: z.ZodError): RecallOutputValidationIssue[] {
   return error.issues.map((issue) => ({
     path: issue.path.map((segment) => String(segment)).join("."),
@@ -71,19 +62,13 @@ function toValidationIssues(error: z.ZodError): RecallOutputValidationIssue[] {
 }
 
 /**
- * `recall()` の戻り値（`outputValidation` を載せる前の draft）を検証する純関数
- * （Issue #131、ADR 0098）。**歯を直接当てる口。**
+ * `recall()` の戻り値（`outputValidation` を載せる前の draft）を検証する純関数（ADR 0098）。
  *
- * `draft` は `RecallResultSchema` が要求する形（`outputValidation` を除く）を満たしている
- * べき値だが、**検証の対象そのものはここでは信用しない**——`unknown` として受け取り、
- * `RecallResultSchema.safeParse` に通す。
+ * `draft` は `unknown` として受け取り、`RecallResultSchema.safeParse` に通す。
+ * **`draft` の値は書き換えない**（壊れていることを見えなくしないため。ADR 0097）。
  *
- * **`draft` の値は一切書き換えない。** 検証は読むだけで、`usage.share` のような
- * 「契約上は妥当だが以前の型では弾かれていた」値（ADR 0097）を丸めたり捨てたりしない
- * ——壊れていることを見えなくするのが最悪の結末である（依頼文参照）。
- *
- * @returns `mode: "off"` のときだけ `undefined`。それ以外は検証結果
- *   （`mode: "throw"` かつ検証に落ちた場合は {@link RecallOutputValidationError} を投げる）。
+ * @returns `mode: "off"` のときだけ `undefined`。それ以外は検証結果。
+ *   `mode: "throw"` で検証に落ちた場合は {@link RecallOutputValidationError} を投げる。
  */
 export function validateRecallOutput(
   draft: unknown,
