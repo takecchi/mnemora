@@ -1,0 +1,55 @@
+-- 0033_provenance_kind_present.sql
+--
+-- Issue #1909: `memories.provenance`（jsonb）に `kind` が無い行を、DB 側で拒む。
+-- ADR 0182 が約束した「`provenance_kind`（列）と `provenance->>'kind'`（jsonb）の一致」の、
+-- 書かれていなかった端を閉じる。
+--
+-- ## 何が穴だったか
+--
+-- `0016` の制約 `memories_provenance_kind_matches_provenance` は
+-- `CHECK (provenance_kind = provenance->>'kind')` である。`provenance_kind` は `NOT NULL` だが、
+-- jsonb に `kind` が無いと `provenance->>'kind'` が NULL になり、比較が NULL になる。
+-- **CHECK は NULL（UNKNOWN）を通す**ので、次の3つの形は拒まれずに入っていた（PG 17 で実測。
+-- Issue #1909）:
+--
+--   provenance = '{}'                  （kind が無い）
+--   provenance = '{"kind": null}'      （kind が JSON の null。`->>` は SQL の NULL を返す）
+--   provenance = '"x"'                 （オブジェクトでない。`->>` は NULL を返す）
+--
+-- 配列・JSON の null も同じ（`->>` が NULL）。
+--
+-- ## なぜ `provenance ? 'kind'` ではなく `provenance->>'kind' IS NOT NULL` か
+--
+-- `?` は「トップレベルのキーとして在るか」しか見ない。`{"kind": null}` は在る扱いで通ってしまい、
+-- オブジェクトでない jsonb の文字列 `"kind"` は `?` が真になる（文字列要素として一致する）。
+-- 元の制約が NULL で通ってしまう形は、まさに「`->>` が NULL になる形」なので、
+-- 同じ式 `provenance->>'kind'` を直接 `IS NOT NULL` で見るのが、取りこぼしの無い言い方である。
+--
+-- ## なぜ既存の制約を作り直さず、新しい制約を足すか
+--
+-- `0016`・`0017` の制約を DROP して `IS NOT DISTINCT FROM` で作り直すと、(1) 出荷済みの migration
+-- が作った制約の定義が、別の migration で消える（出荷済みの版と食い違う）、(2) DROP から作り直しの
+-- 間、列と jsonb の一致が守られない窓ができる、(3) 制約名が同じまま意味が変わり、エラーメッセージの
+-- 名前から原因（一致していないのか、kind が無いのか）が辿れなくなる。
+-- 足すだけなら元の制約は無傷で、**エラーの制約名がそのまま原因を言う**。
+-- 2つの制約の合成は `provenance_kind IS NOT DISTINCT FROM provenance->>'kind'` と同じ
+-- （`provenance_kind` は `NOT NULL`）。
+--
+-- ## なぜ `NOT VALID` で足し、検証を別ファイルに分けるか
+--
+-- `0016`/`0017` と同じ理由である（`0016` のコメントに実測が在る）。
+-- 1. ロック: `ADD CONSTRAINT` の `ACCESS EXCLUSIVE` は同じトランザクション内では COMMIT まで続く。
+--    `VALIDATE CONSTRAINT` を同居させると走査の間ずっと読み書きが止まる。
+-- 2. 失敗時の巻き戻り: 既存行に kind を欠く行があって `VALIDATE` が失敗すると、同居させていたら
+--    `ADD CONSTRAINT` ごと巻き戻る。分けておけば、このファイルが入れた「新しい書き込みの拒否」は
+--    commit 済みのまま残る。
+-- 検証は次のファイル `0034_provenance_kind_present_validate.sql` に分けてある。
+--
+-- `NOT VALID` は新しい INSERT/UPDATE には commit の瞬間から効く。免除されるのは既存行の検査だけである。
+--
+-- 制約名は `memories_provenance_kind_matches_provenance`（0016）と同じ命名（`<table>_<説明>`）。
+-- `->>` は IMMUTABLE なので CHECK に使える（0016 と同じ）。
+
+ALTER TABLE memories
+  ADD CONSTRAINT memories_provenance_kind_present
+  CHECK (provenance->>'kind' IS NOT NULL) NOT VALID;
