@@ -11,11 +11,6 @@ import {
   spawnSyncWithDeadline,
 } from "./spawn-with-deadline.mjs";
 
-/**
- * 同期の子（`spawnSync`・`execFileSync`・`execSync`）の期限。期限の内は素の関数と同じ戻り値を返し、期限を超えたら
- * 子を kill して「子（コマンド 引数）が N 秒で終わらなかった」と名乗って投げる。
- */
-
 function withScript(source, fn) {
   const dir = mkdtempSync(join(tmpdir(), "spawn-sync-with-deadline-"));
   const script = join(dir, "child.mjs");
@@ -129,15 +124,12 @@ describe("spawnSyncWithDeadline / execFileSyncWithDeadline: 同期の子の期�
       } catch (e) {
         error = e;
       }
-      // 落ちたときにも止められるよう、先に pid を読む。
       pid = Number(readFileSync(pidFile, "utf8"));
       expect(error).toBeInstanceOf(Error);
       expect(error.message).toContain("1 秒で終わらなかった");
-      // 文字列のコマンドは、そのまま名乗る（引数に分けない）。
       expect(error.message).toContain(`子（${command}）`);
       expect(Date.now() - started).toBeLessThan(10_000);
-      // `/bin/sh` は1つのコマンドでも fork することがあり（dash で実測）、その node は子ではなく孫になる。
-      // 孫への SIGKILL の配達は非同期なので、死ぬまで少し待つ（上限つき）。
+      // /bin/sh は1つのコマンドでも fork することがあり（dash）、孫への SIGKILL は非同期なので少し待つ。
       const until = Date.now() + 3_000;
       while (isAlive(pid) && Date.now() < until) await new Promise((r) => setTimeout(r, 50));
       expect(isAlive(pid)).toBe(false);
@@ -161,7 +153,6 @@ describe("isDeadlineError: 期限の例外だけを見分ける", () => {
   it("3つの同期の関数が期限を超えて投げた例外には真", () => {
     withScript(HANGS, (script, pidFile) => {
       const command = `${JSON.stringify(process.execPath)} ${JSON.stringify(script)}`;
-      // 最後に起こした子（`execSync` はシェルの孫）が残っていれば止める。
       const stopLast = () => {
         const pid = Number(readFileSync(pidFile, "utf8"));
         if (isAlive(pid)) process.kill(pid, "SIGKILL");
