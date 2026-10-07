@@ -87,11 +87,7 @@ import {
 import { assertStorableMemoryColumn } from "./memory-enum-check.js";
 import { nextId } from "./id.js";
 
-/**
- * ADR 0499（ADR 0447 の材料）: `expectedStatus` を渡された status 更新の CAS が破れるか。**purge 済みの行（`purgedAt` が
- * 非 null。`status` は `forgotten` のまま）は、どの `expectedStatus` にも一致しない**（`PostgresMemoryStore` の
- * `expectedStatusCondition` と同じ。`Runtime.purge` の「不可逆」の約束）。
- */
+/** `expectedStatus` を渡された status 更新の CAS が破れるか。purge 済みの行（`purgedAt` が非 null）は、どの `expectedStatus` にも一致しない（`PostgresMemoryStore` と同じ。`Runtime.purge` の「不可逆」の約束）。 */
 function casMismatch(
   memory: { status: MemoryStatus; purgedAt?: Date | null | undefined },
   expectedStatus: MemoryStatus,
@@ -99,10 +95,7 @@ function casMismatch(
   return memory.status !== expectedStatus || (memory.purgedAt ?? null) !== null;
 }
 
-/**
- * ADR 0499（ADR 0450 の材料）: `resolveContestedPair`・`resolveContestedGroup` の `status` は型が `"active" | "superseded"`。
- * 型の外の値は、書く前に `RangeError` で断る（`PostgresMemoryStore` と同じ文面。値は message に入れない）。
- */
+/** `resolveContestedPair`・`resolveContestedGroup` の `status` が型の外の値なら、書く前に `RangeError` で断る（`PostgresMemoryStore` と同じ文面。値は message に入れない）。 */
 function assertResolvedStatus(method: string, field: string, status: unknown): void {
   if (status !== "active" && status !== "superseded") {
     throw new RangeError(`${method}: ${field}.status must be "active" or "superseded"`);
@@ -110,10 +103,8 @@ function assertResolvedStatus(method: string, field: string, status: unknown): v
 }
 
 /**
- * ADR 0503（ADR 0447 材料3〜5・ADR 0450 材料1・2）: `status: "superseded"` の更新は、置き換えた側（`supersededById`）を
- * 必ず伴い、それは自分自身でないこと。`resolveContested*` の `"active"` に `supersededById` を付けることも断る
- * （active なのに `superseded_by_id` が残る行になる）。書く前に `RangeError` で断る（値は message に入れない）。
- * `PostgresMemoryStore` と同じ文面。
+ * `status: "superseded"` の更新は、置き換えた側（`supersededById`）を必ず伴い、自分自身でないこと。
+ * `resolveContested*` の `"active"` に `supersededById` を付けることも断る。書く前に `RangeError` で断る（`PostgresMemoryStore` と同じ文面）。
  */
 function assertSupersededByShape(
   method: string,
@@ -129,7 +120,7 @@ function assertSupersededByShape(
         `${method}: ${field}.supersededById is required when status is "superseded"`,
       );
     }
-    // Postgres は `normalizeUuidCase` で両側を畳んで比べる。呼び出し側は id だけ畳むので、ここで両側を畳む。
+    // Postgres は両側の uuid を畳んで比べる。呼び出し側は id だけ畳むので、ここで両側を畳む。
     if (normId(supersededById) === normId(selfId)) {
       throw new RangeError(`${method}: ${field}.supersededById must not be the memory itself`);
     }
@@ -140,10 +131,7 @@ function assertSupersededByShape(
   }
 }
 
-/**
- * ADR 0503: `supersededById` の鎖が、同じ呼び出しで `superseded` になるメンバーの中で輪になっていないこと
- * （2者版の「互いを指す」、群版の A→B→A など）。輪になっていれば `RangeError`。
- */
+/** `supersededById` の鎖が、同じ呼び出しで `superseded` になるメンバーの中で輪になっていないこと。輪なら `RangeError`。 */
 function assertNoSupersededCycle(
   method: string,
   members: ReadonlyArray<{ id: string; status: string; supersededById?: string | undefined }>,
@@ -165,24 +153,12 @@ function assertNoSupersededCycle(
   }
 }
 
-/**
- * Issue #1108: `MemoryStore` の口が返す値（Memory と、それを含む返り値のオブジェクト）を、
- * **返す時点の複製**にする。以前は内部に持っている Memory の実体そのものを返していたため、
- * 呼び手が一度受け取った値が後の別の操作で遡って変わり、呼び手が受け取った値を書き換えると
- * store の中身まで変わった。Postgres は毎回行を読み直した新しいオブジェクトを返すので、
- * それに揃える（fixture は Postgres の振る舞いを写すためのもの）。
- * 歯は `__tests__/in-memory-return-snapshots.test.ts`（返す口の一覧を1本ずつ見る）。
- */
+/** `MemoryStore` の口が返す値を、返す時点の複製にする。内部の実体を返すと、呼び手が受け取った値が後の操作で変わり、書き換えると store の中身まで変わる（Postgres は毎回新しいオブジェクトを返す）。 */
 function snapshot<T>(value: T): T {
   return structuredClone(value);
 }
 
-/**
- * Issue #207/#933 PR2（ADR 0381）: `memory_relations` の1行相当。
- * `InMemoryMemoryStore.relations`（`markContestedGroup`/`resolveContestedGroup` が
- * 書く）と `InMemoryRelationStore`（`in-memory-relation-store.ts`、読み取る）が
- * 共有する内部形。
- */
+/** `memory_relations` の1行相当。`InMemoryMemoryStore.relations`（書く）と `InMemoryRelationStore`（読む）が共有する内部形。 */
 export interface StoredRelation {
   id: string;
   tenantId: string;
@@ -192,19 +168,13 @@ export interface StoredRelation {
   createdAt: Date;
 }
 
-/**
- * `createRecall` で、Postgres が `recalls` の行を書けずに拒む入力を先に検査する（何も書かず、
- * 活動時計も進めない）。`subjectId` は `text` 列（NUL を拒む）。`query`・`omitted`・`usage`・
- * `indexBand`・`explain`・`returnedMemories` は `NOT NULL` の `jsonb` 列、`budget` は `jsonb` 列で、
- * `packages/postgres` は `JSON.stringify` した値を送る——NUL を含めば拒み（`unsupported Unicode escape
- * sequence`）、JSON にならない値（`undefined` など）は `NOT NULL` の列で拒む。
- */
+/** `createRecall` で、Postgres が `recalls` の行を書けずに拒む入力（NUL、JSON にならない値、Invalid Date）を先に検査する。何も書かず、活動時計も進めない。 */
 function assertRecallRecordStorable(record: NewRecallRecord): void {
-  // `created_at` は `timestamptz`——Invalid Date は Postgres が書けずに拒む（ADR 0480）。省略は壁時計を使うので検査しない。
+  // `created_at` は `timestamptz`。省略は壁時計を使うので検査しない。
   if (record.createdAt != null && Number.isNaN(record.createdAt.getTime())) {
     throw new Error("createRecall: createdAt must be a valid Date (got Invalid Date)");
   }
-  // ADR 0640: 下限より前は、Postgres が `22008` で書けずに拒む。
+  // 下限より前は、Postgres が書けずに拒む。
   assertWrittenTimestamptzFloor("createRecall", "createdAt", record.createdAt);
   if (record.subjectId != null && record.subjectId.includes("\u0000")) {
     throw new Error("createRecall: subjectId must not contain NUL characters (U+0000)");
@@ -231,12 +201,8 @@ function assertRecallRecordStorable(record: NewRecallRecord): void {
 }
 
 /**
- * outbox の行を**実際に書く**ときに Postgres が拒む入力（ADR 0434）を、何も書く前に検査する。
- * `jobKinds` の要素は `outbox.kind`（`text` 列）に入るので NUL を拒み、`now` は `available_at`・`created_at`
- * （`timestamptz`）に入るので Invalid Date を拒む（`22021`・`22007`）。`claimedBy`（`createObservationWithOutbox` の
- * `opts`。`outbox.claimed_by` は `text` 列）も NUL を拒む（ADR 0493）。**行を書かないときは拒まない**——
- * `jobKinds` が空・冪等の既存の行が在って新しい行を作らないとき、Postgres は outbox へ INSERT せず、
- * どちらも値を見ない（実測）。呼び出し側は、新しい行を実際に作る分岐の中（`beforeInsert`）で呼ぶ。
+ * outbox の行を実際に書くときに Postgres が拒む入力（`jobKinds` の NUL、`now` の Invalid Date、`claimedBy` の NUL）を、何も書く前に検査する。
+ * 行を書かないとき（`jobKinds` が空・冪等の既存の行）は拒まない（Postgres は outbox へ INSERT せず、値を見ない）。新しい行を作る分岐の中（`beforeInsert`）で呼ぶ。
  */
 function assertOutboxRowsWritable(
   method: string,
@@ -251,20 +217,14 @@ function assertOutboxRowsWritable(
   if (jobKinds.some((kind) => stringHasNul(kind))) {
     throw new Error(`${method}: jobKinds must not contain NUL characters (U+0000)`);
   }
-  // ADR 0493: `claimedBy`（`createObservationWithOutbox` の `opts`）は `outbox.claimed_by`（`text` 列）に入るので NUL を拒む。
   if (stringHasNul(claimedBy)) {
     throw new Error(`${method}: claimedBy must not contain NUL characters (U+0000)`);
   }
 }
 
 /**
- * ADR 0486: Observation の `payload` を、Postgres が `JSON.stringify` して `jsonb` に入れるときの規則のうち、
- * `structuredClone` が断る値（関数・`Symbol`）と `toJSON` だけを先に当てる。残りの値（`NaN`・`-0`・`Date`・値が
- * `undefined` の欄など）は、`ObserveEventInput.data` の TSDoc の表どおり、fixture はそのまま保持する。
- * - `toJSON` を持つ値（`Date` を除く。`Date` は表どおり `Date` のまま保つ）→ `toJSON(欄の名前)` の戻り値に置き換える
- *   （戻り値にも同じ規則を当てる。`data` 自体が持てば、object でない値になる）。
- * - 関数・`Symbol` → 欄の値なら欄ごと消す、配列の要素なら `null`（`JSON.stringify` と同じ）。
- * 入力は書き換えない（新しい値を返す）。循環参照・`BigInt` は、先に `jsonContainsNul` が `JSON.stringify` で断る。
+ * Observation の `payload` に、Postgres の `JSON.stringify` の規則のうち、`structuredClone` が断る値（関数・`Symbol`）と `toJSON` だけを先に当てる。
+ * 残りの値（`NaN`・`-0`・`Date` など）は `ObserveEventInput.data` の TSDoc の表どおり保持する。入力は書き換えない。
  */
 function toStorablePayload(value: unknown, key = ""): unknown {
   let current = value;
@@ -289,7 +249,7 @@ function toStorablePayload(value: unknown, key = ""): unknown {
     Object.getPrototypeOf(current) !== Object.prototype &&
     Object.getPrototypeOf(current) !== null
   ) {
-    return current; // Map・Set・型付き配列・クラスのインスタンスなどは、これまでどおり structuredClone に任せる。
+    return current;
   }
   const result: Record<string, unknown> = {};
   for (const [name, element] of Object.entries(current)) {
@@ -301,13 +261,7 @@ function toStorablePayload(value: unknown, key = ""): unknown {
   return result;
 }
 
-/**
- * Observation を書く口（`createObservation` / `createObservationWithOutbox`）で、Postgres が
- * NUL を拒む欄を先に検査する（Issue #816 の NUL 側の残り）。`subjectId`・`externalId`・
- * `kind` は `text` 列（`invalid byte sequence for encoding "UTF8": 0x00`）、`payload`・
- * `attributes` は `jsonb` 列（`unsupported Unicode escape sequence`）。Postgres は
- * `externalId` の衝突を見る前、クエリの時点で拒むので、冪等の判定より前に見る。
- */
+/** Observation を書く口で、Postgres が NUL を拒む欄を先に検査する。`externalId` の衝突を見る前に拒むので、冪等の判定より前に見る。 */
 function assertObservationHasNoNul(owner: string, input: NewObservation): void {
   for (const [field, value] of [
     ["subjectId", input.subjectId],
@@ -326,12 +280,7 @@ function assertObservationHasNoNul(owner: string, input: NewObservation): void {
   }
 }
 
-/**
- * Observation を書く口で、Postgres が `timestamptz` への変換で拒む Invalid Date（`.getTime()` が `NaN`）を先に
- * 検査する（`invalid input syntax for type timestamp with time zone`、`22007`。Issue #807 の Memory 側と同じ根）。
- * 省略（`undefined`/`null`）は「無い」であって Invalid Date ではないので検査しない。上の NUL の検査と同じく、
- * Postgres は `externalId` の衝突を見る前に拒むので、冪等の判定より前に見る。
- */
+/** Observation を書く口で、Postgres が `timestamptz` への変換で拒む Invalid Date を先に検査する。省略は検査しない。`externalId` の衝突を見る前に拒むので、冪等の判定より前に見る。 */
 function assertObservationDatesValid(owner: string, input: NewObservation): void {
   for (const [field, value] of [
     ["occurredAt", input.occurredAt],
@@ -342,49 +291,28 @@ function assertObservationDatesValid(owner: string, input: NewObservation): void
     if (value != null && Number.isNaN(value.getTime())) {
       throw new Error(`${owner}: ${field} must be a valid Date (got Invalid Date)`);
     }
-    // ADR 0640: 下限より前は、Postgres が `22008` で書けずに拒む（冪等の既存の行が在っても、衝突を見る前に拒む。実測）。
+    // 下限より前は、冪等の既存の行が在っても拒む。
     assertWrittenTimestamptzFloor(owner, field, value);
   }
 }
 
 /**
- * `MemoryStore` のインメモリ・プレースホルダ実装。
- *
- * **本番用途ではない。** `packages/testkit` の適合テストが実際に実行できることを示す
- * ためだけの最小実装であり、`packages/postgres`（段階2）が実装すべき振る舞いの
- * 完全な参照ではない。特に索引・永続化・トランザクションは一切模していない。
- *
- * roadmap.md 段階3で `outboxJobs` を公開した。`InMemoryOutboxStore`
- * （`./in-memory-outbox-store.js`）にこの配列をそのまま渡すことで、`createObservationWithOutbox` /
- * `createMemoryWithOutbox` が積んだジョブを `OutboxStore` 側から claim/complete/fail できる
- * （`packages/postgres` が同一 DB・同一トランザクションで両方を実装するのと対応する、
- * ADR 0005・0003）。
- *
- * ADR 0031 で `events` を同じ理由で公開した。`InMemoryEventStore`
- * （`./in-memory-event-store.js`）のコンストラクタにこの配列をそのまま渡すことで、
- * `updateStatusWithEvent` が積んだイベントを `EventStore` 側からも `get`/`list` できる。
+ * `MemoryStore` のインメモリ・プレースホルダ実装。本番用途ではない: 索引・永続化・トランザクションは模さない。
+ * `outboxJobs`・`events` は公開してあり、`InMemoryOutboxStore`・`InMemoryEventStore` に同じ配列を渡すと、
+ * ここが積んだジョブ・イベントを `OutboxStore`・`EventStore` 側から扱える。
  */
 /**
- * ⭐ Issue #329 / [ADR 0173](../../../../docs/decisions/0173-decayed-omission-counted-by-aggregate-scope.md):
- * `aggregateScope` が `filteredDecayed` を数えるための述語。
+ * `aggregateScope` が `filteredDecayed` を数えるための述語。`recall-runtime.ts` の `survivesDecayGate` の否定であり、
+ * `PostgresMemoryStore.aggregateScope` の `isDecayed`（SQL）と同じものでなければならない（一致は適合テストが検算する）。
  *
- * **`recall-runtime.ts` の `survivesDecayGate`（段1の押し下げ・後置フィルタの両方が使う
- * もの）の否定**であり、`PostgresMemoryStore.aggregateScope` の `isDecayed`（SQL）と
- * 同じものでなければならない。`period`/`validAt` と同じ「4箇所の複製」の5つ目である
- * ——**この一致そのものを、適合テストと `recall-decay-cross-day.postgres.test.ts` が検算する。**
- *
- * - 壁時計の軸が生きている: `decayFloorAt > decayFloorAtAfter`（狭義の `>`）
- * - 活動時計の軸が生きている: `decayFloorSeq` が無い（この軸に床が無い、ADR 0165 決めたこと4）
- *   か `decayFloorSeq > decayFloorSeqAfter`
- * - `decayFloorAnyAxis`（`decay_clock: 'either'`）: 2軸の **OR**（最も緩い）
- * - 軸が1本も渡されていない（ゲート無効）: 常に `false`（0件と数える）
+ * - 壁時計の軸が生きている: `decayFloorAt > decayFloorAtAfter`（狭義）
+ * - 活動時計の軸が生きている: `decayFloorSeq` が無い（床が無い）か `decayFloorSeq > decayFloorSeqAfter`
+ * - `decayFloorAnyAxis`: 2軸の OR。軸が1本も渡されていない（ゲート無効）: 常に `false`
  */
 function isDecayedForScope(
   memory: Pick<Memory, "decayFloorAt" | "decayFloorSeq" | "subjectId">,
   scope: RecallScope,
-  // ADR 0353（Issue #338）: このテナントの subject 単位カウンタ（`tenantId` を
-  // 引いた後の `Map<subjectId, S_x>`）。`scope.decayFloorSeqUsesSubjectCounters` が
-  // true のときだけ参照する。
+  // このテナントの subject 単位カウンタ。`scope.decayFloorSeqUsesSubjectCounters` が true のときだけ参照する。
   subjectActivitySeqByTenant: Map<string, number> | undefined,
 ): boolean {
   const { decayFloorAtAfter, decayFloorSeqAfter } = scope;
@@ -397,10 +325,8 @@ function isDecayedForScope(
       : scope.decayFloorSeqUsesSubjectCounters === true && memory.subjectId != null
         ? decayFloorSeqAfter + (subjectActivitySeqByTenant?.get(memory.subjectId) ?? 0)
         : decayFloorSeqAfter;
-  // ADR 0505: `decayFloorSeqAfter + S_x` が `bigint` を溢れるとき、Postgres は `22003` で文ごと失敗する。失敗するのは、
-  // その式が評価されるときだけ（実測）: `decay_floor_seq` が非 NULL（`IS NULL OR …` の短絡）で、subject を持つ行
-  // （`S_x` を引く）。2軸のときは壁時計が左なので、既定（`NOT wall OR NOT activity`）は壁時計が生きているとき、
-  // `decayFloorAnyAxis`（`NOT wall AND NOT activity`）は壁時計が生きていないときだけ、活動時計の式まで行く。
+  // `decayFloorSeqAfter + S_x` が `bigint` を溢れるとき、Postgres は文ごと失敗する。ただし式が評価される行があるときだけ（`decay_floor_seq` が非 NULL で subject を持つ行）。
+  // 2軸のときは壁時計が先に評価される。
   if (
     decayFloorSeqAfter !== undefined &&
     scope.decayFloorSeqUsesSubjectCounters === true &&
@@ -431,90 +357,49 @@ function isDecayedForScope(
 }
 
 /**
- * Issue #881 / [ADR 0318](../../../../docs/decisions/0318-taxonomy-labels.md) 追記
- * （2026-09-26、クローン miku の判断）: `listLabels?` の `name` 昇順を**コードポイント順**
- * （Postgres の `COLLATE "C"` と同じ、バイト順）と定めた。この比較関数はそれを実装する。
- *
- * **文字列同士を素の `<`/`>` で比較しない。**JS の `<`/`>` は UTF-16 コード単位を比較する
- * ため、サロゲートペア（U+10000 以上、絵文字など）を含む名前では、サロゲート自体の値
- * （U+D800〜U+DFFF）が U+E000〜U+FFFF の BMP 文字より小さいコード単位として並んでしまい、
- * 実際のコードポイント順と食い違う（追記2、2026-09-26。`"！"` U+FF01 と `"😀"` U+1F600 の
- * ペアで実際に踏んだ——素の `<` だと `"😀"` が先に来るが、コードポイント順は `"！"` が先）。
- *
- * ⟹ 先頭から `String.prototype.codePointAt` で1文字（サロゲートペアなら2コード単位）ずつ
- * 読み、コードポイントの値そのものを比較する。UTF-8 のバイト順（Postgres の
- * `COLLATE "C"`）はコードポイント順と単調に対応するため、この実装は Postgres と一致する。
+ * `listLabels?` の `name` 昇順を、コードポイント順（Postgres の `COLLATE "C"` と同じバイト順）で比べる。
+ * 素の `<`/`>` を使わない: UTF-16 コード単位の比較だと、サロゲートペア（絵文字など）が U+E000〜U+FFFF の BMP 文字より前に並び、コードポイント順と食い違う。
  */
 function compareLabelName(a: string, b: string): number {
   let i = 0;
   let j = 0;
   while (i < a.length && j < b.length) {
-    // i/j はループ条件で length 未満と保証済みなので、その位置に有効なコード単位が必ずある。
     const aCodePoint = a.codePointAt(i)!;
     const bCodePoint = b.codePointAt(j)!;
     if (aCodePoint !== bCodePoint) {
       return aCodePoint < bCodePoint ? -1 : 1;
     }
-    // サロゲートペア（コードポイントが BMP 外）なら2コード単位、それ以外は1コード単位進む。
     i += aCodePoint > 0xffff ? 2 : 1;
     j += bCodePoint > 0xffff ? 2 : 1;
   }
-  // ここまで全コードポイントが一致——残りがある方（長い方）が後ろ。
   if (i < a.length) return 1;
   if (j < b.length) return -1;
   return 0;
 }
 
-/**
- * `memories` の1行として書ける値かを確かめる（Postgres が拒む入力を、同じ入力で拒む）。`createMemory` 系の
- * 共通の入口（`createMemoryIdempotent`）が、冪等の衝突の判定より前に呼ぶ。モジュールの外へは出さない
- * （`.d.ts` に出ないので、公開の型の面は変わらない）。
- */
+/** `memories` の1行として書ける値かを確かめる（Postgres が拒む入力を、同じ入力で拒む）。冪等の衝突の判定より前に呼ぶ。 */
 function assertStorableNewMemory(input: NewMemory): void {
-  // 値域（ADR 0078）: `packages/postgres` は `memories_strength_range` の CHECK 制約で
-  // これを強制する。外部キー相当の検査（`createMemoryIdempotent` の中）と同じ理由（ADR 0047）——ここで放置すると
-  // 「本番では落ちる書き込みが手元では黙って成功する」。
+  // 値域は Postgres の CHECK 制約と同じ検査を置く: 放置すると、本番では落ちる書き込みが手元では黙って成功する。
   if (!isStrengthInRange(input.strength)) {
     throw new Error(
       `InMemoryMemoryStore: strength out of range (0, ${MAX_STRENGTH}]: ${input.strength}`,
     );
   }
-  // 値域（ADR 0125）: `packages/postgres` は `memories_half_life_range` の CHECK 制約で
-  // これを強制する。`decay`/`freshness` は `elapsedHours / halfLifeHours` として
-  // この値で割るため、`0`・負・`NaN`・`Infinity` は決して通してはならない
-  // （Issue #231。`isHalfLifeHoursInRange` の doc に実測を記録した）。
+  // `decay`/`freshness` は `halfLifeHours` で割るので、`0`・負・`NaN`・`Infinity` は通してはならない。
   if (!isHalfLifeHoursInRange(input.halfLifeHours)) {
     throw new Error(
       `InMemoryMemoryStore: halfLifeHours out of range (0, ∞): ${input.halfLifeHours}`,
     );
   }
-  // Issue #817（PR #815 と同根）: `memories.half_life_hours` は Postgres の `real`
-  // （IEEE 754 単精度・float4）列であり、値域は約 `±3.4028235e38` までしか無い
-  // （`migrations/0012_half_life_hours_range.sql` の CHECK 制約）。上の
-  // `isHalfLifeHoursInRange` は float64 の `(0, ∞)` しか見ないため、float64 では有限
-  // だが float4 の範囲を超える値（例: `1e300`）を通してしまう——`real` へ変換される際に
-  // `Infinity` へ丸まり CHECK 制約に抵触して Postgres は例外を投げる（実測）。
-  // `Math.fround` は JS の number を float4 と同じビット幅へ丸める標準関数であり、
-  // その丸めで `Infinity` になるかどうかは Postgres の `real` 変換が overflow するか
-  // どうかとビット単位で一致する（`setDefaultHalfLifeRecalls`、PR #815 と同じ判定）。
-  //
-  // ⚠ **上側については**、`strength` は同じ `real` 列だが、値域が `(0, MAX_STRENGTH]`（`MAX_STRENGTH` は
-  // 上の `isStrengthInRange` が使う定数、`packages/core/src/memory.ts`）であり
-  // float4 の範囲へ遠く届かない——`isStrengthInRange` の時点で `1e300` のような値は
-  // 既に拒まれている（実測。float4 オーバーフローに到達する前に別の理由で例外になる）
-  // ため、`strength` にはこの検査を足さない。
+  // `half_life_hours` は `real`（float4）列。`isHalfLifeHoursInRange` は float64 の `(0, ∞)` しか見ないので、float4 で `Infinity` に丸まる値を別に断る。
+  // `strength` にはこの検査を足さない: 同じ `real` 列だが、`isStrengthInRange` が先に拒む。
   if (!Number.isFinite(Math.fround(input.halfLifeHours))) {
     throw new Error(
       `InMemoryMemoryStore: halfLifeHours does not fit in a Postgres "real" (float4) column (got ${input.halfLifeHours})`,
     );
   }
-  // 下側（アンダーフロー）: Postgres の `real` は、0 でない値が float4 で 0 に丸まるときも
-  // `"…" is out of range for type real` で拒む（実測: `halfLifeHours: 1e-300`・`strength: 1e-46`
-  // は拒み、`strength: 1e-45`＝float4 の非正規数に収まる値は受け付ける）。境界は
-  // 「`Math.fround(x)` が 0 になるか」とビット単位で一致する（上の上側の検査と同じ形）。
-  // `strength` も同じ `real` 列なので、値域 `(0, MAX_STRENGTH]` の中の値でもここに当たる
-  // ——上側（`1e300`）が値域の検査で先に拒まれるのとは違い、下側は値域の中に在る。
-  // `0` そのものは「0 に丸まった」のではないので、ここでは見ない（値域の検査の担当）。
+  // 下側: 0 でない値が float4 で 0 に丸まるときも Postgres は拒む（境界は `Math.fround(x)` が 0 になるか）。
+  // `strength` は値域の中の値でもここに当たる。`0` そのものは値域の検査の担当。
   for (const [field, value] of [
     ["halfLifeHours", input.halfLifeHours],
     ["strength", input.strength],
@@ -525,14 +410,8 @@ function assertStorableNewMemory(input: NewMemory): void {
       );
     }
   }
-  // Issue #807: `recordedAt`（必須）/`occurredAt`/`validFrom`/`validUntil`
-  // （省略可能）はすべて Postgres の `timestamptz` 列に書き込まれる。Invalid Date
-  // （`.getTime()` が `NaN`）を渡すと `PostgresMemoryStore.createMemory` はクエリ実行時に
-  // `invalid input syntax for type timestamp with time zone` で例外を投げる（実測。
-  // `reinforce`—同じ Issue—と同じ根本原因）。省略可能な3つは値が渡されたときだけ
-  // 検査する（既定値 `null`/`undefined` は「無い」であって Invalid Date ではない）。
-  // ADR 0493: `decayFloorAt`（必須）・`lastReinforcedAt`（省略可能）も同じ `timestamptz` 列で、同じく検査する（下）。
-  // #1183 の外側の CHECK 制約（Postgres の `memories_check`）: 由来が `stated`/`inferred` なら、その元の観測が要る。
+  // `recordedAt`・`occurredAt`・`validFrom`・`validUntil`・`decayFloorAt`・`lastReinforcedAt` は `timestamptz` 列。省略可能な欄は値が渡されたときだけ検査する。
+  // 由来が `stated`/`inferred` なら元の観測が要る（`memories_check`）。
   if (
     (input.provenance.kind === "stated" || input.provenance.kind === "inferred") &&
     input.sourceObservationId == null
@@ -541,8 +420,7 @@ function assertStorableNewMemory(input: NewMemory): void {
       `InMemoryMemoryStore: provenance.kind "${input.provenance.kind}" requires sourceObservationId`,
     );
   }
-  // 活動時計の起点と床（ADR 0165）: Postgres は `bigint` 列で、`memories_decay_seq_non_negative` が負を拒む。
-  // 省略（`null`/`undefined`）は「この軸には床が無い」であり、検査しない。
+  // 活動時計の起点と床は `bigint` 列で、負を拒む。省略は検査しない。
   for (const [field, value] of [
     ["decayBaseSeq", input.decayBaseSeq],
     ["decayFloorSeq", input.decayFloorSeq],
@@ -558,8 +436,7 @@ function assertStorableNewMemory(input: NewMemory): void {
       throw new Error(`InMemoryMemoryStore: ${field} must fit in a Postgres bigint (got ${value})`);
     }
   }
-  // 活動時計の半減期: 値域は `halfLifeHours` と同じ `(0, ∞)`（`memories_half_life_recalls_range`、ADR 0125）で、
-  // `real`（float4）列に収まる必要がある（上の `halfLifeHours` と同じ判定）。省略は検査しない。
+  // 活動時計の半減期は `(0, ∞)` で、`real`（float4）列に収まる必要がある。省略は検査しない。
   if (input.halfLifeRecalls != null) {
     const recalls = input.halfLifeRecalls;
     if (!isHalfLifeRecallsInRange(recalls)) {
@@ -579,10 +456,7 @@ function assertStorableNewMemory(input: NewMemory): void {
   if (Number.isNaN(input.recordedAt.getTime())) {
     throw new Error(`InMemoryMemoryStore: recordedAt must be a valid Date (got Invalid Date)`);
   }
-  // ADR 0493: `decayFloorAt`（必須）・`lastReinforcedAt`（省略可）も `timestamptz` 列。Postgres は Invalid Date を拒む。
-  // Issue #1759: `decay_floor_at` は NOT NULL で、Postgres は `null`・`undefined`・キーなしを `23502` で拒む（冪等の既存の行が
-  // 在っても。実測）。fixture も書く前に断る。例外の顔は揃えない（ADR 0640 の前例。型の誤りなので `TypeError`、ADR 0525）。
-  // 以前は型の外の `null` を通していた（ADR 0493）。
+  // `decay_floor_at` は NOT NULL で、Postgres は `null`・`undefined`・キーなしを拒む（冪等の既存の行が在っても）。型の誤りなので `TypeError`（例外の顔は Postgres と揃えない）。
   if (!(input.decayFloorAt instanceof Date)) {
     throw new TypeError(
       `InMemoryMemoryStore: decayFloorAt must be a Date (got ${input.decayFloorAt === null ? "null" : typeof input.decayFloorAt})`,
@@ -601,7 +475,7 @@ function assertStorableNewMemory(input: NewMemory): void {
       throw new Error(`InMemoryMemoryStore: ${field} must be a valid Date (got Invalid Date)`);
     }
   }
-  // ADR 0640: 上の6欄は、下限（4714-11-24 BC 00:00:00 UTC）より前を Postgres が `22008` で書けずに拒む（実測。冪等の既存の行が在っても拒む）。
+  // 上の欄は、下限より前を Postgres が書けずに拒む（冪等の既存の行が在っても拒む）。
   for (const [field, value] of [
     ["recordedAt", input.recordedAt],
     ["decayFloorAt", input.decayFloorAt],
@@ -612,20 +486,7 @@ function assertStorableNewMemory(input: NewMemory): void {
   ] as const) {
     assertWrittenTimestamptzFloor("InMemoryMemoryStore", field, value);
   }
-  // Issue #816（NUL 側。孤立サロゲート側はここでは扱わない）: Postgres の `text` 型は
-  // NUL バイト（`\u0000`）を構造的に拒む（C 文字列表現に由来する制約）。
-  // `PostgresMemoryStore.createMemory` は `content`/`subjectId`/`tags`（各要素）/
-  // `digest` のいずれに NUL を含む文字列を渡しても `invalid byte sequence for
-  // encoding "UTF8": 0x00` で例外を投げる（実測。4欄とも同じメッセージ）。
-  // PR #923 の時点ではこの検査を `content` だけに絞っていた（同 PR のコメント）が、
-  // 実測するとこの4欄は対称な入力面だったため、本 PR（Issue #816 の残り）で揃えた。
-  //
-  // ⚠ `tenantId` はここに含めない——`ctx.tenantId` は `createMemory` 以外の
-  // ほぼ全メソッドが個別に直接読む横断的な値であり、`InMemoryMemoryStore`/
-  // `FakeMemoryStore` のどちらも `ctx` を受ける共通の入口を持たない。ここで検査を
-  // 足しても `get`/`reinforce` 等の他メソッドでは素通りのままで一貫せず、全メソッドへ
-  // 検査を広げる横展開は本 PR の範囲を超えるため扱わない（実測: `tenantId` に NUL を
-  // 含めても Postgres は同じ理由で例外を投げる。Issue #816 本文と同じ）。
+  // `text` 列は NUL を拒む。`tenantId` はここに含めない: `ctx.tenantId` は他のメソッドが個別に読む横断的な値で、ここだけ検査しても一貫しない。孤立サロゲートはここでは扱わない。
   if (input.content.includes("\u0000")) {
     throw new Error(`InMemoryMemoryStore: content must not contain NUL characters (U+0000)`);
   }
@@ -638,14 +499,11 @@ function assertStorableNewMemory(input: NewMemory): void {
   if (input.digest.includes("\u0000")) {
     throw new Error(`InMemoryMemoryStore: digest must not contain NUL characters (U+0000)`);
   }
-  // 穴 O-6-3（ADR 0424）: `content_hash` も `text` 列——Postgres は NUL を拒む。以前ここだけ検査が無く、
-  // インメモリは NUL 入りの contentHash を保存していた。
+  // `content_hash` も `text` 列。
   if (input.contentHash.includes("\u0000")) {
     throw new Error(`InMemoryMemoryStore: contentHash must not contain NUL characters (U+0000)`);
   }
-  // `extractor_version`・`claim_key_subject`・`claim_key_predicate` も `text` 列で、Postgres は NUL を拒む
-  // （ADR 0434、実測。`createMemory`・`createMemoryWithOutbox`・`supersedeWithNewMemories`・
-  // `createMemoriesWithOutboxAndEvents` のどれでも、冪等の既存の行が在っても拒む）。
+  // `extractor_version`・`claim_key_subject`・`claim_key_predicate` も `text` 列（冪等の既存の行が在っても拒む）。
   if (stringHasNul(input.extractorVersion)) {
     throw new Error(
       `InMemoryMemoryStore: extractorVersion must not contain NUL characters (U+0000)`,
@@ -661,42 +519,26 @@ function assertStorableNewMemory(input: NewMemory): void {
       `InMemoryMemoryStore: claimKey.predicate must not contain NUL characters (U+0000)`,
     );
   }
-  // `attributes`・`provenance` は `jsonb` 列。Postgres は NUL を `unsupported Unicode
-  // escape sequence` で拒む（実測。`jsonContainsNul` の doc コメント参照）。
+  // `attributes`・`provenance` は `jsonb` 列。
   if (jsonContainsNul(input.attributes ?? {})) {
     throw new Error(`InMemoryMemoryStore: attributes must not contain NUL characters (U+0000)`);
   }
   if (jsonContainsNul(input.provenance)) {
     throw new Error(`InMemoryMemoryStore: provenance must not contain NUL characters (U+0000)`);
   }
-  // 列挙の列（型の列挙に無い値）: Postgres は CHECK 制約で拒む（`memory-enum-check.ts`）。
-  // `status` は省略すると `active` になるので、省略は検査しない。
+  // 列挙の列（型の列挙に無い値）は Postgres の CHECK 制約で拒む。`status` は省略すると `active` になるので、省略は検査しない。
   if (input.status !== undefined) assertStorableMemoryColumn("status", input.status);
   assertStorableMemoryColumn("digest_source", input.digestSource);
   assertStorableMemoryColumn("embedding_status", input.embeddingStatus);
   assertStorableMemoryColumn("provenance_kind", input.provenance.kind);
-  // ADR 0630: 書いたら読み戻したときに `MemorySchema` を通らなくなる値（`digest`・`contentHash`・`extractorVersion` の空文字、
-  // `claimKey`・`attributes`・`provenance` の中身の欠け・値域外）も断る。上の検査（NUL・列挙）の後に置く——それらが先に断る入力の
-  // 文面を変えない。`@mnemora/postgres`・core の Fake と同じ検査（`assertWellFormedNewMemory`）。
   assertWellFormedNewMemory("InMemoryMemoryStore", input);
-  // 孤立サロゲート（Issue #816、実測）: この関数は検査しない。`text` 列の欄の孤立サロゲートは、ADR 0543 から
-  // `createMemoryIdempotent` の入口で U+FFFD に置き換えて保存する（`PostgresMemoryStore` と同じ。以前は入力をそのまま保持していた）。
-  // `jsonb` 列の欄（`attributes`・`provenance`）は、今も置き換えも拒みもしない（Postgres は拒む。ADR 0543 の対象外）。
 }
 
 /**
- * `MemoryStore` のインメモリ実装（`@mnemora/testkit/fixtures`）。適合スイートと単体テストの入力に使う。
- * 契約は `@mnemora/core` の `MemoryStore` の各メソッドの doc が正で、Postgres が拒む値はこの fixture も拒む
- * （列挙に無い値・NUL・値域の外の数など）。拒むときは何も書かない。
- *
- * status を書く口が投げる名前の付いたエラー（`MemoryStatusConflictError`・`ContestedWithoutCompanionError`）は、
- * 各メソッドの doc に書いてある。
+ * `MemoryStore` のインメモリ実装（`@mnemora/testkit/fixtures`）。契約は `@mnemora/core` の `MemoryStore` の各メソッドの doc が正。
+ * Postgres が拒む値（列挙に無い値・NUL・値域の外の数など）はこの fixture も拒み、拒むときは何も書かない。
  */
-/**
- * ADR 0521: 操作の対象の id を小文字にそろえる（`@mnemora/postgres` は uuid 型の列で比べる・入口で
- * `normalizeUuidCase` を掛けるので、大文字の uuid を同じ記憶として受ける）。この fixture の id は小文字の
- * `mem-N` だけなので、小文字にそろえても別の id と混ざらない。
- */
+/** 操作の対象の id を小文字にそろえる（Postgres は uuid 型の列で比べるので、大文字の uuid を同じ記憶として受ける。この fixture の id は小文字の `mem-N` だけ）。 */
 function normId<T extends string>(id: T): T {
   return id.toLowerCase() as T;
 }
@@ -714,11 +556,7 @@ function normPairSide<T extends { id: MemoryId; supersededById?: MemoryId | unde
   };
 }
 
-/**
- * ADR 0604: `recall_usages` の鍵 `${tenantId}:${recallId}:${memoryId}` から tenantId を取り出す。
- * tenantId は `:` を含んでよい不透明な文字列なので、前から切らずに後ろの2つの `:` を外す
- * （`recallId`・`memoryId` は uuid で `:` を含まない）。Postgres は `tenant_id` の列で比べる。
- */
+/** `recall_usages` の鍵 `${tenantId}:${recallId}:${memoryId}` から tenantId を取り出す。tenantId は `:` を含みうるので、前から切らず後ろの2つの `:` を外す。 */
 function tenantOfUsageKey(key: string): string {
   const last = key.lastIndexOf(":");
   return key.slice(0, key.lastIndexOf(":", last - 1));
@@ -731,112 +569,54 @@ export class InMemoryMemoryStore implements MemoryStore {
   private readonly extractionIndex = new Map<string, MemoryId>();
   /** `(tenant_id, recall_id, memory_id)` の使用報告の冪等キー。 */
   private readonly usages = new Set<string>();
-  /**
-   * roadmap.md 段階4/5: recall 段6（記録）が書き込む `recalls` 相当のインメモリ表。
-   * Issue #298 / ADR 0155: `createdAt` を足した——`getRecall`（`RecallRecord`）が
-   * 返す形と1対1にするため。この in-memory 実装が保持する行は常に
-   * `createRecall` 経由で新規に書かれたものであり、マイグレーション以前の
-   * 「内訳を持たない」行という状態は存在しない（`breakdownCaptured` は
-   * `getRecall` で常に `true` に組み立てる）。
-   */
+  /** `recalls` 相当のインメモリ表。`getRecall` が返す形と1対1にするため `createdAt` を持つ。 */
   readonly recalls = new Map<string, NewRecallRecord & { tenantId: string; createdAt: Date }>();
-  /** `InMemoryEventStore` と共有する memory_events 相当の配列（ADR 0031、同一プロセス内の参照共有）。 */
+  /** `InMemoryEventStore` と共有する memory_events 相当の配列。 */
   readonly events: MemoryEvent[] = [];
-  /** `InMemoryOutboxStore` と共有する outbox ジョブの配列（同一プロセス内の参照共有）。 */
+  /** `InMemoryOutboxStore` と共有する outbox ジョブの配列。 */
   readonly outboxJobs: OutboxJobRecord[] = [];
-  /**
-   * [ADR 0165](../../../../docs/decisions/0165-decay-activity-clock.md) 決めたこと5
-   * （Issue #305）: `tenant_activity` 相当のテナントごとの活動カウンタ。
-   * `InMemoryTenantSettingsStore` にこの Map をそのまま渡すことで、`createRecall`
-   * （書く側）と `getActivitySeq`（読む側）が同じ値を見る——`outboxJobs`/`events` と
-   * 同じ「同一プロセス内の参照共有」の形（`packages/core/src/__tests__/runtime-fakes.ts`
-   * の `FakeBackingStore.activitySeq` と同じ設計）。
-   */
+  /** `tenant_activity` 相当のテナントごとの活動カウンタ。`InMemoryTenantSettingsStore` に同じ Map を渡すと、`createRecall`（書く側）と `getActivitySeq`（読む側）が同じ値を見る。 */
   readonly activitySeq = new Map<string, number>();
 
-  /**
-   * [ADR 0353](../../../../docs/decisions/0353-activity-counting-per-call.md)
-   * （Issue #338）: `tenant_subject_activity` 相当。`tenantId` → `subjectId` → `S_x`
-   * の2段の `Map`。`InMemoryTenantSettingsStore` にそのまま渡すことで、`createRecall`
-   * （書く側）と `getSubjectActivitySeqs`/`hasSubjectActivityCounters`（読む側）が
-   * 同じ値を見る——`activitySeq`（上）と同じ「同一プロセス内の参照共有」の形。
-   */
+  /** `tenant_subject_activity` 相当（`tenantId` → `subjectId` → `S_x`）。`InMemoryTenantSettingsStore` と共有する。 */
   readonly subjectActivitySeq = new Map<string, Map<string, number>>();
 
   /**
-   * Issue #1232 / [ADR 0354](../../../../docs/decisions/0354-atomic-event-retention-purge.md):
-   * `tenant_settings.event_retention_days` 相当。`purgeExpiredEventsByRetention` が読む。
-   * `InMemoryTenantSettingsStore` にこの Map をそのまま渡すことで、`setEventRetention`
-   * （書く側）と `purgeExpiredEventsByRetention`（読む側）が同じ値を見る——`activitySeq`（上）と
-   * 同じ「同一プロセス内の参照共有」の形。キーが無い（`Map.has` が `false`）テナントは
-   * `{ kind: "unset" }`、値が `null` なら `{ kind: "unlimited" }`、数値なら `{ kind: "days" }`。
+   * `tenant_settings.event_retention_days` 相当。`InMemoryTenantSettingsStore` と共有する。
+   * キーが無いテナントは `{ kind: "unset" }`、値が `null` なら `{ kind: "unlimited" }`、数値なら `{ kind: "days" }`。
    */
   readonly eventRetentionDays = new Map<string, number | null>();
 
-  /**
-   * Issue #201 / ADR 0318: `labels` 相当のインメモリ表。key は {@link labelKey}。
-   * `PostgresMemoryStore.upsertProposedLabels`/`listLabels`/`registerLabel` と同じ意味論
-   * （`docs/memory-model.md` §8）を、`Map` の上でそのまま再現する。
-   */
+  /** `labels` 相当のインメモリ表。key は {@link labelKey}。 */
   private readonly labels = new Map<string, LabelSummary>();
 
-  /**
-   * Issue #995/#1207 / [ADR 0375](../../../../docs/decisions/0375-purge-scope-widened.md):
-   * `memory_labels` 相当——`(tenantId, memoryId)` からその Memory が紐づく label 名の
-   * 集合へ。`labels`（上）は `proposedCount` 等の集計だけを持ち、どの memory がどの
-   * label を持つかを個別には追跡していなかった——`purgeMemory` が「この Memory の
-   * label の紐付けを外し、その分だけ `proposedCount` を減らす」ためにこの PR で新設した。
-   */
+  /** `memory_labels` 相当（`(tenantId, memoryId)` → 紐づく label 名の集合）。`purgeMemory` が紐付けを外し、その分だけ `proposedCount` を減らすために要る。 */
   private readonly memoryLabels = new Map<string, Set<string>>();
 
-  /**
-   * Issue #207/#933 PR2（ADR 0381）: `memory_relations` 相当——`InMemoryRelationStore`
-   * と共有する（`events`/`outboxJobs` と同じ「同一プロセス内の参照共有」の形）。
-   * `markContestedGroup`/`resolveContestedGroup`（このファイル）が書き、
-   * `InMemoryRelationStore.listRelated` が読む。
-   */
+  /** `memory_relations` 相当。`InMemoryRelationStore` と共有する。 */
   readonly relations: StoredRelation[] = [];
 
-  /**
-   * [ADR 0426](../../../../docs/decisions/0426-in-memory-erase-tenant-postgres-alignment.md):
-   * `memories` の行を消したときに呼ぶ listener。`memory_embeddings_<space>.memory_id` の
-   * `ON DELETE CASCADE`（`packages/postgres/src/vector-space.ts`）に当たる動きを、
-   * `InMemoryVectorStore` がコンストラクタで {@link onMemoriesDeleted} を通して登録する。
-   */
+  /** `memories` の行を消したときに呼ぶ listener（`memory_embeddings_<space>.memory_id` の `ON DELETE CASCADE` に当たる動き）。 */
   private readonly memoriesDeletedListeners: Array<
     (tenantId: string, memoryIds: readonly MemoryId[]) => void
   > = [];
 
-  /**
-   * [ADR 0426](../../../../docs/decisions/0426-in-memory-erase-tenant-postgres-alignment.md):
-   * `memories` の行が消えたとき（`eraseTenant`。`dryRun` では呼ばない）に `listener` を呼ぶ。
-   * `InMemoryVectorStore` が埋め込みを一緒に消すために使う（Postgres の CASCADE）。
-   */
+  /** `memories` の行が消えたとき（`eraseTenant`。`dryRun` では呼ばない）に `listener` を呼ぶ。`InMemoryVectorStore` が埋め込みを一緒に消すために使う。 */
   onMemoriesDeleted(listener: (tenantId: string, memoryIds: readonly MemoryId[]) => void): void {
     this.memoriesDeletedListeners.push(listener);
   }
 
-  /**
-   * `(tenantId, name)` を区切り文字で繋がず、`JSON.stringify` の配列で表す。`tenantId` は不透明な
-   * 文字列で `::` を含んでよい（`Ctx` の doc）。以前の `${tenantId}::${name}` は、テナント `a::b` の
-   * `x` とテナント `a` の `b::x` を同じキーに潰していた（`labels-tenant-key.postgres.test.ts`）。
-   */
+  /** `(tenantId, name)` を区切り文字で繋がず、`JSON.stringify` の配列で表す: `tenantId` は `::` を含みうるので、繋ぐとテナント `a::b` の `x` とテナント `a` の `b::x` が同じキーに潰れる。 */
   private labelKey(tenantId: string, name: string): string {
     return JSON.stringify([tenantId, name]);
   }
 
-  /** `labelKey` と同じ理由・同じ形——`(tenantId, memoryId)` を `JSON.stringify` の配列で表す。 */
+  /** `labelKey` と同じ理由で、`(tenantId, memoryId)` を `JSON.stringify` の配列で表す。 */
   private memoryLabelKey(tenantId: string, memoryId: string): string {
     return JSON.stringify([tenantId, memoryId]);
   }
 
-  /**
-   * Issue #201 / ADR 0318: `PostgresMemoryStore.upsertProposedLabels` と同じ契約——
-   * 新しく作った Memory の `tags`（重複は `Set` で潰す）から `proposed` ラベルを作り・
-   * `proposedCount` を数える。`status === 'registered'` のラベルは件数を進めない。
-   * `createMemoryIdempotent` の「新しい行を実際に作った」分岐からだけ呼ぶ
-   * （冪等衝突では呼ばない——postgres 実装と同じ判断）。
-   */
+  /** 新しく作った Memory の `tags` から `proposed` ラベルを作り、`proposedCount` を数える（`PostgresMemoryStore.upsertProposedLabels` と同じ）。「新しい行を実際に作った」分岐からだけ呼ぶ。 */
   private upsertProposedLabels(ctx: Ctx, memoryId: MemoryId, tags: readonly string[]): void {
     const uniqueNames = Array.from(new Set(tags));
     if (uniqueNames.length === 0) {
@@ -854,30 +634,25 @@ export class InMemoryMemoryStore implements MemoryStore {
       if (existing.status === "proposed") {
         this.labels.set(key, { ...existing, proposedCount: existing.proposedCount + 1 });
       }
-      // status === 'registered' の場合は件数を進めない（postgres 実装と同じ）。
+      // `status === 'registered'` は件数を進めない。
       linked.add(name);
     }
-    // Issue #995/#1207 / ADR 0375: この Memory がどの label 名に紐づいたかを覚える——
-    // `purgeMemory` がこの紐付けを外し、`proposedCount` を減らすために使う。
+    // この Memory がどの label 名に紐づいたかを覚える（`purgeMemory` が使う）。
     this.memoryLabels.set(this.memoryLabelKey(ctx.tenantId, memoryId), linked);
   }
 
-  /**
-   * ADR 0054: 「既存を引く」と「挿入する」を1つの同期区間に閉じ、`created` をその判定
-   * そのものから出す。**`await` を挟まない**——挟むと判定と挿入の間に他の呼び出しの
-   * 同期区間が入り、`created` が別の書き込みの影響を受ける。
-   */
+  /** 「既存を引く」と「挿入する」を1つの同期区間に閉じる。`await` を挟まない: 挟むと判定と挿入の間に他の呼び出しが入り、`created` が別の書き込みの影響を受ける。 */
   private createObservationIdempotent(
     ctx: Ctx,
     input: NewObservation,
-    // 新しい行を実際に作るとき（冪等の既存の行が無いとき）にだけ、書く前に呼ばれる（ADR 0434）。
+    // 新しい行を実際に作るとき（冪等の既存の行が無いとき）にだけ、書く前に呼ばれる。
     beforeInsert?: () => void,
   ): IdempotentCreateResult<Observation> {
-    // ADR 0543: `kind`（`text` 列。識別子ではない）の孤立サロゲートは、Postgres と同じく U+FFFD に置き換えて保存する。
+    // `kind`（`text` 列）の孤立サロゲートは、Postgres と同じく U+FFFD に置き換えて保存する。
     input = replaceLoneSurrogatesInNewObservation(input);
     assertObservationHasNoNul("InMemoryMemoryStore", input);
     assertObservationDatesValid("InMemoryMemoryStore", input);
-    // Postgres の一意制約は `external_id IS NOT NULL` の行に効く——空文字も鍵である（`null`/`undefined` だけが鍵無し）。
+    // Postgres の一意制約は `external_id IS NOT NULL` の行に効く: 空文字も鍵（`null`/`undefined` だけが鍵無し）。
     const existing =
       input.externalId != null
         ? [...this.observations.values()].find(
@@ -895,13 +670,11 @@ export class InMemoryMemoryStore implements MemoryStore {
         payload: toStorablePayload(input.payload),
         occurredAt: input.occurredAt ?? null,
         recordedAt: input.recordedAt ?? new Date(),
-        // Issue #280: `occurredAt` と同じ経路。
         validFrom: input.validFrom ?? null,
         validUntil: input.validUntil ?? null,
-        // Issue #152（ADR 0312）: 同じ経路。runtime は常に `{}` 以上の値を書く。
         attributes: input.attributes ?? {},
       };
-      // Issue #1108: 呼び手の入力（payload・attributes・Date）と切り離して保存する。
+      // 呼び手の入力と切り離して保存する。
       const stored = snapshot(observation);
       this.observations.set(stored.id, stored);
       return stored;
@@ -928,12 +701,11 @@ export class InMemoryMemoryStore implements MemoryStore {
     ctx: Ctx,
     kind: OutboxJobKind,
     payload: Record<string, unknown>,
-    // Issue #1237: 既定は壁時計——呼び出し側が時刻を明示的に渡さない限り、今日と同じ挙動のまま。
     now: Date = new Date(),
-    // ADR 0407: 渡されたら「その名前で claim 済み」（`attempts: 1`）で作る。
+    // 渡されたら、その名前で claim 済み（`attempts: 1`）で作る。
     claimedBy?: string,
   ): OutboxJobRecord {
-    // ADR 0543: `outbox.kind`・`outbox.claimed_by` は `text` 列。孤立サロゲートは U+FFFD に置き換えて保存する。
+    // `text` 列なので、孤立サロゲートは U+FFFD に置き換える。
     kind = replaceLoneSurrogates(kind);
     claimedBy = replaceLoneSurrogates(claimedBy);
     const job: OutboxJobRecord = {
@@ -963,8 +735,7 @@ export class InMemoryMemoryStore implements MemoryStore {
     assertWellFormedCtx(ctx);
     assertWellFormedIdentifier(input.subjectId, "input.subjectId");
     assertWellFormedIdentifier(input.externalId, "input.externalId");
-    // Issue #1237: 省略時は1回だけ壁時計を読み、この呼び出しで積む outbox 行すべてに
-    // 同じ値を使う（`@mnemora/postgres` と同じ規律）。
+    // 省略時は1回だけ壁時計を読み、積む outbox 行すべてに同じ値を使う（`@mnemora/postgres` と同じ）。
     const outboxNow = opts?.now ?? new Date();
     const { value: observation, created } = this.createObservationIdempotent(ctx, input, () =>
       assertOutboxRowsWritable("createObservationWithOutbox", jobKinds, opts?.now, opts?.claimedBy),
@@ -984,27 +755,20 @@ export class InMemoryMemoryStore implements MemoryStore {
     return snapshot({ observation, created: true, jobs });
   }
 
-  /**
-   * ADR 0439: 別の行への参照は、`ctx` のテナントの行を指さなければならない。実在しない id と別テナントの id は区別しない
-   * （`PostgresMemoryStore` と同じ。message も `… not found for tenant: <id>` にそろえる）。`null`・`undefined` は「参照しない」
-   * （空文字は参照として扱い、どのテナントの行でもないので拒む）。
-   */
+  /** 別の行への参照は `ctx` のテナントの行を指さなければならない。実在しない id と別テナントの id は区別しない（`… not found for tenant: <id>`）。`null`・`undefined` は「参照しない」。空文字は参照として扱い、拒む。 */
   private assertOwnMemoryRef(ctx: Ctx, id: MemoryId | null | undefined): void {
     if (id === null || id === undefined) return;
     const memory = this.memories.get(normId(id));
     if (!memory || memory.tenantId !== ctx.tenantId) {
-      // Issue #1759: 参照先が無いときの message は、Postgres と同じく小文字にそろえた id を載せる（ADR 0521 の訂正）。
+      // 参照先が無いときの message は、Postgres と同じく小文字にそろえた id を載せる。
       throw new Error(`InMemoryMemoryStore: memory not found for tenant: ${normId(id)}`);
     }
   }
 
   /**
-   * ADR 0466（ADR 0456 の H4 の InMemory 版）: 呼び出し側が渡した `NewMemoryEvent.memoryId` の記憶が `ctx` のテナントに
-   * 在ることを、イベントを積む前に確かめる。実在しない・別テナントは区別せず `memory not found for tenant`
-   * （`PostgresMemoryStore` の `assertEventTargetInTenant` と同じ判定・同じ message の形）。`null`・`undefined`
-   * （記憶を指さないイベント）は確かめない。`knownInTenant` は、この呼び出しが今まさに更新・作成した行の id
-   * （`ctx` のテナントの行と分かっている）で、それを指すイベントは問い合わせない。
-   * **書く前に呼ぶ**（断ったら、status の更新も news もイベントも、何も書かれない）。
+   * `NewMemoryEvent.memoryId` の記憶が `ctx` のテナントに在ることを、イベントを積む前に確かめる。実在しない・別テナントは区別しない。
+   * `null`・`undefined` は確かめない。`knownInTenant` は、この呼び出しが更新・作成した行の id で、それを指すイベントは問い合わせない。
+   * 書く前に呼ぶ（断ったら何も書かれない）。
    */
   private assertEventTargetOwn(
     ctx: Ctx,
@@ -1012,8 +776,7 @@ export class InMemoryMemoryStore implements MemoryStore {
     knownInTenant: readonly MemoryId[] = [],
   ): void {
     if (memoryId === null || memoryId === undefined) return;
-    // ADR 0469: 大文字小文字は区別しない（`@mnemora/postgres` は uuid を小文字にそろえて比べる。この fixture の id は小文字の `mem-N`）。
-    // 断るときの message は、渡された id のまま。操作の対象の id（`updateStatusWithEvent(ctx, id, …)` の `id` など）は変えない。
+    // 大文字小文字は区別しない（Postgres は uuid を小文字にそろえて比べる）。断るときの message は渡された id のまま。
     const id = memoryId.toLowerCase();
     if (knownInTenant.some((known) => known.toLowerCase() === id)) return;
     const memory = this.memories.get(id);
@@ -1030,10 +793,7 @@ export class InMemoryMemoryStore implements MemoryStore {
     }
   }
 
-  /**
-   * ADR 0054: 冪等キーの判定と挿入を1つの同期区間に閉じ、`created` をその判定そのものから
-   * 出す（`createObservationIdempotent` と同じ理由）。
-   */
+  /** 冪等キーの判定と挿入を1つの同期区間に閉じる（`createObservationIdempotent` と同じ理由）。 */
   private createMemoryIdempotent(
     ctx: Ctx,
     input: NewMemory,
@@ -1041,7 +801,7 @@ export class InMemoryMemoryStore implements MemoryStore {
       | "createMemory"
       | "createMemoryWithOutbox"
       | "createMemoriesWithOutboxAndEvents" = "createMemory",
-    // 新しい行を実際に作るとき（冪等の既存の行が無いとき）にだけ、書く前に呼ばれる（ADR 0434）。
+    // 新しい行を実際に作るとき（冪等の既存の行が無いとき）にだけ、書く前に呼ばれる。
     beforeInsert?: () => void,
   ): IdempotentCreateResult<Memory> {
     // ADR 0543: `text` 列に入る欄の孤立サロゲートは、Postgres と同じく U+FFFD に置き換えて保存する。冪等の鍵
