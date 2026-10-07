@@ -4,13 +4,6 @@ import { InMemoryTenantSettingsStore } from "@mnemora/testkit/fixtures";
 import { PostgresTenantSettingsStore } from "../tenant-settings-store.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
-/**
- * ADR 0437 決定2（PR #1545）の確かめ直し（Issue #1734）で足した歯。`getSubjectActivitySeqs` の `subjectIds` の
- * 各要素は、形が壊れていれば `subjectIds[<添字>]` という欄の名前つきで断る（`MalformedIdentifierError` の
- * `field`。値は載せない）。適合テストは「断ること」と例外の kind だけを見ていたので、欄の名前を別の綴りに
- * 変えても緑のままだった。Postgres と testkit の InMemory の両方を見る。
- */
-
 const ctx: Ctx = { tenantId: "tenant-settings-subject-ids-field-name" };
 
 const KITS: Array<[string, () => Promise<TenantSettingsStore>]> = [

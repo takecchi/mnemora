@@ -6,28 +6,15 @@ import { InMemoryMemoryStore } from "@mnemora/testkit/fixtures";
 import { PostgresMemoryStore } from "../memory-store.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
-/**
- * ADR 0437 決定3（`MemoryStore.scrubPurged`、PR #1545）の確かめ直し（Issue #1734）で足した歯。
- * 公開の適合テストは「残骸が tags・attributes・claim key の全部に在る行」と「残骸の無い行」だけを見ていたので、
- * 次の変異が緑のままだった。Postgres と testkit の InMemory に同じ表を当てる。
- *
- * - 残骸が1つの欄だけに在る行（tags だけ・attributes だけ・claim key だけ）は、その欄も消える。
- * - purge 済み（`purgedAt` が立っている）でも `forgotten` でない行は触らない。
- * - 登録済み（`registered`）の label の `proposedCount` は動かさない。
- * - `proposedCount` は 0 を割らない。
- * - 形の壊れた `ctx`（NUL を含む `tenantId`）は `MalformedIdentifierError` で断る。
- */
-
 const ctx: Ctx = { tenantId: "scrub-purged-residue-gaps" };
 
 interface Kit {
   store: InMemoryMemoryStore | PostgresMemoryStore;
-  /** `purgedAt` だけを立てる（`status` と `content` は触らない）。 */
   markPurgedAt: (id: string) => Promise<void>;
-  /** label の `proposedCount` を、実際の紐付けの本数と食い違う値へ書き換える。 */
   setProposedCount: (name: string, count: number) => Promise<void>;
 }
 
+// v1.0.x の purge が残した状態は公開の口では作れないので、InMemory は内部の Map を、Postgres は SQL を直に書き換えて作る。
 const KITS: Array<[string, () => Promise<Kit>]> = [
   [
     "testkit の InMemory",

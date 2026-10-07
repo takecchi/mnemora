@@ -4,15 +4,6 @@ import type { NewMemoryEvent } from "../event.js";
 import type { Memory, NewMemory } from "../memory.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * ADR 0439（PR #1549）の確かめ直し（Issue #1734）で足した歯。core の `FakeMemoryStore` の `resolveContestedPair`・
- * `resolveContestedGroup` が、別テナントの memory を `supersededById` に書こうとする呼び出しを、実在しない id と
- * 同じ message（`memory not found for tenant: <id>`）で断ること。`fake-cross-tenant-ref-message` は
- * `createMemory`・`recordUsage` の参照だけを見ていて、この2つの口の検査を外しても赤にならなかった。
- *
- * 断られたとき、どの行の status も変わらない。陽性対照として、自テナントの勝者を指す呼び出しは通る。
- */
-
 const A: Ctx = { tenantId: "fake-xref-pair-group-a" };
 const B: Ctx = { tenantId: "fake-xref-pair-group-b" };
 const NOW = new Date("2026-06-01T00:00:00.000Z");
@@ -54,7 +45,7 @@ function setup() {
   return { store, ev, mem };
 }
 
-describe("Fake: resolveContestedPair・resolveContestedGroup は、別テナントの memory を supersededById に書けない（ADR 0439）", () => {
+describe("Fake: resolveContestedPair・resolveContestedGroup は、別テナントの memory を supersededById に書けない", () => {
   it("resolveContestedPair: 別テナントの supersededById は memory not found for tenant で断り、行は contested のまま。自テナントの勝者は通す", async () => {
     const { store, ev, mem } = setup();
     const [a, b] = [await mem(A), await mem(A)];

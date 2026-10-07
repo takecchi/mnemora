@@ -5,17 +5,6 @@ import { InMemoryMemoryStore } from "@mnemora/testkit/fixtures";
 import { PostgresMemoryStore } from "../memory-store.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
-/**
- * ADR 0439（PR #1549）の確かめ直し（Issue #1734）で足した歯。`MemoryStore` の書き込み口が受け取る、別の行への参照の
- * 入口の検査（`checkedRef`）のうち、`cross-tenant-reference-check`・適合テストが見ていなかった隅を縛る。
- *
- * - 大文字の uuid は小文字にそろえる（決定3）。実在しない大文字の uuid を渡すと、message には**小文字にそろえた** id が載る
- *   （DB は uuid 型で大文字も同じ値に読むので、そろえ忘れは message の綴りにだけ出る）。
- * - uuid の形でない id は、`updateStatusWithEvent`・`resolveContestedGroup` でも DB へ投げる前に弾く
- *   （生の `invalid input syntax for type uuid` を見せず、`memory not found for tenant` にそろえる）。
- * - `null` は「参照しない」。`createMemory` の3つの参照欄に明示の `null` を渡しても通る（testkit の InMemory も同じ）。
- */
-
 const A: Ctx = { tenantId: "ref-spelling-gaps-a" };
 const MISSING_UPPER = "00000000-0000-4000-8000-00000000ABCD";
 const MISSING_LOWER = MISSING_UPPER.toLowerCase();
@@ -34,7 +23,7 @@ afterAll(async () => {
   await closeTestClient();
 });
 
-describe("PostgresMemoryStore：参照の入口の検査の隅（ADR 0439）", () => {
+describe("PostgresMemoryStore：参照の入口の検査の隅", () => {
   let mem: PostgresMemoryStore;
   const make = (name: string, over: Record<string, unknown> = {}) =>
     mem.createMemory(
