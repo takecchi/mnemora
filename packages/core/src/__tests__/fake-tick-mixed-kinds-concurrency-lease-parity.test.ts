@@ -448,7 +448,7 @@ function newMemory(ctx: Ctx, content: string, over: Partial<NewMemory> = {}): Ne
 }
 
 describe("tick の種類の混在・並行・リースの期限切れ（Fake）", () => {
-  it("Postgres で実測した結果（EXPECTED）と一致する", async () => {
+  it("種類が混在するジョブへの並行 tick と、リース期限切れ後の再 claim の結果が、Postgres で実測した値（EXPECTED）と一致する", async () => {
     const stores = createFakeRuntimeStores();
     const space = { provider: "fake", model: "fake-model", dimensions: 3 };
     clockOffsetMs = 0;

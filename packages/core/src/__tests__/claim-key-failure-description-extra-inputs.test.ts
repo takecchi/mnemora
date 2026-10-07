@@ -21,17 +21,20 @@ const INPUTS: Array<[string, unknown]> = [
   ["kind が空白だけの Error", Object.assign(new Error("x"), { kind: " " })],
 ];
 
-describe("deriveClaimKeys の失敗の記述は、追加の入力でも describeExtractionFailure と同じ", () => {
-  it.each(INPUTS)("%s", async (_label, thrown) => {
-    const provider: LLMProvider = {
-      complete: async () => {
-        throw new Error("not used");
-      },
-      completeStructured: async () => {
-        throw thrown;
-      },
-    };
-    const result = await deriveClaimKeys(provider, { tenantId: "t" }, ["発話"]);
-    expect(result.failure).toEqual(describeExtractionFailure(thrown));
-  });
+describe("deriveClaimKeys の失敗の記述は、空メッセージの Error・kind を持つ Error の派生・Error でないオブジェクト・Symbol・BigInt・空文字などが投げられても describeExtractionFailure と同じ", () => {
+  it.each(INPUTS)(
+    "投げられたものが「%s」のとき、failure は describeExtractionFailure(thrown) と同じ",
+    async (_label, thrown) => {
+      const provider: LLMProvider = {
+        complete: async () => {
+          throw new Error("not used");
+        },
+        completeStructured: async () => {
+          throw thrown;
+        },
+      };
+      const result = await deriveClaimKeys(provider, { tenantId: "t" }, ["発話"]);
+      expect(result.failure).toEqual(describeExtractionFailure(thrown));
+    },
+  );
 });

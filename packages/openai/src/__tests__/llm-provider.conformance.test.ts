@@ -58,7 +58,7 @@ function createFailingHarness(error: unknown): LLMProviderFailureHarness {
 }
 
 /** 足場が歯を空回りさせていないことを、適合テストの前に測る。偽 client から余計な欄が消えると、歯が黙って空回りする。 */
-describe("適合テストの前提: 足場が歯を空回りさせていない", () => {
+describe("適合テストの前提: 偽 client の応答は、ベンダー固有の欄と schema に無い欄を実際に持つ（無いと適合テストが何も確かめないまま緑になる）", () => {
   it("偽 client の応答（SDK 相当）は content 以外にベンダー固有の欄を実際に持つ", () => {
     const response = openaiResponseWithVendorFields("x");
     const keys = Object.keys(response);
@@ -80,10 +80,10 @@ describe("適合テストの前提: 足場が歯を空回りさせていない",
  * 公開 suite（`@mnemora/testkit`）には足さず、リポ内の歯にする。公開 suite の歯を締めると、利用者の自作 adapter のテストが更新しただけで赤になりうる。
  * 適合 suite の歯は `Object.keys(result)` の走査なので、`result` が `{}` なら一度も検査せずに緑になる。欄が落ちる変異はそこを素通りするので、「在るべき欄が同じ値で在る」を別に測る。
  */
-describe("リポ内の歯（ADR 0266 負債7）: completeStructured は schema が宣言した欄を落とさない", () => {
+describe("completeStructured は schema が宣言した欄を落とさない（リポ内の検査。ADR 0266 負債7）", () => {
   const declared = Object.keys(structuredSchema.shape) as (keyof typeof structuredSchema.shape)[];
 
-  it("前提: 偽応答の JSON は、schema が宣言した欄をすべて持つ（持たなければこの歯は空振りする）", () => {
+  it("前提: 偽応答の JSON は、schema が宣言した欄をすべて持つ（持たなければ下の検査は何も確かめないまま緑になる）", () => {
     for (const key of declared) {
       expect(structuredPayloadWithVendorField).toHaveProperty(key);
     }

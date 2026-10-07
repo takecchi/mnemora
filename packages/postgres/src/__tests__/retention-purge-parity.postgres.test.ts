@@ -544,7 +544,7 @@ function memoryFixture(ctx: Ctx, tag: string) {
 }
 
 describe("保持と掃除の口（InMemory・Postgres）", () => {
-  it("InMemory は Postgres で実測した結果（EXPECTED）と一致する", async () => {
+  it("InMemory の保持日数による event の purge と、purgeExpiredRecalls・purgeCompletedJobs の結果が、Postgres で実測した値（EXPECTED）と一致する", async () => {
     const m = new InMemoryMemoryStore();
     let n = 0;
     const out = await scenario({
@@ -570,7 +570,7 @@ describe("保持と掃除の口（InMemory・Postgres）", () => {
     expect(out).toEqual(EXPECTED);
   });
 
-  it("Postgres は EXPECTED と一致する", async () => {
+  it("Postgres の保持日数による event の purge と、purgeExpiredRecalls・purgeCompletedJobs の結果が、EXPECTED と一致する", async () => {
     await resetTestDatabase();
     const { db } = await getTestClient();
     const mem = new PostgresMemoryStore(db);

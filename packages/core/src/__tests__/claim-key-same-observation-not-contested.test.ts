@@ -43,7 +43,7 @@ function buildRuntime(llmProvider: LLMProvider) {
 }
 
 describe("claim key の検出: 同じ observation の兄弟どうしを誤って contested にしない（Issue #835、ADR 0377、core の Fake）", () => {
-  it("(R) 回帰の歯: 先行 observe の M1 が在るとき、後続の1回の observe が生む同じ claim key の2件（訂正の新値・旧値の言い直し）は、片方が M1 と contested になり、もう片方は active のまま残る", async () => {
+  it("(R) 回帰: 先行 observe の M1 が在るとき、後続の1回の observe が生む同じ claim key の2件（訂正の新値・旧値の言い直し）は、片方が M1 と contested になり、もう片方は active のまま残る", async () => {
     const llm = sequencedLlm([
       { memories: [{ content: "以前は京都に住んでいた", provenanceKind: "stated" }] },
       { claims: [{ subject: "user", predicate: "lived_in_city" }] },

@@ -550,7 +550,7 @@ function build(base: string, stores: Stores, rows: Env["rows"]): Env {
 }
 
 describe("tick の種類の混在・並行・リースの期限切れ（InMemory・Postgres）", () => {
-  it("InMemory は Postgres で実測した結果（EXPECTED）と一致する", async () => {
+  it("InMemory の、種類が混在するジョブへの並行 tick と、リース期限切れ後の再 claim の結果が、Postgres で実測した値（EXPECTED）と一致する", async () => {
     const m = new InMemoryMemoryStore();
     const env = build(
       "tick-mixed-inmem",
@@ -582,7 +582,7 @@ describe("tick の種類の混在・並行・リースの期限切れ（InMemory
     expect(await scenario(env)).toEqual(EXPECTED);
   });
 
-  it("Postgres は EXPECTED と一致する", async () => {
+  it("Postgres の、種類が混在するジョブへの並行 tick と、リース期限切れ後の再 claim の結果が、EXPECTED と一致する", async () => {
     await resetTestDatabase();
     const { db } = await getTestClient();
     const env = build(

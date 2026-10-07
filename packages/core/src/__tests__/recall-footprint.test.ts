@@ -19,7 +19,7 @@ import type { NewMemory } from "../memory.js";
 import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-describe("BUILTIN_RECALL_FOOTPRINT_PROFILE — 構造定数のずれを検知する歯", () => {
+describe("BUILTIN_RECALL_FOOTPRINT_PROFILE — 係数を測った構造定数が、いまの構造定数からずれていない", () => {
   it("origin.measuredUnder は FOOTPRINT_STRUCTURAL_CONSTANTS（現在値）と一致する", () => {
     const origin = BUILTIN_RECALL_FOOTPRINT_PROFILE.origin;
     if (origin.kind !== "builtin_default") {
@@ -55,7 +55,7 @@ const shapeTestProfile: RecallFootprintProfile = {
 // 既定の許容誤差 5% は `compareWithFullLog` が 'too_close_to_call' を返す幅なので、動くと判定が静かに変わる。
 // 値の根拠（較正後の最大残差 2.023% が内側）が崩れたら、決め直す合図にする。
 describe("DEFAULT_FOOTPRINT_TOLERANCE — 既定の許容誤差は 5%", () => {
-  it("値は 0.05", () => {
+  it("DEFAULT_FOOTPRINT_TOLERANCE の値は 0.05", () => {
     expect(DEFAULT_FOOTPRINT_TOLERANCE).toBe(0.05);
   });
 });

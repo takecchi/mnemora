@@ -614,7 +614,7 @@ function build(
 }
 
 describe("consolidate・reflect・reextract・observe の「消した後の参照」（InMemory・Postgres）", () => {
-  it("InMemory は Postgres で実測した結果（EXPECTED）と一致する", async () => {
+  it("InMemory の、消した後の記憶に対する consolidate・reflect・reextract・observe・recall の結果が、Postgres で実測した値（EXPECTED）と一致する", async () => {
     const m = new InMemoryMemoryStore();
     const env = build("llm-paths-inmem", {
       mem: m,
@@ -632,7 +632,7 @@ describe("consolidate・reflect・reextract・observe の「消した後の参�
     expect(await scenario(env)).toEqual(EXPECTED);
   });
 
-  it("Postgres は EXPECTED と一致する", async () => {
+  it("Postgres の、消した後の記憶に対する consolidate・reflect・reextract・observe・recall の結果が、EXPECTED と一致する", async () => {
     await resetTestDatabase();
     const { db } = await getTestClient();
     const env = build("llm-paths-pg", {

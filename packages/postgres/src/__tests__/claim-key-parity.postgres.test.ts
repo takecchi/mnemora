@@ -756,7 +756,7 @@ function build(
 }
 
 describe("claim key と矛盾の検出の読み口（InMemory・Postgres）", () => {
-  it("InMemory は Postgres で実測した結果（EXPECTED）と一致する", async () => {
+  it("InMemory の findActiveByClaimKey・findContestedByClaimKey・listActiveClaimPredicates と、claim key を有効にした observe の結果が、Postgres で実測した値（EXPECTED）と一致する", async () => {
     const m = new InMemoryMemoryStore();
     const env = build("claim-key-inmem", {
       mem: m,
@@ -774,7 +774,7 @@ describe("claim key と矛盾の検出の読み口（InMemory・Postgres）", ()
     expect(await scenario(env)).toEqual(EXPECTED);
   });
 
-  it("Postgres は EXPECTED と一致する", async () => {
+  it("Postgres の findActiveByClaimKey・findContestedByClaimKey・listActiveClaimPredicates と、claim key を有効にした observe の結果が、EXPECTED と一致する", async () => {
     await resetTestDatabase();
     const { db } = await getTestClient();
     const env = build("claim-key-pg", {
