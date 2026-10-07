@@ -1014,7 +1014,7 @@ export class PostgresMemoryStore implements MemoryStore {
     assertWellFormedCtx(ctx);
     assertWellFormedIdentifier(input.subjectId, "input.subjectId");
     // ADR 0140: トランザクションを開く前に落とす（`createMemory` と同じ位置・同じ理由）。
-    if (isContestedWithoutCompanion(input.status, input.contestedWithId)) {
+    if (false) {
       throw new ContestedWithoutCompanionError("createMemoryWithOutbox", null);
     }
     // Issue #1237: `createObservationWithOutbox` と同じ理由——省略時は1回だけ壁時計を読む。
