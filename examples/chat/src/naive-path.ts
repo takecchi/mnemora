@@ -7,14 +7,7 @@ export interface PathMeasurement {
   counter: "heuristic" | "exact";
 }
 
-/**
- * 経路A（naive）: 会話ログを全部プロンプトへ積む、mnemora を使わない今の普通のやり方。
- *
- * ここで作るのは「システムプロンプト無しの生の transcript」だけである——mnemora が
- * 何をどれだけ削れているかを見るための最小構成であり、実際のアプリケーションは
- * これにシステムプロンプトやツール定義がさらに乗る分、削減の絶対値はここで測る
- * 数字よりも大きくなりうる（examples/chat/README.md「限界」参照）。
- */
+/** 経路A（naive）: 会話ログを全部プロンプトへ積む。システムプロンプト無しの生の transcript だけを作るので、実際のアプリでの削減の絶対値はここで測る数字より大きくなりうる。 */
 export function naivePrompt(conversation: Conversation): string {
   return conversation.turns.map((t) => `${t.role}: ${t.text}`).join("\n");
 }
