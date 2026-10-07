@@ -1,15 +1,4 @@
-/**
- * 固定回帰ケース(ADR 0227 の門)と同じ条件で probe ごとの順位を一覧にし、Markdown を標準出力へ、
- * 機械可読の JSON を `MNEMORA_RANK_LISTING_JSON` のパスへ書く(Issue #572、ADR 0276 の
- * 2026-09-28 の追記。⛔ 門ではない)。
- *
- * 条件は門と揃える: provider = `recorded`(`examples/chat/cassettes/retrieval.json` の再生。
- * `OPENAI_API_KEY` の有無を見ない)、時計 = `fixedClock(RANK_LISTING_FIXED_CLOCK_ISO)`、
- * 入力 = `probe-set.ts` の `PROBES`(変えない)。
- *
- * **終了コードは順位を見ない**(`decideRankListingExit`)。非0になるのは、DATABASE_URL が無い・
- * カセットに無い入力・DB エラーなどで例外になったときと、一覧を作れなかったときだけである。
- */
+/** 門ではない: 終了コードは順位を見ない（`decideRankListingExit`）。 */
 import { writeFileSync } from "node:fs";
 import { fixedClock } from "@mnemora/core";
 import { cassettePathFor, loadCassette } from "../cassette-io.js";
