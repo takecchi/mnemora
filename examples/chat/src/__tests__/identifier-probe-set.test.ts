@@ -12,12 +12,6 @@ import {
   identifierHaystackExternalId,
 } from "../identifier-probe-set.js";
 
-/**
- * Issue #109: 識別子 probe set 自体の整合性(DB もネットワークも要らない)。
- *
- * ⚠ `probe-set.ts` は1文字も変更していない——`buildHaystackUtterance`/
- * `DEFAULT_HAYSTACK_SIZE` を import して確認するだけである。
- */
 describe("identifier-probe-set", () => {
   it("Issue #106 が名指しした5領域を、30件で覆っている", () => {
     expect(IDENTIFIER_PROBES).toHaveLength(30);
@@ -87,11 +81,6 @@ describe("identifier-probe-set", () => {
     expect(utterances).toHaveLength(IDENTIFIER_PROBES.length * 2);
   });
 
-  // ---------------------------------------------------------------------------
-  // dense haystack(マネージャー指示: #106「同じ形式の別の識別子が近傍に来て埋もれる」
-  // の再点検)。
-  // ---------------------------------------------------------------------------
-
   describe("dense haystack", () => {
     it("既定件数(DEFAULT_DENSE_HAYSTACK_SIZE)は sparse の既定と同程度である", () => {
       expect(DEFAULT_DENSE_HAYSTACK_SIZE).toBe(60);
@@ -122,7 +111,6 @@ describe("identifier-probe-set", () => {
       expect(utterances).toHaveLength(IDENTIFIER_PROBES.length * 2 + DEFAULT_DENSE_HAYSTACK_SIZE);
       const haystackOnly = utterances.filter((u) => u.kind === "haystack");
       expect(haystackOnly).toHaveLength(DEFAULT_DENSE_HAYSTACK_SIZE);
-      // dense haystack は書式ファミリーの識別子を含む(sparse には無い性質)。
       expect(haystackOnly.some((u) => u.text.includes("PROJ-2001"))).toBe(true);
     });
 
