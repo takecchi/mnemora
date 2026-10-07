@@ -2864,6 +2864,32 @@ PR #1712（[ADR 0600](./decisions/0600-erase-tenant-recheck-teeth.md)）・#1715
 
 この節は、`v1.3.0`（tag の sha の正本は GitHub Release `v1.3.0`）より後に `main` へ入った変更を数える。まだ棚卸しはしておらず、下の項目は、着地に先立って変更を作った本人が足したものである。⛔ ここに件数を書かないこと（[ADR 0234](./decisions/0234-bake-no-numbers-into-tools-and-artifacts.md)）。番号は 72 から振る。
 
+### 72. `memories.provenance` の jsonb に `kind` が無い行を、DB が拒むようになった（`@mnemora/postgres` の migration `0033`・`0034`）
+
+[ADR 0693](./decisions/0693-provenance-kind-must-be-present-in-jsonb.md)・[Issue #1909](https://github.com/takecchi/mnemora/issues/1909)。**これを 🔴 として数えるのは、クローン（miku）の判断で、オーナーが個別に決めたものではない。** オーナーの回答は一般的なもの（2026-09-28、ask_human 6911db12 の問6、逐語「v1.X.0とかで破壊的変更しちゃっていいよ僕しか使ってないし」）で、#1909 への当てはめはクローンのものである。
+
+**何が変わったか**: 新しい制約 `memories_provenance_kind_present`（`CHECK (provenance->>'kind' IS NOT NULL)`）が、`{}`・`{"kind": null}`・オブジェクトでない jsonb（`"x"` など）を持つ行の INSERT/UPDATE を拒む。以前は、元の制約 `memories_provenance_kind_matches_provenance` が `provenance->>'kind'` の NULL を通すので、そういう行が入った。
+
+**なぜ破壊的と数えるか**: 型・シグネチャは変わらないが、**以前は通っていた書き込み（生 SQL など）が実行時の例外になり、すでにそういう行がある DB では `0034` が失敗する。**「既存の利用者のコードが実行時に壊れる」定義に当たる。`0016`/`0017` を非破壊と数えた前例（上の「v0.2.0 → v0.3.0 で追加されたマイグレーション」）との違いは、あちらは列と jsonb の一致を強制しただけで、`kind` を持つ正規の行は全部通った点である。今回は、`kind` を欠く行を書いていた書き手と既存の行に、例外が出る。
+
+**誰が影響を受けるか**: 次のどちらか。
+
+1. 生 SQL などで `memories` に書いていて、`provenance` に `kind` を持たない jsonb を書いている。`PostgresMemoryStore` 経由の書き込みは、列と jsonb の両方を同じ値から書くので影響しない。
+2. すでに `memories` に、そういう行がある。
+
+**どう直すか**: 1 は、`provenance` に `kind` を入れ、`provenance_kind` と同じ値にする。2 は、その場でデータを直さず、次で該当行を探し、作った書き手を先に特定する。
+
+```sql
+SELECT id, tenant_id, provenance_kind, provenance FROM memories
+WHERE provenance->>'kind' IS NULL;
+```
+
+`provenance_kind`（列）が正しいと確かめられた行だけ、jsonb の `kind` を列に合わせて直し、`runMigrations`（`mnemora-postgres-migrate`）を流し直す。`0033` は台帳に残っているので、`0034` だけが走る。`0034` が失敗しても、`0033` による新しい書き込みの拒否は効いたまま残る。
+
+**確かめたこと**: 手元の PostgreSQL 17 で、`0001`〜`0032` を当てた DB に `{}` の行を入れてから `0033`・`0034` を流すと、`0034` だけが失敗し、`0033` は台帳に残り、新しい `{}` は拒まれ、行を直して流し直すと `0034` だけが走ることを、試験（`provenance-kind-present.postgres.test.ts`）で確かめた。**確かめていないこと**: 本番の DB に該当行があるか、本番規模の `VALIDATE` の費用。
+
+**DB マイグレーション**: 要る（`0033`・`0034`。どちらも非破壊の DDL で、列は消さない）。
+
 ## 🟡 後方互換だが挙動が変わりうるもの（v0.1.9 → v0.2.0）
 
 （⚠ 2026-09-27: この見出しは PR #1192 が「v1.0.1 → 次の版」の節を書き換えたときに一緒に消えており、下の3項目が「v1.0.2 → 次の版」の節の中に在るように読めていた。見出しを戻した。下の3項目は v0.1.9 → v0.2.0 の話である）
