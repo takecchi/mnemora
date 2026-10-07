@@ -2,17 +2,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { spawnSyncWithDeadline } from "./spawn-with-deadline.mjs";
 
-/**
- * `scripts/ci-green-check.mjs`（CLI 入口）の歯。
- *
- * ⚠ **`gh` を実際に呼ぶ経路は、ここでは検査しない。** CI のこのジョブ（typecheck/lint/
- * test/build）に GitHub API への到達性・認証済み `gh` が在る保証が無く、それに依存する
- * 歯を書くと「歯が赤い」のか「この環境に `gh` が届いていない」のかが区別できなくなる
- * （`db-server-description.mjs` が「取れなかったことも情報として出す」のと同じ理由で、
- * ここでは最初から依存しない設計を選ぶ）。**検査するのは、`gh` を呼ぶ前に決着する
- * 引数検査の経路だけである。** `gh` 呼び出し以降のロジック（判定そのもの）は
- * `ci-green-check-lib.test.mjs` が純関数として検査している。
- */
+/** `gh` を呼ぶ経路は検査しない。CI のこのジョブに認証済み `gh` の保証が無く、歯が赤いのか `gh` が届いていないのかを区別できなくなる。 */
 
 const script = fileURLToPath(new URL("../ci-green-check.mjs", import.meta.url));
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
