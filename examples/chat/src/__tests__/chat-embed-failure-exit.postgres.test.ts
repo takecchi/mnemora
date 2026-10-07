@@ -6,18 +6,6 @@ import { describe, expect, it } from "vitest";
 import { OPENAI_EMBEDDING_DIMENSIONS } from "../providers.js";
 import { requireDatabaseUrl } from "./test-db.js";
 
-/**
- * `cli.ts chat` が、取り込み（observe → tick）で embed に失敗した件があるとき、
- * 標準エラーへ警告を出して終了コード 1 で終わる（以降の recall の表示は止めない）こと。
- * 失敗が無いときは、警告も終了コード 1 も出さないこと。
- *
- * `cli.ts` は末尾で `main()` を無条件に実行するので、子プロセスで観る（`cli-verify-no-key.test.ts` と同じ）。
- * 宛先は、この試験が立てた手元の HTTP サーバー（`OPENAI_BASE_URL`）で、実 API には出ない。
- * 埋め込みの呼び出しのうち `failOnCalls` に入る番号だけを 400（再送されない）で落とし、
- * ほかは正しい形の応答を返す。埋め込み以外の経路は、呼ばれたら 400 にする。
- * 本物の Postgres を使う（`chat` が `DATABASE_URL` を要るため）。
- */
-
 const chatDir = fileURLToPath(new URL("../..", import.meta.url));
 const CLI_TIMEOUT_MS = 90_000;
 
@@ -112,7 +100,6 @@ describe("examples/chat cli.ts chat: embed の失敗を画面と終了コード�
         expect(stub.embeddingCalls()).toBeGreaterThanOrEqual(3);
         expect(result.stderr).toContain("🔴 embed に失敗した件がある(1件)");
         expect(result.stdout).toContain("失敗 1 件");
-        // 失敗しても打ち切らない: 以降の recall の表示まで出す。
         expect(result.stdout).toContain("=== recall()（budget 無し） ===");
         expect(result.code).toBe(1);
       } finally {
