@@ -508,6 +508,13 @@ Memory を探す」）が索引アクセスで済む形にしてある——`sup
 書き込み時に `null` へ正規化する案は採らず、今の振る舞いを記録した（選び直す余地は Issue に残してある）。
 書き分けは `Memory.claimKey` の TSDoc。
 
+⚠ **2026-10 追記（[ADR 0630](./decisions/0630-store-rejects-new-memory-that-fails-memory-schema-on-read-back.md)。上の「どちらの adapter も拒まない」は、もう成り立たない）**:
+`MemoryStore.createMemory`・`createMemoryWithOutbox`・`supersedeWithNewMemories` は、主語か述語の片方だけの `claimKey` と、空文字の
+`subject`・`predicate` を、何も書かずに `Error`（`<実装名>: claimKey.subject is malformed (…)` の形）で拒む。`@mnemora/postgres` も
+`@mnemora/testkit` の fixture も同じである【実測 2026-10-07、`{ subject: "user" }`・`{ predicate: "p" }`・`{ subject: "", predicate: "p" }`
+の3つとも、両方で拒まれた】。拒むのは書き込みの口だけで、それより前に書かれた片側だけの列を持つ行は、読み出しでは鍵なしのまま
+（`findActiveByClaimKey` に一致せず、`listActiveClaimPredicates` にも数えられない）。上の本文は、当時の記録として書き換えていない。
+
 **#372（検出）が実装されても、進める先は `contested` までである。**[ADR 0185](./decisions/0185-contradiction-detection-path.md)
 決定4: `claimKey` は推論から導かれる ⟹ 推論を根拠に `active → superseded`
 （ユーザーが言った事実を消す側）へ進めてはならない。機構2が「判定できないときは
@@ -708,6 +715,13 @@ store が保存済みの値で計算し直すので、**強化後の `decay_floo
 クローン miku の判断で、列を `double precision` にする案（migration）・書く前に丸める案（結果を変える）は採らず、
 今の振る舞いを記録した。値域の外を丸めて通さないこと（ADR 0125 決定7「黙って丸めない」）とは別の話であり、
 値域の内側の値が float4 の精度になるのは今日の保存の形である（ADR 0125 の追記）。
+
+⚠ **2026-10 追記（[ADR 0500](./decisions/0500-testkit-fixture-alignment-claimkey-labels-timestamptz-seq-llm-float4.md)。上の「fixture は float64 のまま」と「強化後の `decay_floor_at` は実装によってずれうる」は、もう成り立たない）**:
+`@mnemora/testkit` の fixture と core の Fake も、`strength`・`half_life_hours`（と `halfLifeRecalls`）を書いた値と読み戻す値を、
+Postgres と同じ float4 の表記に揃える。強化の後の `decay_floor_at` も一致する。
+【実測 2026-10-07、自分専用の PostgreSQL 17 + pgvector と testkit の fixture、1〜4日後に1日ずつ強化】半減期 720・123456.789・
+1000000.123・10000000.123 時間（`strength` 1）と、半減期 720・123456.789・0.1 時間（`strength` 0.3・0.7・0.9）の組で、
+`decay_floor_at` の差も `strength` の差も 0ms・0 だった。上の本文は、当時の記録として書き換えていない。
 
 ### 二段検索とデータモデル側の帰結
 

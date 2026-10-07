@@ -195,20 +195,18 @@ export interface Memory {
    * 強さ。値域は `(0, MAX_STRENGTH]`（ADR 0078）。
    *
    * ⚠ **`@mnemora/postgres` はこの値を float4（`real` 列）の精度に丸めて保存する。**`@mnemora/testkit` の
-   * fixture は float64 のまま持つ。`decayFloorAt` は、作成時は呼び出し側が渡した値（float64 で計算したもの）を
-   * どちらもそのまま保存するが、**強化（`reinforce`）の後は store が保存済みの `strength`・`halfLifeHours` で
-   * 計算し直す**ので、強化後の `decayFloorAt` は実装によってずれうる。ずれは
-   * `halfLifeHours × log2(strength / 閾値)` の丸め誤差に比例し、半減期が長いほど大きく、向きも一定しない
-   * （【実測】強化後の床の Postgres − testkit: 720 時間 0ms、123456.789 時間 +15.6秒、約100万時間 −約6分、
-   * 約1000万時間 −約32分。`strength: 0.3`・720 時間は 0ms）。段2の減衰係数（`scoring.ts`）も、Postgres では
-   * 丸めた値で計算される。列の型を変える案・書く前に丸める案は採っていない。`docs/memory-model.md` §7 を参照。
+   * fixture と core の Fake も、書いた値と読み戻す値を Postgres と同じ float4 の表記に揃える（ADR 0500）ので、
+   * 強化（`reinforce`）の後に store が保存済みの `strength`・`halfLifeHours` で計算し直す `decayFloorAt` も
+   * 実装どうしで一致する（【実測】半減期 720〜約1000万時間・`strength` 0.3〜1 で、Postgres と fixture の差は
+   * 0ms）。段2の減衰係数（`scoring.ts`）も、どちらも丸めた値で計算される。列の型を変える案・書く前に丸める案は
+   * 採っていない。`docs/memory-model.md` §7 を参照。
    */
   strength: number;
   /**
    * 半減期（時間）。値域は `(0, ∞)` の有限の正の実数（ADR 0125）。
    *
    * ⚠ **`@mnemora/postgres` はこの値を float4（`real` 列）の精度に丸めて保存する。**`strength` の doc の
-   * とおり、強化後の `decayFloorAt` は実装によってずれうる。
+   * とおり、fixture と Fake も同じ表記に揃えるので、強化後の `decayFloorAt` は実装どうしで一致する。
    *
    * Postgres の列は `real`（float4）なので、float4 に収まる範囲（`Math.fround(x)` が有限かつ 0 でない値。上限は約
    * `3.4028235e38`、下限は約 `1.4e-45`）の外は、`@mnemora/postgres` も testkit の fixture も、メッセージに
