@@ -5,13 +5,6 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { spawnSyncWithDeadline } from "./spawn-with-deadline.mjs";
 
-/**
- * `scripts/lexical-regime-coverage.mjs` の歯。**本物のスクリプトを子プロセスとして
- * 実際に起動する**(`lexical-regime-summary.test.mjs` と同じ判断)——CLI としての
- * 配線(`--artifacts-dir` の読み方・ファイル探索・exit code)は
- * `lexical-regime-coverage-lib.test.mjs`(純関数のみ)では測れない。
- */
-
 const script = fileURLToPath(new URL("../lexical-regime-coverage.mjs", import.meta.url));
 
 let workDir;
@@ -89,8 +82,6 @@ describe("lexical-regime-coverage.mjs(子プロセスで起動)", () => {
   it("🔴 両方揃っているが中身が両方 UTF8 だと非0(POSTGRES_INITDB_ARGS が効いていない疑い)", () => {
     const dir = makeArtifactsDir();
     writeArtifact(dir, "UTF8", makeRegime("UTF8"));
-    // SQL_ASCII という名前の artifact なのに、中身は UTF8 を測っている
-    // (initdb の宣言が無視された場合に実際に起きうる形)。
     writeArtifact(dir, "SQL_ASCII", makeRegime("UTF8"));
     const result = run(["--artifacts-dir", dir]);
     expect(result.status).not.toBe(0);
