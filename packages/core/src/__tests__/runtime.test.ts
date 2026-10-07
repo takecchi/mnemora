@@ -40,8 +40,7 @@ async function createRecallFixture(stores: { memoryStore: FakeMemoryStore }, ctx
 }
 
 const ctx: Ctx = { tenantId: "tenant-1" };
-// このファイルの歯はリースの境界そのものを検査しない(それは
-// outbox-store-conformance.ts の役目)ので、十分に長く固定した値を使う。
+// リースの境界そのものは検査しないので、十分に長く固定した値を使う。
 const TEST_LEASE_MS = 60_000;
 
 function llmReturning(
@@ -655,8 +654,6 @@ describe("runtime.observe — memory_usage（ADR 0009）", () => {
     );
 
     // 口を持たない adapter を模す（`delete` では消えない。クラスのメソッドは prototype に在る）。
-    // `recordUsageAndReinforce`（任意）が在ると記録と強化を1つの口で撃ち、下の2段の経路を通らない。
-    // この歯が見るのは2段の経路の分岐なので、その口を持たない adapter を模す。
     (stores.memoryStore as { recordUsageAndReinforce?: unknown }).recordUsageAndReinforce =
       undefined;
     (stores.memoryStore as { reinforceMany?: unknown }).reinforceMany = undefined;
@@ -699,7 +696,6 @@ describe("runtime.observe — memory_usage（ADR 0009）", () => {
       embeddingStatus: "pending",
     });
     const recallId = await createRecallFixture(stores, ctx);
-    // 同じ (recallId, memoryId) を先に一度送っておく。2回目は insertedMemoryIds が空になる。
     await runtime.observe(ctx, { kind: "memory_usage", recallId, usedMemoryIds: [memory.id] });
 
     const reinforceManySpy = vi.spyOn(stores.memoryStore, "reinforceMany");
@@ -757,8 +753,7 @@ describe("runtime.observe — memory_usage（ADR 0009）", () => {
 
 describe("runtime.observe — memory_usage の externalId 冪等性（Issue #870）", () => {
   function observationsBacking(stores: { memoryStore: FakeMemoryStore }) {
-    // Fake の裏の Map を直接数える（`FakeMemoryStore` に列挙の口が無いため、
-    // `consolidate.test.ts` の「口が投げたら…」歯と同じ手法）。
+    // Fake の裏の Map を直接数える（`FakeMemoryStore` に列挙の口が無いため）。
     return (
       stores.memoryStore as unknown as {
         backing: { observations: Map<string, { kind: string; tenantId: string }> };
@@ -927,11 +922,8 @@ describe("runtime.tick — embed ジョブ（embeddingStatus の遷移）", () =
   });
 
   /**
-   * `observe({ kind: 'document' })` の `content` に上限は無い。LLM 抽出が失敗すると `fallbackWholeObservationCandidate` が
-   * Observation の全文をそのまま1件の候補にし、その全文が `processEmbedJob` 経由で `embed(ctx, [memory.content])` へそのまま渡る。
-   * この3段がつながった先で、`EmbeddingProvider` の契約どおりに reject する provider を使ったとき、
-   * (a) Memory.content は全文のまま変わらない（黙って切り詰められない）、(b) embeddingStatus は 'failed' になる、
-   * (c) tick はそれを failed として数える（黙って ready にならない）、がすべて成り立つことを固定する。
+   * `observe({ kind: 'document' })` の `content` に上限は無い。LLM 抽出が失敗すると全文が1件の候補になり、`EmbeddingProvider` の契約どおりに reject する provider を使ったとき、
+   * content は黙って切り詰められず、embeddingStatus は 'failed' になり、tick はそれを failed として数える。
    */
   it("LLM抽出が失敗して全文フォールバックになった Memory を、上限超過で reject する embeddingProvider に渡すと、content は全文のまま embeddingStatus が 'failed' になり、tick はそれを failed として数える（Issue #449）", async () => {
     const hugeContent = "x".repeat(500);
@@ -953,19 +945,15 @@ describe("runtime.tick — embed ジョブ（embeddingStatus の遷移）", () =
     expect(observeResult.extraction).toBe("llm_failed_whole_observation");
     const memoryId = observeResult.memoryIds[0]!;
 
-    // (a) 全文フォールバックの時点で、content は既に全文のまま。
     const beforeTick = await stores.memoryStore.get(ctx, memoryId);
     expect(beforeTick?.content).toBe(hugeContent);
 
     const tickResult = await runtime.tick(ctx, { kinds: ["embed"], leaseMs: TEST_LEASE_MS });
 
-    // (c) tick は failed として数える。黙って processed 側に入らない。
     expect(tickResult).toEqual({ processed: 0, failed: 1, unsupported: [], leaseConflicts: [] });
 
     const afterTick = await stores.memoryStore.get(ctx, memoryId);
-    // (a) tick の後も content は全文のまま——黙って切り詰められていない。
     expect(afterTick?.content).toBe(hugeContent);
-    // (b) embeddingStatus は 'failed'。黙って 'ready' にならない。
     expect(afterTick?.embeddingStatus).toBe("failed");
   });
 });
@@ -985,9 +973,6 @@ describe("runtime.reembed（ADR 0079: provider が直った後に、索引へ戻
     const memoryId = observeResult.memoryIds[0]!;
 
     const failedTick = await runtime.tick(ctx, { kinds: ["embed"], leaseMs: TEST_LEASE_MS });
-    // ⚠ 状態はその場で**文字列として**取り出す。`FakeMemoryStore.get` は可変な Memory
-    // オブジェクトへの参照をそのまま返すので、オブジェクトのまま持ち回ると後続の
-    // `tick` の書き込みで「過去の観測」まで書き換わる（実際にそれで一度赤くなった）。
     const afterFailure = (await stores.memoryStore.get(ctx, memoryId))?.embeddingStatus;
 
     stores.embeddingProvider.shouldFail = false;
@@ -1067,8 +1052,6 @@ describe("runtime.tick — processEmbedJob の embeddingInput opt-in フック�
     const memoryId = observeResult.memoryIds[0]!;
 
     const failedTick = await runtime.tick(ctx, { kinds: ["embed"], leaseMs: TEST_LEASE_MS });
-    // `FakeMemoryStore.get` は可変な Memory オブジェクトへの参照をそのまま返すので、ここで文字列として値を取り出しておかないと、
-    // 後続の `healingTick` の書き込みで `afterFailure` まで "ready" に書き換わる。
     const afterFailureStatus = (await stores.memoryStore.get(ctx, memoryId))?.embeddingStatus;
 
     // 運用側が opt-in フックを足した runtime を、同じ store（同じ永続状態）に対して新たに立てる。runtime 自身は状態を持たず、状態は deps 側の store が持つ。
@@ -1591,7 +1574,6 @@ describe("runtime.observe(extract) が consolidate/reflect の種を積むのは
   });
 
   it("⭐ `autoQueueConsolidateReflectOnExtract: true` にすると、同じ memoryId を種にした consolidate/reflect のジョブも積まれ、tick が処理する", async () => {
-    // `llmReturningOrDecliningReflection` を使う理由は上の it.each の歯と同じ。
     const { runtime, stores } = buildRuntime(
       llmReturningOrDecliningReflection([
         { content: "本文", digest: "要旨", provenanceKind: "stated" },
@@ -2048,7 +2030,7 @@ describe("runtime.reextract（ADR 0028: 「やり直したら重複が残る」�
         status: "forgotten",
       });
 
-      // 非対称であることそのものを assert する——同数だと入れ替え変異が生き残る。
+      // 非対称であることそのものを assert する——同数だと取り違えが検出できない。
       const statuses = result.skipped
         .filter(
           (s): s is Extract<ReextractSkip, { kind: "status_not_active" }> =>
@@ -2225,7 +2207,7 @@ describe("runtime.reextract（ADR 0028: 「やり直したら重複が残る」�
       });
 
       // 決定的な差し込み: M への1件目の書き込みが来た瞬間に、別の誰か（利用者による forget 相当）が M を forgotten に変えたことにする。
-      // N には介入しない。フィクスチャを非対称にすることで「件数は合っているが対応が崩れている」変異も捕まえられるようにする。
+      // N には介入しない。フィクスチャを非対称にすることで「件数は合っているが対応が崩れている」実装も捕まえられるようにする。
       // `FakeMemoryStore.get` は写しを返すので、行そのものを引く `liveRowForTest` で取った参照の `status` を書き換えて「割り込み」を再現する。
       const mBeforeIntervention = stores.memoryStore.liveRowForTest(ctx, mId);
       let intervened = false;
@@ -2472,7 +2454,6 @@ describe("observe の冪等な再送は、同時に別の観測が入っても�
       freshExtraction: "ok",
       freshMemoryCount: 1,
       freshIsDistinctObservation: true,
-      // fresh のぶんの1回だけ。再送は抽出を走らせない。
       llmCallsAddedByResendAndFresh: 1,
     });
   });
@@ -2486,7 +2467,7 @@ describe("observe: 抽出候補ごとに subjectId を持てる（Issue #608 項
         { content: "Bさんは面白いとは思わなかった", provenanceKind: "stated", subjectId: "user:b" },
         // 明示的な null ＝ 主題なし（observation の subjectId があっても上書きする）。
         { content: "映画をやっている", provenanceKind: "stated", subjectId: null },
-        // subjectId 省略 ＝ 未指定。従来どおり observation の値へ落ちる。
+        // subjectId 省略 ＝ 未指定。observation の値へ落ちる。
         { content: "念のための第4の候補", provenanceKind: "stated" },
       ]),
       // 一覧を渡さずに候補ごとの主題を受けるのは opt-in（既定は捨てる）。

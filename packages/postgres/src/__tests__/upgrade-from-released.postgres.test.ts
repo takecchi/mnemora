@@ -194,7 +194,6 @@ for (const fixture of FIXTURES) {
 
       applied.push((await runMigrations(client.pool)).applied);
       applied.push((await runMigrations(client.pool)).applied);
-      // アプリの起動時と同じく、空間を登録し直す（既存の空間に対しては何も作らないはず）。
       for (const space of Object.values(SPACES)) {
         await registerEmbeddingSpace(client.pool, space);
       }

@@ -81,7 +81,7 @@ export const DigestSourceSchema = z.enum(["llm", "fallback"]) satisfies z.ZodTyp
  * 依存させない）。呼び出し側・adapter が `crypto.createHash('sha256').update(content).digest('hex')`
  * （またはそれと同値の実装）で計算し、`NewMemory.contentHash` に渡すこと。
  *
- * 後から足した欄（`validFrom`/`validUntil`・`claimKey`・活動時計の3つ組・`purgedAt`・`attributes`）が省略可能なのは、
+ * `validFrom`/`validUntil`・`claimKey`・活動時計の3つ組・`purgedAt`・`attributes` が省略可能なのは、
  * `Memory` が公開型で、必須にすると自前でリテラルを組み立てている既存の呼び出し元・adapter・fixture すべてに
  * 新しい必須プロパティを強制する破壊的変更になるため。
  */
@@ -179,7 +179,7 @@ export interface Memory {
    *
    * `undefined`（未指定）と `null`（明示的に鍵なし）は同じ意味で、読み出し側はどちらも「鍵が無い」として扱うこと。
    *
-   * **[ADR 0630](../../../docs/decisions/0630-store-rejects-new-memory-that-fails-memory-schema-on-read-back.md) から、
+   * **[ADR 0630](../../../docs/decisions/0630-store-rejects-new-memory-that-fails-memory-schema-on-read-back.md):
    * 書き込みの口は、主語か述語の片方だけのオブジェクト・空文字の `subject`・`predicate`（型を破る入力。
    * 例: `{ subject: "user" }`・`{ subject: "", predicate: "p" }`）を入口で拒む**（`MemoryStore.createMemory`・
    * `createMemoryWithOutbox`・`supersedeWithNewMemories`。何も書かない。冪等の既存の行が在っても拒む）。
@@ -195,10 +195,9 @@ export interface Memory {
    * 強さ。値域は `(0, MAX_STRENGTH]`（ADR 0078）。
    *
    * ⚠ **`@mnemora/postgres` はこの値を float4（`real` 列）の精度に丸めて保存する。**`@mnemora/testkit` の
-   * fixture も、書いた値と読み戻す値を Postgres と同じ float4 の表記に揃える（PR #1517）ので、
+   * fixture も、書いた値と読み戻す値を Postgres と同じ float4 の表記に揃えるので、
    * 強化（`reinforce`）の後に store が保存済みの `strength`・`halfLifeHours` で計算し直す `decayFloorAt` も
-   * 実装どうしで一致する（【実測】半減期 720〜約1000万時間・`strength` 0.3〜1 で、Postgres と fixture の差は
-   * 0ms）。段2の減衰係数（`scoring.ts`）も、どちらも丸めた値で計算される。列の型を変える案・書く前に丸める案は
+   * 実装どうしで一致する。段2の減衰係数（`scoring.ts`）も、どちらも丸めた値で計算される。列の型を変える案・書く前に丸める案は
    * 採っていない。`docs/memory-model.md` §7 を参照。
    */
   strength: number;

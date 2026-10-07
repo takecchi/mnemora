@@ -4,9 +4,7 @@ import { describeExtractionFailure } from "../extraction.js";
 import type { LLMProvider } from "../interfaces/llm-provider.js";
 
 /**
- * `describeClaimKeyFailure` は `describeExtractionFailure` の意図的な複製で、出力が同じであることだけが
- * 両者を結ぶ。メッセージが空の Error・Error の派生・メッセージを持つ素のオブジェクト・Symbol・BigInt も、
- * 同じ記述になる。
+ * `describeClaimKeyFailure` は `describeExtractionFailure` の意図的な複製で、出力が同じであることだけが両者を結ぶ。
  */
 
 class KindedError extends Error {
