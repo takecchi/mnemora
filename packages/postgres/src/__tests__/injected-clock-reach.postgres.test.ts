@@ -33,27 +33,9 @@ import {
   TEST_EMBEDDING_SPACE,
 } from "./test-db.js";
 
-/**
- * Issue #1237「案1」適用後に期待される振る舞いを縛る。時刻の欄（`MemoryStore.createObservationWithOutbox`/
- * `createMemoryWithOutbox` の `opts.now`、`OutboxStore.complete`/`fail` の `opts.at`、
- * `NewRecallRecord.createdAt`、`purgeMemory` の `purged_at`、`archiveDecayed` の `archived` イベントの `at`）
- * はすべて任意になり、runtime はここへ `clock.now()` を渡す。省略時は今日どおり壁時計になる
- * （型の上では非破壊）。
- *
- * 以前（案3、PR #1241・#1297）は「今の振る舞い」として次を固定していた——本テストはその裏返しを縛る:
- * 1. 監査ログの `at`・recall の `createdAt`・outbox の3欄は壁時計だった → **注入した時計に従う**。
- * 2. 壁時計より過去の時計を注入すると `tick` が積んだジョブを1本も取らなかった
- *    → **PAST でも FUTURE でも `processed: 1`**（outbox の `available_at` も注入した時計になったため）。
- * 3. `restoreArchived` の `restored`/`sweepArchive` の `archived` の `at` は壁時計だった
- *    → **`archived` は `opts.now`、`restored` は `clock.now()` に従う**。
- *
- * `Clock` の TSDoc（`packages/core/src/interfaces/clock.ts`）も同じ変更を反映して書き直してある。
- */
-
 const llm: LLMProvider = {
   complete: async () => ({ content: "unused" }),
   completeStructured: async (_ctx, req) => {
-    // 抽出（`memories`）と統合（`content`）の両方のスキーマに答える。
     const extracted = req.schema.safeParse({
       memories: [{ content: "事実です", provenanceKind: "stated" }],
     });
@@ -145,7 +127,7 @@ const ctx: Ctx = { tenantId: "injected-clock-reach" };
 const PAST = new Date("2020-01-01T00:00:00.000Z");
 const FUTURE = new Date("2030-01-01T00:00:00.000Z");
 
-/** 呼ぶたびに `base` から1秒ずつ進む時計（固定の時計では、作成と同じ時刻の強化が書かれないため。ADR 0048）。 */
+/** 呼ぶたびに `base` から1秒ずつ進む時計（固定の時計では、作成と同じ時刻の強化が書かれないため）。 */
 function steppingClockFrom(base: Date): Clock {
   let t = base.getTime();
   return { now: () => new Date((t += 1000)) };
@@ -188,8 +170,6 @@ for (const [name, makeKit] of KITS) {
         expect(isNear(extractJobBefore?.availableAt, clockAt)).toBe(true);
         expect(isNear(extractJobBefore?.createdAt, clockAt)).toBe(true);
 
-        // 案3以前はここで PAST が processed: 0 になっていた（available_at が壁時計、
-        // claim の now だけが注入した時計だったため）。案1適用後はどちらも processed: 1。
         expect(await kit.runtime.tick(ctx, { kinds: ["extract"], leaseMs: 60_000 })).toEqual({
           processed: 1,
           failed: 0,
@@ -262,7 +242,6 @@ for (const [name, makeKit] of KITS) {
       expect(isNear(createdA.recordedAt, FUTURE)).toBe(true);
       const floorA = createdA.decayFloorAt!;
 
-      // 使用報告の強化: 注入した時計。
       const recalled = await kit.runtime.recall(ctx, { text: "事実", limit: 3, association: null });
       await kit.runtime.observe(ctx, {
         kind: "memory_usage",
@@ -271,15 +250,12 @@ for (const [name, makeKit] of KITS) {
       });
       expect(isNear((await kit.memoryStore.get(ctx, b))!.lastReinforcedAt, FUTURE)).toBe(true);
 
-      // sweepArchive: 選ぶ基準も archived の at も opts.now——渡した値とちょうど一致する
-      // （runtime.sweepArchive はこれをそのまま archiveDecayed へ渡すだけ）。
       const sweepNow = new Date(floorA.getTime() + 1000);
       const swept = await kit.runtime.sweepArchive(ctx, { now: sweepNow, limit: 10 });
       expect(swept.archived.map((x) => x.memoryId)).toContain(a);
       const [archived] = await kit.eventStore.list(ctx, { memoryId: a, kind: "archived" });
       expect(archived!.at).toEqual(sweepNow);
 
-      // restoreArchived: reinforce も restored の at も注入した時計。
       const restoredArchived = await kit.runtime.restoreArchived(ctx, { memoryId: a });
       expect(restoredArchived.outcomes.map((o) => o.kind)).toEqual(["restored"]);
       const afterRestore = (await kit.memoryStore.get(ctx, a))!;
@@ -288,7 +264,6 @@ for (const [name, makeKit] of KITS) {
       const [restored] = await kit.eventStore.list(ctx, { memoryId: a, kind: "restored" });
       expect(isNear(restored?.at, FUTURE)).toBe(true);
 
-      // restoreSuperseded: reinforce も unsuperseded の at も注入した時計（案3以前から変わらない）。
       const consolidated = await kit.runtime.consolidate(ctx, { target: { memoryIds: [a, b] } });
       const reinforcedBefore = (await kit.memoryStore.get(ctx, a))!.lastReinforcedAt!;
       const restoredSuperseded = await kit.runtime.restoreSuperseded(ctx, {

@@ -21,14 +21,6 @@ import {
   TEST_EMBEDDING_SPACE,
 } from "./test-db.js";
 
-/**
- * 利用者へ伝わる例外の message から、SQL に付けた値（params）を落とす（ADR 0423。ADR 0363 と同じ作法）。
- *
- * 本物の drizzle が包んだ例外（`Failed query: <SQL>\nparams: <値>`）で見る。本文に値を入れた入力で
- * 例外を起こし、message に本文が入らないこと、SQL の文・`cause` の理由と SQLSTATE が残ることを確かめる。
- * 例外の起こし方は、jsonb 列が受けない値（孤立サロゲート）を本文に入れること——本文そのものの扱いは変えない。
- */
-
 const ctx: Ctx = { tenantId: "error-message-omits-params" };
 const BODY_MARKER = "本文の目印-0123456789";
 const BAD_BODY = `${BODY_MARKER}\uD83D`;
@@ -88,7 +80,6 @@ describe("runtime.observe の例外の message に、本文は入らない", () 
 });
 
 /**
- * ADR 0504: store を直接呼んだときも、投げる例外の message（`cause` の連鎖を含む）から params の値を落とす。
  * `PostgresVectorStore` の全ての口。`searchMany` は 1 文に最大 16384 件のベクトルが params に載る。
  * 例外の起こし方は2つ: (a) 登録していない空間（42P01 を `EmbeddingSpaceNotRegisteredError` に包む経路）、
  * (b) 登録済みの空間への次元違いの `upsert`（pgvector が拒む。包まずそのまま投げる経路）。
@@ -128,7 +119,6 @@ function expectNoParams(error: unknown): void {
     expect(text).not.toContain(VECTOR_MARKER);
     expect(text).not.toContain(TENANT_MARKER);
   }
-  // やりすぎていない: SQL の文と、落としたことの印は残る
   expect(texts.some((t) => t.includes("Failed query:") && t.includes("(omitted by mnemora,"))).toBe(
     true,
   );
@@ -211,12 +201,9 @@ describe("PostgresVectorStore を直接呼んだ例外から、params の値を�
 });
 
 /**
- * ADR 0505（ADR 0504 の負債の返済）: `PostgresEventStore.append`・`PostgresLexicalStore.search` を直接呼んだときも、
- * 投げる例外の message（`cause` の連鎖を含む）から params の値を落とす。
  * 例外の起こし方は、本物の DB が拒む入力:
- * - `append`: `kind` が CHECK 制約（`memory_events_kind_check`）を外れる（`memoryId` が null の経路と、記憶を指す経路の2つ。
- *   INSERT が別の文）。`meta` の孤立サロゲートは、ADR 0499 の入口の検査が先に名指しで断る（値は載らない）ので、
- *   DB に届かない——その入力の message に値が無いことも縛る。
+ * - `append`: `kind` が CHECK 制約（`memory_events_kind_check`）を外れる（`memoryId` が null の経路と、記憶を指す経路の2つ。INSERT が別の文）。
+ *   `meta` の孤立サロゲートは入口の検査が先に名指しで断る（値は載らない）ので DB に届かない。その入力の message に値が無いことも縛る。
  * - `LexicalStore.search`: `filter.attributes` の孤立サロゲート（`jsonb` が拒む）。
  */
 const EVENT_MARKER = "event-marker-7b2e";
@@ -340,10 +327,6 @@ describe("PostgresEventStore.append・PostgresLexicalStore.search を直接呼�
 });
 
 /**
- * ADR 0516（ADR 0504・0505 の負債の返済）: `PostgresTrigramLexicalStore.search`・`PostgresOutboxStore`・
- * `PostgresTenantSettingsStore` を直接呼んだときも、投げる例外の message（`cause` の連鎖を含む）から
- * params の値を落とす。`PostgresMemoryStore`・`PostgresRelationStore` は今回の範囲外（ADR の負債）。
- *
  * 例外の起こし方は、本物の DB が拒む入力:
  * - `PostgresTrigramLexicalStore.search`: `filter.attributes` の孤立サロゲート（`jsonb` が拒む。22P02）。
  * - `PostgresOutboxStore`: `LIMIT` に負の数（2201W）、`attempts`（int4）に収まらない数（22003）。
