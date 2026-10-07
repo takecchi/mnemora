@@ -31,10 +31,9 @@ import type { OutboxJobKind } from "./scheduler.js";
  *   ジョブは、別のワーカー（または同じワーカー）に再び claim され、**同じジョブが
  *   複数回処理されうる**。呼び出し側（`processExtractJob`/`processEmbedJob` 等）は
  *   この重複を前提にしてよい形（冪等）で書くこと。
- *   ⚠ 2026-09-28 変更（[Issue #1092](https://github.com/takecchi/mnemora/issues/1092)、
- *   [ADR 0347](../../../../docs/decisions/0347-extract-write-path-redelivery-and-unsaveable-candidates.md)。
- *   クローン miku の判断であり、オーナーの判断ではない）: **`extract` のジョブは、逐次の再配達では2回目が何も
- *   書かない。**`processExtractJob` は LLM を呼ぶ前に、その Observation から今の抽出器の版で作られた Memory
+ *   ⚠ **`extract` のジョブは、逐次の再配達では2回目が何も書かない**（[Issue #1092](https://github.com/takecchi/mnemora/issues/1092)、
+ *   [ADR 0347](../../../../docs/decisions/0347-extract-write-path-redelivery-and-unsaveable-candidates.md)）。
+ *   `processExtractJob` は LLM を呼ぶ前に、その Observation から今の抽出器の版で作られた Memory
  *   （status を問わない）が在るかを見て、在れば抽出を済んだものとしてジョブを完了にする。⟹ 1回目が書いた後・
  *   `complete` の前に止まり、リースが切れた後の2回目が同じジョブを処理しても、LLM の出力によらず1回目の分だけが
  *   残る（1回目が全文フォールバックなら、それが残る）。
@@ -44,7 +43,7 @@ import type { OutboxJobKind } from "./scheduler.js";
  *   - 旧い版の Memory しか無い Observation は、今どおり新しい版で抽出する。
  *   `reflect` は再配達で2件になる（`Runtime.reflect` の doc）。`embed`・`consolidate` は1回だけ処理したときと同じ
  *   状態になる。
- *   【実測 2026-09-28】`@mnemora/postgres` と testkit の fixture で同じ
+ *   `@mnemora/postgres` と testkit の fixture で同じ
  *   （`packages/postgres/src/__tests__/tick-sequential-redelivery.postgres.test.ts`）。
  *   **下の「Phase 1 では失敗したジョブの自動リトライを行わない」とは別の話**——
  *   あちらは `fail()` で終端状態になった（＝処理を試みて失敗が確定した）ジョブの話、
@@ -90,54 +89,20 @@ import type { OutboxJobKind } from "./scheduler.js";
  *   止まり続ける job（毎回ワーカーを止めてしまう job など）は、リースが切れるたびに claim され
  *   続ける。`attempts` はフェンシングにだけ使い、再試行の上限には使っていない
  *   （ADR 0032「これが覆るとしたら」が `attempts` の活用を範囲外として残している）。
- *   ⚠ **2026-09-27 追記（今の振る舞いを書いたもの）: そうした job は古い順の先頭に並び続け、後ろを
- *   止めうる。** `claimBatch` は `available_at` の古い順に `limit` 本を取るので、止まり続ける job が
- *   `limit` 本以上あると、リースが切れるたびに**同じ job だけが取られ、後ろの job に届かない**
- *   （先頭詰まり）。後ろに届くのは、別の `tick` がリースの内に続けて取ったとき（止まった job は
- *   まだ claim 中なので飛ばされる）だけである。【実測 2026-09-27】`@mnemora/postgres` と testkit の
- *   fixture で同じ（歯は `packages/postgres/src/__tests__/outbox-head-of-line.postgres.test.ts`）。
- *   止まり続ける job を後回しにする・隔離する・上限で終端にする、はしていない（新しい方針、
- *   [Issue #1196](https://github.com/takecchi/mnemora/issues/1196)）。
- *   🔴 **2026-09-29 追記（上の先頭詰まりを解消した。[Issue #1196](https://github.com/takecchi/mnemora/issues/1196)、
- *   [ADR 0357](../../../../docs/decisions/0357-outbox-reclaim-requeues-to-tail.md)。クローン miku
- *   の判断であり、オーナーの判断ではない）: `claimBatch` は、リースが切れた行を**取り直す**
- *   （＝claim 時点で `claimed_at` が既に非 NULL）ときに限り、`available_at` を `opts.now`
- *   へ書き直す。**初めての claim**（`claimed_at` が NULL だった行）では `available_at` を
- *   変えない。取る順（`available_at` の古い順）そのものは変えていない——索引
- *   `(tenant_id, available_at)` もそのまま効く。
- *
- *   **狙い**: 止まり続ける job が何本あっても、後ろの job がいつかは claim されること
- *   （飢餓が起きないこと）。取り直された job は、その `available_at` がそのときの `now`
- *   （通常は他のどの未処理 job の `available_at` よりも新しい）へ進むため、次にリースが
- *   切れて `claimBatch` が呼ばれるときには、まだ一度も claim されていない古い job の
- *   ほうが先に来る。**正直に書くと、取り直された job は先頭で「2回」claim されてから
- *   後ろへ回る**——1回目は初めての claim なので `available_at` を動かさず、2回目
- *   （最初の取り直し）で初めて `now` へ進む。3回目以降の claim では、その時点でまだ
- *   `available_at` が古い他の job に先を譲る。
- *
- *   **採らなかった案**（詳細は ADR 0357）:
- *   - B: `ORDER BY attempts, available_at`（attempts が少ない job を優先する）。
- *     却下——流入が続く運用では、一度リースが切れた job（無実のクラッシュに巻き込まれた
- *     job を含む）が `attempts` の大きさゆえに恒久的に後回しにされ、今度は「止まらない
- *     job」の流入が「かつて止まった job」を飢えさせる。しかも `ORDER BY attempts,
- *     available_at` は `(tenant_id, available_at)` の索引で並べ替えられない
- *     （`attempts` を先頭に持つ新しい索引が要る）。
- *   - C: `ORDER BY COALESCE(claimed_at, available_at)`。却下——`available_at` の値そのもの
- *     は保てるが、この式に対する新しい索引（式索引）を張るマイグレーションが要る。
- *
- *   ⛔ **`attempts` が N を超えたら `fail` にする、のような上限で終端にする形は入れていない**
- *   （ADR 0032「これが覆るとしたら」が範囲外として残した論点のまま。Issue #1196 の
- *   「決めていないこと」のうち、この PR が答えたのは「後回しにする」の1点だけであり、
- *   「隔離する・上限で終端にする」「観測できるようにする」は範囲外に残した）。
- *
- *   【実測 2026-09-29】`@mnemora/postgres` と testkit の fixture で同じ（歯は
- *   `packages/postgres/src/__tests__/outbox-head-of-line.postgres.test.ts`）。
- * - ⚠ **2026-09-27 追記（今の振る舞いを書いたもの）: 取る集合は `available_at` の古い順だが、同じ
- *   `available_at` の行どうしの並びと、1回の `claimBatch` が返す配列の中の順（`tick` はこの順に
- *   処理する）は約束しない。** `@mnemora/postgres` は `ORDER BY available_at` だけで取り、
+ *   ⚠ **止まり続ける job が `limit` 本以上あっても、後ろの job は飢えない**（Issue #1196、
+ *   [ADR 0357](../../../../docs/decisions/0357-outbox-reclaim-requeues-to-tail.md)）。`claimBatch` は、
+ *   リースが切れた行を**取り直す**（claim 時点で `claimed_at` が既に非 NULL）ときに限り、`available_at` を
+ *   `opts.now` へ書き直す。**初めての claim** では `available_at` を変えない。取る順（`available_at` の古い順）
+ *   そのものは変えず、索引 `(tenant_id, available_at)` もそのまま効く。取り直された job は、先頭で
+ *   「2回」claim されてから後ろへ回る（1回目は初めての claim なので動かさず、最初の取り直しで `now` へ進む）。
+ *   `attempts` 順や `COALESCE(claimed_at, available_at)` 順に並べる案を採らなかった理由は ADR 0357 を見ること。
+ *   ⛔ `attempts` が N を超えたら `fail` にする、のような上限での終端は入れていない
+ *   （ADR 0032「これが覆るとしたら」が範囲外として残した論点）。
+ *   歯は `packages/postgres/src/__tests__/outbox-head-of-line.postgres.test.ts`。
+ * - ⚠ **取る集合は `available_at` の古い順だが、同じ `available_at` の行どうしの並びと、1回の `claimBatch` が返す
+ *   配列の中の順（`tick` はこの順に処理する）は約束しない。** `@mnemora/postgres` は `ORDER BY available_at` だけで取り、
  *   `UPDATE … RETURNING` の順で返す（SQL はこの順を保証しない）。testkit の fixture は古い順に
- *   並べて返す（同じ時刻なら積んだ順）。【実測 2026-09-27】20本の範囲では両方とも積んだ順・古い順に
- *   返ったが、それは約束ではない。
+ *   並べて返す（同じ時刻なら積んだ順）。
  * - Phase 1 では失敗したジョブの自動リトライを行わない（`fail` は終端状態。リースが切れた
  *   ジョブの再 claim とは別の話。上の「リース」の項を見ること）。
  */
@@ -217,7 +182,7 @@ export interface OutboxStore {
    * `MemoryStore.createObservationWithOutbox` の `opts` と同じ理由）。**`opts.at` を渡すと
    * `completedAt` にその値を使う。省略時は実装が壁時計を使う。** runtime はこの欄に `clock.now()` を渡す。
    *
-   * **`opts.at` が Invalid Date（`getTime()` が `NaN`）なら例外を投げ、行には触れない**（Postgres は `timestamptz` への変換で拒む）。**検査は `jobId` の形・行の有無より先**——形の崩れた・存在しない `jobId` でも、`opts.at` が Invalid Date なら静かに返さず例外にする（ADR 0594。以前の `@mnemora/postgres` は、`jobId` が UUID の形でないときは `opts.at` を見る前に何もせず返していた）。**`opts.at` が `timestamptz` の下限（紀元前4714年11月24日 00:00:00 UTC。`Date.UTC(-4713, 10, 24)`）より前なら、同じく `jobId` の形・行の有無より先に `RangeError` を投げ、行には触れない**（下限ちょうどは書ける。Postgres は下限より前を書けない。ADR 0597。以前の `@mnemora/postgres` は、形の崩れた `jobId` では静かに返し、uuid の形の `jobId` では DB の例外（`22008`）だった）。渡された `Date` は参照のまま保存せず、複製して持つ——呼び手が後から書き換えても `completedAt` は変わらない。`fail` も同じ。
+   * **`opts.at` が Invalid Date（`getTime()` が `NaN`）なら例外を投げ、行には触れない**（Postgres は `timestamptz` への変換で拒む）。**検査は `jobId` の形・行の有無より先**——形の崩れた・存在しない `jobId` でも、`opts.at` が Invalid Date なら静かに返さず例外にする（ADR 0594）。**`opts.at` が `timestamptz` の下限（紀元前4714年11月24日 00:00:00 UTC。`Date.UTC(-4713, 10, 24)`）より前なら、同じく `jobId` の形・行の有無より先に `RangeError` を投げ、行には触れない**（下限ちょうどは書ける。Postgres は下限より前を書けない。ADR 0597）。渡された `Date` は参照のまま保存せず、複製して持つ——呼び手が後から書き換えても `completedAt` は変わらない。`fail` も同じ。
    */
   complete(
     ctx: Ctx,
@@ -267,7 +232,7 @@ export interface OutboxStore {
   /**
    * [ADR 0404](../../../../docs/decisions/0404-purge-expired-recalls-and-completed-outbox-jobs.md):
    * **完了した**ジョブ（`completed_at IS NOT NULL AND completed_at < opts.olderThan`）だけを消す。
-   * `eraseTenant` 以外に `outbox` の行を消す経路が無かった（ADR 0290 の 2026-09-30 追記、
+   * `eraseTenant` 以外に `outbox` の行を消す経路が無かった（ADR 0290、
    * ADR 0357 の負債1）ことへの口。
    *
    * 🔴 **任意メソッドである。**理由は `eraseTenant?` と同じ。
