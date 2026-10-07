@@ -3139,13 +3139,11 @@ export class InMemoryMemoryStore implements MemoryStore {
 
   /**
    * このテナントに属する行を、`memory_labels`・`recall_usages`・`memory_events` → `memories`（+ 冪等キー）→ `observations` → `recalls` → `labels` → `tenant_activity`・`tenant_subject_activity` の順で消す（`PostgresMemoryStore.eraseTenant` と同じ並び）。
-   * 外部キー制約を持たないので、`blocked_by_foreign_reference` は返さない（`packages/postgres` 固有の振る舞い）。
-   * 消した `memories` の埋め込みは、{@link onMemoriesDeleted} で登録された `InMemoryVectorStore` が一緒に消す（件数には数えない）。`tenant_subject_activity` は subject ごとに1行として数える。
+   * 外部キー制約を持たないので、`blocked_by_foreign_reference` は返さない。消した `memories` の埋め込みは `InMemoryVectorStore` が一緒に消す（件数には数えない）。
    * `reachedLimit` は `PostgresMemoryStore.eraseTenant` と同じ「保守的な近似」（ちょうど budget 分だけ削除できたら、残りを確認せず `true`）。
    */
   async eraseTenant(ctx: Ctx, opts: EraseTenantStoreOptions): Promise<EraseTenantStoreResult> {
     assertWellFormedCtx(ctx);
-    // `limit` は `bigint` の引数へ渡される（負数そのものは拒まない）。
     assertQueryBigint("eraseTenant", "limit", opts.limit);
     const limit = opts.limit;
     const dryRun = opts.dryRun === true;
@@ -3153,7 +3151,6 @@ export class InMemoryMemoryStore implements MemoryStore {
     let total = 0;
     let reachedLimit = false;
 
-    // `matches(key, value)` を満たすエントリを budget 個まで集め、`dryRun` でなければ取り除く。戻り値は削除した（またはプレビューで数えた）件数。
     const drainMap = <V>(map: Map<string, V>, tenantOf: (value: V) => string): number => {
       if (remaining <= 0) return 0;
       const budget = remaining;
@@ -3225,19 +3222,12 @@ export class InMemoryMemoryStore implements MemoryStore {
     };
 
     const steps: Array<() => number> = [
-      // memory_labels
       () => drainKeyedMap(this.memoryLabels),
-      // recall_usages（key: `${tenantId}:${recallId}:${memoryId}`）
-      // ADR 0604: 前方一致ではなく、鍵から取り出した tenantId の完全一致（`acme` を消しても `acme:eu` は残す）。
+      // 前方一致ではなく、鍵から取り出した tenantId の完全一致（`acme` を消しても `acme:eu` は残す）。
       () => drainSet(this.usages, (key) => tenantOfUsageKey(key) === ctx.tenantId),
-      // memory_events
       () => drainArray(this.events, (event) => event.tenantId),
-      // memory_relations（Issue #207/#933 PR2 の `relations`。`InMemoryRelationStore` と共有）
       () => drainArray(this.relations, (relation) => relation.tenantId),
-      // memories（+ 冪等キー extractionIndex の掃除。budget には数えない——見えない
-      // 内部索引であり、Postgres 側に対応する別テーブルが無いため）。
-      // ADR 0426: 消した memories の埋め込みも listener 経由で消す（Postgres の
-      // `ON DELETE CASCADE`）。CASCADE で消えた行と同じく、budget にも `deleted` にも数えない。
+      // `extractionIndex` の掃除と、消した memories の埋め込み（listener 経由）は、budget にも `deleted` にも数えない（見えない内部索引・`ON DELETE CASCADE` に当たる）。
       () => {
         const tenantMemoryIds = [...this.memories.values()]
           .filter((memory) => memory.tenantId === ctx.tenantId)
@@ -3259,21 +3249,16 @@ export class InMemoryMemoryStore implements MemoryStore {
         }
         return deleted;
       },
-      // observations
       () => drainMap(this.observations, (observation) => observation.tenantId),
-      // recalls
       () => drainMap(this.recalls, (recall) => recall.tenantId),
-      // labels
       () => drainKeyedMap(this.labels),
-      // tenant_activity（高々1エントリ）
       () => {
         if (remaining <= 0) return 0;
         if (!this.activitySeq.has(ctx.tenantId)) return 0;
         if (!dryRun) this.activitySeq.delete(ctx.tenantId);
         return 1;
       },
-      // tenant_subject_activity（`(tenant_id, subject_id)` が主キー——ADR 0426: 内側の
-      // `Map<subjectId, seq>` の1エントリを1行として数え、budget ぶんだけ消す）
+      // `(tenant_id, subject_id)` が主キー: 内側の `Map<subjectId, seq>` の1エントリを1行として数える。
       () => {
         const bySubject = this.subjectActivitySeq.get(ctx.tenantId);
         if (bySubject === undefined) return 0;
@@ -3293,8 +3278,7 @@ export class InMemoryMemoryStore implements MemoryStore {
       total += deleted;
       remaining -= deleted;
       if (deleted === budgetBeforeStep && deleted > 0) {
-        // budget をちょうど使い切った——保守的に「まだ残っているかもしれない」とみなす
-        // （interface doc の近似。`PostgresMemoryStore.eraseTenant` と同じ判断）。
+        // budget をちょうど使い切ったら、保守的に「まだ残っているかもしれない」とみなす。
         reachedLimit = true;
         break;
       }
@@ -3309,9 +3293,7 @@ export class InMemoryMemoryStore implements MemoryStore {
     extractorVersion: string | null,
     contentHash: string,
   ): string {
-    // 区切り文字で繋がず、`JSON.stringify` の配列で表す。`tenantId`・`extractorVersion`・
-    // `contentHash` は呼び手の値で `:` を含んでよく、繋ぐと別の組と同じキーになる
-    // （`joined-string-keys.postgres.test.ts`）。
+    // 区切り文字で繋がず、`JSON.stringify` の配列で表す: `tenantId`・`extractorVersion`・`contentHash` は `:` を含みうるので、繋ぐと別の組と同じキーになる。
     return JSON.stringify([tenantId, sourceObservationId, extractorVersion, contentHash]);
   }
 }
