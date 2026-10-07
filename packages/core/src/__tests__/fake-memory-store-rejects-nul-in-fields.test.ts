@@ -3,7 +3,7 @@ import type { Ctx } from "../ctx.js";
 import type { NewMemory } from "../memory.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-const ctx: Ctx = { tenantId: "fake-nul-teeth-tenant" };
+const ctx: Ctx = { tenantId: "fake-rejects-nul-tenant" };
 const NOW = new Date("2026-06-01T00:00:00.000Z");
 
 function newMemory(overrides: Partial<NewMemory> = {}): NewMemory {

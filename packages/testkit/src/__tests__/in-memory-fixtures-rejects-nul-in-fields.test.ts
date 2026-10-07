@@ -3,7 +3,7 @@ import type { Ctx } from "@mnemora/core";
 import { buildNewMemoryFixture } from "../test-data.js";
 import { InMemoryMemoryStore } from "../__fixtures__/in-memory-memory-store.js";
 
-const ctx: Ctx = { tenantId: "tenant-nul-teeth" };
+const ctx: Ctx = { tenantId: "in-memory-rejects-nul-tenant" };
 
 describe("InMemoryMemoryStore.createMemory: NUL の検査の形（#928）", () => {
   for (const position of [0, 1, 2]) {

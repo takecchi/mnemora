@@ -95,9 +95,9 @@ describe("schema 未指定のときだけ current_schema() を読んでロック
   });
 
   it("runMigrations: schema を明示したら、その schema の導出キーで待つ（current_schema() は読まない）", async () => {
-    const database = "mnemora_lock_teeth_migrate_explicit";
+    const database = "mnemora_schema_lock_key_migrate_explicit";
     const pool = await createBlankDatabase(database);
-    const schema = "lock_teeth_app";
+    const schema = "schema_lock_key_app";
     expect(migrationLockKeyFor(schema)).not.toBe(MIGRATION_LOCK_KEY);
 
     const spy = vi.spyOn(pool, "query");
@@ -113,7 +113,7 @@ describe("schema 未指定のときだけ current_schema() を読んでロック
   }, 20_000);
 
   it("runMigrations: options.lockKey を上書きしたら current_schema() を読まず、その上書きのキーで待つ", async () => {
-    const database = "mnemora_lock_teeth_migrate_override";
+    const database = "mnemora_schema_lock_key_migrate_override";
     const pool = await createBlankDatabase(database);
     const overrideKey = 7_924_001n;
 
@@ -130,16 +130,16 @@ describe("schema 未指定のときだけ current_schema() を読んでロック
   }, 20_000);
 
   it("runMigrations: 陽性対照——schema 未指定で上書きも無ければ current_schema() を1回読む", async () => {
-    const pool = await createBlankDatabase("mnemora_lock_teeth_migrate_read");
+    const pool = await createBlankDatabase("mnemora_schema_lock_key_migrate_read");
     const spy = vi.spyOn(pool, "query");
     await runMigrations(pool);
     expect(currentSchemaReads(spy)).toBe(1);
   }, 60_000);
 
   it("runMigrations: current_schema() が NULL（search_path のどのスキーマも無い）なら、既定の固定キーで待つ", async () => {
-    const database = "mnemora_lock_teeth_migrate_null";
+    const database = "mnemora_schema_lock_key_migrate_null";
     const pool = await createBlankDatabase(database, {
-      options: "-c search_path=lock_teeth_no_such_schema",
+      options: "-c search_path=schema_lock_key_no_such_schema",
     });
     const { rows } = await pool.query<{ s: string | null }>("SELECT current_schema() AS s");
     expect(rows[0]!.s).toBeNull();
@@ -155,9 +155,9 @@ describe("schema 未指定のときだけ current_schema() を読んでロック
   }, 20_000);
 
   it("registerEmbeddingSpace: schema を明示したら、その schema の導出キーで待つ（current_schema() は読まない）", async () => {
-    const database = "mnemora_lock_teeth_vector_explicit";
+    const database = "mnemora_schema_lock_key_vector_explicit";
     const pool = await createBlankDatabase(database);
-    const schema = "lock_teeth_app";
+    const schema = "schema_lock_key_app";
     expect(registerEmbeddingSpaceLockKeyFor(schema)).not.toBe(REGISTER_EMBEDDING_SPACE_LOCK_KEY);
 
     const spy = vi.spyOn(pool, "query");
@@ -169,7 +169,7 @@ describe("schema 未指定のときだけ current_schema() を読んでロック
       await expect(
         registerEmbeddingSpace(
           pool,
-          { provider: "test", model: "lock-teeth-explicit", dimensions: 3 },
+          { provider: "test", model: "schema-lock-key-explicit", dimensions: 3 },
           { schema, lockTimeoutMs: 300 },
         ),
       ).rejects.toBeInstanceOf(RegisterEmbeddingSpaceLockTimeoutError);
@@ -180,7 +180,7 @@ describe("schema 未指定のときだけ current_schema() を読んでロック
   }, 20_000);
 
   it("registerEmbeddingSpace: options.lockKey を上書きしたら current_schema() を読まず、その上書きのキーで待つ", async () => {
-    const database = "mnemora_lock_teeth_vector_override";
+    const database = "mnemora_schema_lock_key_vector_override";
     const pool = await createBlankDatabase(database);
     const overrideKey = 7_924_002n;
 
@@ -190,7 +190,7 @@ describe("schema 未指定のときだけ current_schema() を読んでロック
       await expect(
         registerEmbeddingSpace(
           pool,
-          { provider: "test", model: "lock-teeth-override", dimensions: 3 },
+          { provider: "test", model: "schema-lock-key-override", dimensions: 3 },
           { lockKey: overrideKey, lockTimeoutMs: 300 },
         ),
       ).rejects.toBeInstanceOf(RegisterEmbeddingSpaceLockTimeoutError);
