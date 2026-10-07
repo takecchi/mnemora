@@ -11,19 +11,6 @@ import type { Db } from "../client.js";
 import { PostgresMemoryStore } from "../memory-store.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
-/**
- * `labels`（語彙）の行ロックまわりの約束のうち、並行の歯（`label-lock-order-cross-memory`・
- * `label-upsert-lock-order`）が見ない所を、単体で決定的に縛る（ADR 0511）。
- *
- * - 語彙を先に作らない: 候補ごとの upsert の前に語彙の既存行を `FOR UPDATE` で取るだけで、行を作らない。
- *   書かれなかった候補（`createMemoriesWithOutboxAndEvents` の SAVEPOINT で落ちた候補・冪等衝突の候補、
- *   `supersedeWithNewMemories` の冪等衝突の候補）の語彙は、`listLabels` に増えない。
- * - 件数が 0 になってもラベルを消さない: `purgeMemory` は `proposed_count` を減らすだけで、`labels` の行は残す
- *   （ADR 0375「`labels`（語彙の行）は残す」）。
- * - `upsertProposedLabels` はコードポイント順に処理する: 補助面の文字と BMP 上位の文字で、UTF-16 のコード単位順と
- *   コードポイント順が食い違う。発行した SQL の名前の並びを見る（時刻・並行性に依らず決定的）。
- */
-
 const dialect = new PgDialect();
 
 afterAll(async () => {
@@ -75,12 +62,10 @@ describe("語彙を先に作らない: 書かれなかった候補の語彙は l
       ctx,
       [
         { input: build({ contentHash: "good", content: "good", tags: ["kept"] }), jobKinds: [] },
-        // 本文の NUL は DB が拒む（SAVEPOINT で巻き戻して dropped に積まれる）。
         {
           input: build({ contentHash: "bad", content: "a\u0000b", tags: ["dropped-label"] }),
           jobKinds: [],
         },
-        // 冪等の鍵（観測・版・contentHash）が既存の行と同じ: 書かれない。
         {
           input: build({ contentHash: "dup", content: "dup", tags: ["conflict-label"] }),
           jobKinds: [],
@@ -261,10 +246,6 @@ describe("upsertProposedLabels はコードポイント順に処理する", () =
   });
 });
 
-// Issue #1775 の #717（変異5・6）: 冪等衝突（同じ `sourceObservationId`・`contentHash` の再呼び出し）は、
-// すでに在る語彙の `proposedCount` を数え直さない（ADR 0318 決定2・`upsertProposedLabels` の doc、約束2）。
-// 再試行のたびに昇格の判断材料が膨らむ誤りを縛る。既存の歯は「語彙が作られない」だけを見て、すでに在る語彙の
-// 件数は見ていなかった。
 describe("冪等衝突で、すでに在る語彙の proposedCount を増やさない", () => {
   const input = (observationId: string, tenantId: string) =>
     buildNewMemoryFixture({

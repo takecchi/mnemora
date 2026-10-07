@@ -8,11 +8,6 @@ import {
   type ScoringStrategy,
 } from "../strategies/scoring.js";
 
-/**
- * `@mnemora/core` の公開の純関数の TSDoc が約束していて、どのテストも縛っていなかった振る舞い
- * （4回目の TSDoc の棚卸しの B8・B9）。
- */
-
 function memory(id: string, content: string, digest: string): Memory {
   return { id, content, digest } as unknown as Memory;
 }

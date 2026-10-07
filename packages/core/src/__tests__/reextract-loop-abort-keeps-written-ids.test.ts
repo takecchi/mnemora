@@ -5,12 +5,6 @@ import { SourceMemoryForgottenError } from "../interfaces/memory-store.js";
 import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * Issue #1734（2026-09-30 マージ分の確かめ直し）の #1493 のすり抜け B7（ADR 0406、PR 本文の約束）。
- * 口の無い adapter（`supersedeWithNewMemories` が無い）の書き込みループで、2件目以降の書き込みが
- * `SourceMemoryForgottenError` で打ち切られたとき、書いた分（1件目）の `memoryIds` を隠さず、
- * `atomicity: "store_unsupported"` で返す。既存の歯には、この場面（複数候補の2件目での打ち切り）が無かった。
- */
 const ctx: Ctx = { tenantId: "tenant-reextract-loop-abort" };
 
 let contents: string[] = [];
@@ -64,7 +58,6 @@ describe("口の無い adapter のループで2件目の書き込みが打ち切
     expect(result.skipped).toEqual([
       { kind: "status_not_active", memoryId: existing, status: "forgotten" },
     ]);
-    // 1件目は実際に書かれている（戻り値がそれを名乗っている）。
     expect((await stores.memoryStore.get(ctx, result.memoryIds[0]!))?.status).toBe("active");
     expect((await stores.memoryStore.get(ctx, existing))?.status).toBe("active");
   });

@@ -8,21 +8,7 @@ import {
 import { PostgresMemoryStore } from "../memory-store.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
-/**
- * Issue #273 / ADR 0182: `memories_provenance_kind_matches_provenance`
- * （`migrations/0016_provenance_kind_matches_provenance.sql` /
- * `0017_provenance_kind_matches_provenance_validate.sql`）が、実際に
- * `provenance_kind` 列と `provenance->>'kind'`（jsonb）の一致を守ることを検査する。
- *
- * この歯は `packages/testkit` の conformance suite には乗らない——`provenanceKind` は
- * `MemoryStore` インターフェース（core の `Memory` 型）に出てこず（`mapping.ts` の
- * `rowToMemory` が読み戻していない）、adapter 非依存の適合テストからはこの列自体が
- * 見えないため（Issue #273 の調査結果）。`packages/postgres` 固有の歯としてここに置く。
- *
- * **⚠ CI（postgres ジョブ）でしか走らない。** `DATABASE_URL` が無い作業環境では
- * `requireDatabaseUrl()`（`getTestClient()` 経由）が例外を投げ、テストランナー自体が
- * 起動しない（Issue #247 と同じ制約）。
- */
+/** conformance suite には乗らない。`provenanceKind` は `MemoryStore` インターフェース（core の `Memory` 型）に出てこず、adapter 非依存の適合テストからはこの列自体が見えないため、`packages/postgres` 固有の歯としてここに置く。 */
 describe("memories_provenance_kind_matches_provenance", () => {
   const ctx: Ctx = { tenantId: "tenant-1" };
 
@@ -36,7 +22,6 @@ describe("memories_provenance_kind_matches_provenance", () => {
       buildNewObservationFixture({ tenantId: "tenant-1" }),
     );
 
-    // createMemory: stated（実在の observation を要求する kind）
     const stated = await store.createMemory(
       ctx,
       buildNewMemoryFixture({
@@ -52,7 +37,6 @@ describe("memories_provenance_kind_matches_provenance", () => {
     );
     expect(stated.provenance.kind).toBe("stated");
 
-    // createMemoryWithOutbox: inferred
     const { memory: inferred } = await store.createMemoryWithOutbox(
       ctx,
       buildNewMemoryFixture({
@@ -71,7 +55,6 @@ describe("memories_provenance_kind_matches_provenance", () => {
     );
     expect(inferred.provenance.kind).toBe("inferred");
 
-    // supersedeWithNewMemories: consolidated（news 側）
     const target = await store.createMemory(
       ctx,
       buildNewMemoryFixture({ tenantId: "tenant-1", contentHash: "hash-target" }),
@@ -106,8 +89,6 @@ describe("memories_provenance_kind_matches_provenance", () => {
     );
     expect(created[0]?.memory.provenance.kind).toBe("consolidated");
 
-    // 生 SQL で「列 provenance_kind」と「jsonb provenance->>'kind'」が全行で一致していることを
-    // 直接確認する（アプリの型を経由せず、DB の実データを見る）。
     const { pool } = await getTestClient();
     const { rows } = await pool.query<{ mismatched: string }>(`
       SELECT count(*)::text AS mismatched FROM memories

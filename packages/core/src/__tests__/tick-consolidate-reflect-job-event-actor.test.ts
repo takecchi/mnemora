@@ -5,13 +5,6 @@ import type { NewMemory } from "../memory.js";
 import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * `tick()` が駆動する consolidate・reflect のジョブは、`actor` も `reason` も渡さない。
- * ⟹ そのジョブが積む統合先・内省の `created`（と統合元の `superseded`）は、actor が
- * `{ type: "system" }` のままで、`meta.note` が付かない（直接呼んだときに `actor`・`reason` を
- * 渡した場合だけ、それらが入る）。
- */
-
 const ctx: Ctx = { tenantId: "tick-consolidate-reflect-job-event-actor" };
 const NOW = new Date("2026-06-01T00:00:00.000Z");
 
@@ -126,7 +119,6 @@ describe("observe → tick（抽出・埋め込み・consolidate/reflect）が�
     }
 
     const kinds = new Set(stores.eventStore.events.map((e) => e.kind));
-    // 抽出の created は必ず在る。consolidate・reflect まで届いていれば superseded も在る。
     expect(kinds.has("created")).toBe(true);
     expect(stores.eventStore.events.length).toBeGreaterThan(2);
     for (const e of stores.eventStore.events) {

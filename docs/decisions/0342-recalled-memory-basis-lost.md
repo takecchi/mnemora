@@ -72,7 +72,7 @@ grep して0件だった。
   （`getObservation` は単件のみ）。
 - Memory 側は forget（論理削除、`status: 'forgotten'`）と purge（物理的にトゥームストーン化、
   `purgedAt` を設定。`forgotten` からしか遷移できない——docs/memory-model.md §11 行10）の
-  2段階を持つ。`purgedAt` は `Memory` の任意欄（`memory.ts` 215行付近）。
+  2段階を持つ。`purgedAt` は `Memory` の任意欄（`packages/core/src/memory.ts` の `Memory.purgedAt`）。
 
 ---
 

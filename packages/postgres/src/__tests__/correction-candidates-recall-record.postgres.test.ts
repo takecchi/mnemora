@@ -22,15 +22,6 @@ import {
   TEST_EMBEDDING_SPACE,
 } from "./test-db.js";
 
-/**
- * `findCorrectionCandidates` が書くものを縛る（Issue #1244。`Runtime.findCorrectionCandidates` の doc の
- * 2026-09-27 訂正）。振る舞いは変えていない。
- *
- * Memory の `status` と `memory_events` には書かない。ただし中で1回呼ぶ `recall()` が、recall の記録を1件書き
- * （戻り値の `recallId`）、`decay_clock` が `'wall'` 以外のテナントでは `activity_seq` を1進める。
- * Postgres と testkit の fixture で同じ。
- */
-
 const shared = {
   llmProvider: {
     complete: async () => ({ content: "unused" }),

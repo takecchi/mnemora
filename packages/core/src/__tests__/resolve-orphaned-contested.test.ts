@@ -7,33 +7,6 @@ import type { MemoryStore } from "../interfaces/memory-store.js";
 import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * `runtime.resolveOrphanedContested`（[Issue #825](https://github.com/takecchi/mnemora/issues/825)、
- * ADR 0150 追記）の歯。`resolve-contested.test.ts`（決定3 の CAS を課す正規経路）を手本にした、
- * 救済経路の対称な検査。
- *
- * 出典の再現: `runtime.markContested(a, b)` で対を作り、`runtime.forget(b)` すると、
- * `a` は `status: "contested"`・`contestedWithId: b.id` のまま残り、`resolveContested(a, b, ...)`
- * は `b` が `status_not_contested (forgotten)` で ineligible になり、`a` を戻す手段が無くなる
- * （再現テストは枝 `fix/forget-contested-pair` commit `1a79680` の
- * `forget-contested-pair.test.ts`）。本ファイルはこの再現の続きとして、`resolveOrphanedContested`
- * が `a` を `active` へ戻せることを検査する。
- *
- * 設計の要点（`runtime.ts` の `ResolveOrphanedContestedOutcome`/`resolveOrphanedContested` の
- * doc コメント参照）:
- * - **`resolveContested`/`MemoryStore.resolveContestedPair`（決定3の CAS）には一切触れない**
- *   ——既存の呼び出しの振る舞いが変わっていないことも、この歯で確かめる。
- * - 対象は「生存側が `status === 'contested'` かつ、`contestedWithId` の指す先が
- *   `forgotten` か見つからない」場合に限る。それ以外（`not_found`/`status_not_contested`/
- *   `no_contested_with_id`/`opposite_not_orphaned`）は ineligible で、書き込みは一切しない。
- * - 書き換えるのは生存側1件の `status`（→`active`）と `contestedWithId`（→`null`）だけ。
- *   対向（forgotten）の行には一切触れない。
- * - CAS で書く。TOCTOU は `conflict` として返し、上限の無い再試行はしない。
- * - `MemoryStore.resolveOrphanedContested` が無い adapter では `supported: false` になり、
- *   フォールバックしない。
- * - `tick()`/`observe()` からは呼ばれない。
- */
-
 const ctx: Ctx = { tenantId: "tenant-1" };
 const NOW = new Date("2026-06-01T00:00:00.000Z");
 
@@ -103,11 +76,9 @@ function disableResolveOrphanedContested(stores: ReturnType<typeof createFakeRun
 }
 
 /**
- * `stores.memoryStore` を包み、`get(ctx, hiddenId)` だけ `null` を返すようにする
- * （ADR 0150 の変異試験と同じ「`MemoryStore` を包んで作る」作法。本番コードは1バイトも
- * 触らない）。「対向が purge 済みで見つからない」を、実際に行を消さずに模すための道具
- * ——`purgeMemory` は今日どの実装も物理削除しない（tombstone するだけ）ため、これ以外の
- * 方法で「見つからない」を作る経路が無い。
+ * `stores.memoryStore` を包み、`get(ctx, hiddenId)` だけ `null` を返すようにする。「対向が purge 済みで見つからない」を
+ * 実際に行を消さずに模すための道具（`purgeMemory` は今日どの実装も物理削除しない（tombstone するだけ）ため、
+ * これ以外に「見つからない」を作る経路が無い）。
  */
 function hideMemory(store: MemoryStore, hiddenId: string): MemoryStore {
   const originalGet = store.get.bind(store);
@@ -133,7 +104,7 @@ async function createContestedPair(
   return { a, b };
 }
 
-/** Issue #825 の再現そのもの: 対を作り、b を forget する。 */
+/** 対を作り、b を forget する。 */
 async function createOrphanedPair(
   runtime: ReturnType<typeof buildRuntime>["runtime"],
   stores: ReturnType<typeof buildRuntime>["stores"],
@@ -183,7 +154,6 @@ describe("runtime.resolveOrphanedContested — 再現の解消（Issue #825）",
     expect(survivor?.status).toBe("active");
     expect(survivor?.contestedWithId).toBeNull();
 
-    // 対向（forgotten）は一切書き換わっていない——status も contestedWithId も元のまま。
     const forgotten = await stores.memoryStore.get(ctx, b.id);
     expect(forgotten?.status).toBe("forgotten");
     expect(forgotten?.contestedWithId).toBe(a.id);
@@ -209,7 +179,6 @@ describe("runtime.resolveOrphanedContested — 再現の解消（Issue #825）",
       note: "手動で気づいた",
     });
 
-    // b 側には新しいイベントが積まれていない——対向の行には一切触れない。
     const bEventsAfter = await stores.eventStore.list(ctx, { memoryId: b.id });
     expect(bEventsAfter).toHaveLength(bEventsBefore.length);
   });
@@ -262,10 +231,8 @@ describe("runtime.resolveOrphanedContested — ineligible（書き込みは一�
   it("no_contested_with_id: contestedWithId が null な contested（ADR 0150 負債2 の形）は対象外", async () => {
     const { runtime, stores } = buildRuntime();
     const { a } = await createContestedPair(runtime, stores);
-    // ADR 0140 以前の壊れたデータ（書き込み側では今日作れない状態）を、fake 内部の行を
-    // 直接いじって模す——`resolveContestedPair` の変異試験と同じ「テスト側だけで壊れた
-    // 状態を作る」作法。
-    // ADR 0562: `get` は写しを返す。store の中の行そのものを書き換えるので `liveRowForTest` を使う。
+    // 壊れたデータ（書き込み側では今日作れない状態）を、fake 内部の行を直接いじって模す。
+    // `get` は写しを返す。store の中の行そのものを書き換えるので `liveRowForTest` を使う。
     const stored = stores.memoryStore.liveRowForTest(ctx, a.id);
     if (stored) stored.contestedWithId = null;
 
@@ -301,10 +268,9 @@ describe("runtime.resolveOrphanedContested — ineligible（書き込みは一�
   it("opposite_not_orphaned（superseded）: 対向が resolveContested(supersede) で決着済みの場合も対象外", async () => {
     const { runtime, stores } = buildRuntime();
     const { a, b } = await createContestedPair(runtime, stores);
-    // a を負けさせて superseded にし、a の contestedWithId だけを直接 b へ戻す
-    // （「決着後の対向を、なお contestedWithId が指している」という壊れ方をテスト側で作る）。
+    // a を負けさせて superseded にし、a の contestedWithId だけを直接 b へ戻す。
     await runtime.resolveContested(ctx, a.id, b.id, { kind: "supersede", winnerId: b.id });
-    // ADR 0562: `get` は写しを返す。store の中の行そのものを書き換えるので `liveRowForTest` を使う。
+    // `get` は写しを返す。store の中の行そのものを書き換えるので `liveRowForTest` を使う。
     const stored = stores.memoryStore.liveRowForTest(ctx, a.id);
     if (stored) {
       stored.status = "contested";
@@ -333,7 +299,7 @@ describe("runtime.resolveOrphanedContested — 並行（MemoryStatusConflictErro
     const { a } = await createOrphanedPair(runtime, stores);
     stores.memoryStore.beforeUpdateStatus = (id) => {
       if (id === a.id) {
-        // ADR 0562: `createMemory` の返り値は写し。store の中の行を書き換える。
+        // `createMemory` の返り値は写し。store の中の行を書き換える。
         stores.memoryStore.liveRowForTest(ctx, a.id)!.status = "archived";
       }
     };

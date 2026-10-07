@@ -53,7 +53,7 @@ node scripts/ci-green-check.mjs --sha <(a) の sha> --repo takecchi/mnemora
 
 **通過条件**: (b) が **exit 0** で終わり、`status=green — N件すべてが completed かつ success`
 と出ること。終了コードは `0`=green / `1`=red / `2`=pending（まだ判定できない）/
-`3`=`gh` 呼び出し等の失敗（`scripts/ci-green-check.mjs` の docstring「終了コード: `0` = green」の行。【読んで確かめた】）。
+`3`=`gh` 呼び出し等の失敗（`scripts/ci-green-check.mjs` の `main()` 末尾の `process.exit(0)`〔green〕/ `(1)`〔red〕/ `(2)`〔それ以外＝pending〕と、`gh` 失敗時の `process.exit(3)`。【読んで確かめた】）。
 ⛔ **`2`（pending）は通過ではない。**「まだ分からない」であって「緑」ではない。
 
 **「何本中何本が緑ならよいか」**: **通過条件は「N 件すべて」であって「13件」ではない。**
@@ -95,8 +95,8 @@ gh run list --branch main --limit 3 --json databaseId,headSha,name,conclusion,st
 
 **⚠ run 全体の `conclusion` を見て判定しないこと。**`ci-green-check.mjs` は
 run 全体の `conclusion` も `mergeStateStatus` も**判定に一度も使わない**——
-Issue #228 が観測した4つの外れ方を踏まないための設計である
-（`scripts/ci-green-check.mjs:3-24`。【読んで確かめた】）。
+Issue #228 が観測した外れ方を踏まないための設計である
+（`scripts/ci-green-check.mjs` の冒頭 TSDoc の「⛔ check-runs（job 単位）だけを見る。run 全体の `conclusion` と `mergeStateStatus` は判定に使わない」の項。【読んで確かめた】）。
 
 ### 0.2 `pnpm run pack:check` が通ること（**DB 不要**）
 
@@ -124,8 +124,8 @@ doc コメントにしか無かった）。
 **2026-09-16・`origin/main` = `14a7c27` 時点の実測**であり、**`6a19d85` では走らせていない。**
 
 **参考**（【読んで確かめた】、§2.3 には書かれていない配線）: `pack:check` は
-`.github/workflows/ci.yml:45-62` で毎 PR の CI の `typecheck / lint / test / build` ジョブの
-末尾でも走る（Issue #241）。⟹ **0.1 が緑なら、その sha については `pack:check` も一度通っている。**
+`.github/workflows/ci.yml` の「publish 梱包の門（pack:check）を毎PRのCIでも走らせる（Issue #241）」ステップで、
+毎 PR の CI の `typecheck / lint / test / build` ジョブの末尾でも走る。⟹ **0.1 が緑なら、その sha については `pack:check` も一度通っている。**
 **それでも手元で1回走らせる理由は、0.1 で見た sha と手元の作業ツリーが同じとは限らないからである。**
 
 ### 0.3 ADR 索引が最新であること
@@ -159,11 +159,11 @@ node scripts/generate-adr-index.mjs
 
 ⛔ **索引の表を手で編集しないこと**（`docs/decisions/README.md`「この表は手で編集しない。」、ADR 0137）。
 再生成は、ADR を足す PR の側で **squash merge する前に PR ブランチ上で**行い、索引も同じ PR で commit する
-（`scripts/generate-adr-index.mjs:11-22`。【読んで確かめた】）。⚠ **「マージした直後に `main` 上で」ではない**
+（`scripts/generate-adr-index.mjs` の冒頭 TSDoc。【読んで確かめた】）。⚠ **「マージした直後に `main` 上で」ではない**
 ——そうすると陳腐化したままの squash コミットが `main` に着地し、`ci.yml` を赤くする。
 
 **0.1 との重なり**（【読んで確かめた】）: 鮮度の歯 `scripts/__tests__/adr-index-freshness.test.mjs` は
-**`main` に限って**赤くなる設計であり（`scripts/adr-index-freshness-branch-lib.mjs:1-18`）、
+**`main` に限って**赤くなる設計であり（`scripts/adr-index-freshness-branch-lib.mjs` の冒頭 TSDoc の「⛔ 手元(`GITHUB_REF` が無い)は、常に git のブランチ名 === "main" で判定する」の項）、
 `main` では `ci.yml` の `typecheck / lint / test / build` ジョブの `pnpm run test` の中で走る。
 ⟹ **0.1 が緑なら、その sha の索引は最新である。**この項目を別に立てるのは、
 **tag を切る直前に手元で1本のコマンドとして確かめられるようにするためである。**
@@ -236,7 +236,7 @@ tag から `scripts/apply-release-version.mjs` が runner の作業ツリー上�
   ——**過去に何度も本番で通った実績がある**ことが分かった。**ただし「次の `v1.0.0` でも
   必ず通る」ことまでは保証しない**——詳細は1・2番目の項目を見ること。
 
-1. **`npm publish --provenance` が通ること自体**（`publish.yml:227`）。
+1. **`npm publish --provenance` が通ること自体**（`publish.yml` の「npm publish（依存の向きの順に、tarball を上げる）」ステップ内の `npm publish ... --provenance`）。
    **本番 tag を打つまで分からない。**⟹ **予行（`workflow_dispatch` / `dry_run: true`）が
    緑でも、これは何も保証しない**——`--dry-run` は書き込みの要求を投げないので、
    認証・認可・存在検査・サーバ側の検証を**構造的に**見られない（ADR 0067 逐語。**§2.2**）。
@@ -250,7 +250,7 @@ tag から `scripts/apply-release-version.mjs` が runner の作業ツリー上�
    `v0.1.4` だけ failure）。さらに `npm view @mnemora/<pkg>@0.2.0 --json` を6パッケージ
    すべてに対して引くと、**6本とも** `dist.attestations` に
    `"provenance":{"predicateType":"https://slsa.dev/provenance/v1"}` が付いている——
-   `publish.yml:227` が `--provenance` を必ず付ける唯一の経路である以上、**この6本は
+   `publish.yml` の「npm publish（依存の向きの順に、tarball を上げる）」ステップが `--provenance` を必ず付ける唯一の経路である以上、**この6本は
    実際に OIDC 経由の `npm publish --provenance` を通っている。**⟹ **「一度も通ったことが
    ない」のではなく、「複数回、実際に通っている」。**
    ⚠ **ただし ADR 0067 の構造的な指摘そのものは変わらず生きている**——`--dry-run` が
@@ -271,8 +271,8 @@ tag から `scripts/apply-release-version.mjs` が runner の作業ツリー上�
    **設定の値そのものは、今回もこの器から見ていない**（§4.2 の「npm の画面で見る」の
    価値はそのまま残る——下記参照）。**だが、その設定が現に機能していることは、上の
    1番目の追記が引いた「6回連続 success ＋ 6本とも provenance あり」という実測で
-   実証されている。**信頼発行元が正しく設定されていなければ、`publish.yml:227` の
-   `npm publish --provenance` は §2.2 が引用した実例と同じ
+   実証されている。**信頼発行元が正しく設定されていなければ、`publish.yml` の
+   `npm publish --provenance`（「npm publish（依存の向きの順に、tarball を上げる）」ステップ）は §2.2 が引用した実例と同じ
    `403 ... OIDC permission denied` で落ちる——**落ちずに6回連続で通り、6本とも
    provenance が付いたという事実は、org/repo/workflow filename/直接publish許可が
    `v0.2.0`（2026-09-16）の時点で正しく機能していたことの**強い状況証拠である。
@@ -302,7 +302,7 @@ tag から `scripts/apply-release-version.mjs` が runner の作業ツリー上�
    ⚠ ただし**その時点の1 commit を実測しただけ**であり、「今後もう二度と壊れない」ことを
    意味しない——`pnpm-lock.yaml` や各 `package.json` に手を入れる commit が出るたびに、
    また `--frozen-lockfile` が赤くなりうる余地は残る。赤くなるとすれば §1.2 のステップ5である。
-   ⚠ **0.1 の CI も `pnpm install --frozen-lockfile` で入れている**ため（`ci.yml:25` ほか。
+   ⚠ **0.1 の CI も `pnpm install --frozen-lockfile` で入れている**ため（`ci.yml` の `build` ジョブの「Install dependencies」ステップほか。
    【読んで確かめた】）、**0.1 が緑ならその sha については lockfile も一度通っている**——
    今回の実測は、それを**この器（CI とは別の環境）でも独立に再現した**という位置づけである。
 
@@ -708,7 +708,7 @@ pack → tarball の `exports` と利用者が頼ってよい入口の一覧の�
 `push: tags` は**意図的に持たせていない**
 （`publish.yml` の `on:`。理由：Release UI から tag も同時に作られるため、両方を引き金にすると
 同じ版で2本走ってしまう。【読んで確かめた】）。**⟹ Release を作ることが「npm へ出してよい」の
-表明であり、その表明がリリースノートと一緒に GitHub 上に残る**（`publish.yml` の `on:` の上のコメント）。
+表明であり、その表明がリリースノートと一緒に GitHub 上に残る**（[ADR 0066](./decisions/0066-start-publishing-with-oidc.md)。かつて `publish.yml` の `on:` の上のコメントにも書いてあったが、2026-10-07 の #1853 で消えた）。
 
 ### 1.2 段階3（`publish.yml`）の各ステップと、どこを見れば成否が分かるか
 
@@ -1009,7 +1009,7 @@ npm view @mnemora/bullmq dist-tags
 
 Actions → `Publish` → `Run workflow` → `dry_run` を `true`（既定）のまま実行すると、
 上表の1〜11のステップは本番と同じものが走る。**唯一の違いは12番目のステップで
-`npm publish` に `--dry-run` が付くことだけ**（`publish.yml:217-221`。【読んで確かめた】）。
+`npm publish` に `--dry-run` が付くことだけ**（`publish.yml` の「npm publish（依存の向きの順に、tarball を上げる）」ステップの `DRY_RUN` の分岐。【読んで確かめた】）。
 
 これで検証できるもの（【読んで確かめた】）:
 - typecheck / lint / format / test / build が通ること
@@ -1265,7 +1265,7 @@ publish 段のログを引き、**`PUBLISH_TARGETS` の各本について「publ
 
 ### 2.3 手元で事前に走らせられる検査（`pnpm run pack:check`）
 
-**何をカバーするか**（`scripts/check-publish-pack.mjs:109-131` のバナーそのまま。
+**何をカバーするか**（`scripts/check-publish-pack.mjs` が実行の頭に印字するバナー〔`console.log` の「検査項目:」〕そのまま。
 【読んで確かめた】。6パッケージそれぞれに対して実際に `pnpm pack` し、tarball を展開して検査する）:
 
 1. `workspace:` プロトコルが依存に残っていないこと
@@ -1377,8 +1377,8 @@ publish 段のログを引き、**`PUBLISH_TARGETS` の各本について「publ
 | `@mnemora/local-embedding` | `@mnemora/core`, `@huggingface/transformers` |
 
 **⟹ `@mnemora/core` が先頭に在りさえすれば、残り5本の順序は実行時依存の上ではどれでもよい。**
-これは「いまの並びを支えているのは依存の向きだけ（＝当時の未公開の経緯はもう効いていない）」という
-`scripts/publish-targets.mjs` のコメントと整合する。
+これは `scripts/publish-targets.mjs` が順序の根拠を依存の向きだけに置いていること
+（同ファイルの冒頭 TSDoc）と整合する。当時の未公開の経緯を書いていた同ファイル内のコメントは、2026-10-07 のコメント整理（#1837・#1874）で消えた。
 
 #### 追記【実測】（2026-09-17、CI と同じ条件で）
 
@@ -1552,7 +1552,7 @@ done
 
 ### 3.2 既に上がっている版が飛ばされる仕組み（冪等性）
 
-`publish.yml` の12番ステップ、`npm publish` の呼び出し部分（217-239行。【読んで確かめた】）:
+`publish.yml` の12番ステップ、`npm publish` の呼び出し部分（`while IFS= read -r tarball; do` のループの中。【読んで確かめた】）:
 
 ```bash
 OUT=$(npm publish "${tarball}" --access public --provenance \
@@ -1571,13 +1571,13 @@ fi
 
 **この設計により、同じ Release（同じ tag）の workflow を Actions の「Re-run failed jobs」
 で再実行すると、既に上がっている版は `E403` を「上がっていた」として飲み込み、
-まだ上がっていないパッケージから続行できる**（コメント193-197行に明記の意図。
+まだ上がっていないパッケージから続行できる**（同ステップ冒頭のコメント「既に上がっている版は飛ばす（冪等にする）」に明記の意図。
 【読んで確かめた】）。
 
 **⚠ ただし `exit "${STATUS}"` に注意——それ以外の失敗は、そこでループが止まる。**
 `while IFS= read -r tarball; do ... done < publish-order.txt` という形なので、
 **失敗した1本より後ろのパッケージは、その回では一切 `npm publish` が呼ばれない**
-（`publish.yml:222-241`のループ構造から読める。【読んで確かめた】）。
+（`publish.yml` の `while IFS= read -r tarball; do ... done` のループ構造から読める。【読んで確かめた】）。
 
 ### 3.3 同じ tag での re-run で回復できるケースの条件
 
@@ -1618,7 +1618,7 @@ fi
    commit の中身は変わらない**——修正を反映するには**新しい tag（＝新しい版）**を
    切るほかない。
 3. **新しい tag を切ったときの挙動**: `apply-release-version.mjs` は**6パッケージ全部の
-   `package.json` に同じ新しい版を無条件で書き込む**（`apply-release-version.mjs:64-88`）。
+   `package.json` に同じ新しい版を無条件で書き込む**（`apply-release-version.mjs` の `for (const target of PUBLISH_TARGETS)` のループ）。
    `publish-targets.mjs` の6件も無条件に対象になる。**⟹ 新しい tag（例: `v1.0.1`）を
    切ると、前回すでに `v1.0.0` で publish 済みだったパッケージも含めて、6本**全部**が
    新しい版（`1.0.1`）への publish を試みる**（既に `1.0.1` を持っていない限り、
@@ -1651,7 +1651,7 @@ fi
 
 **「恒久的に残りうる」と報告したのはマネージャーである。上の指摘のとおり、その言い方は強すぎた。**
 `apply-release-version.mjs` が `PUBLISH_TARGETS` の**6本全部へ無条件に同じ版を書き込む**
-ことを現物で確認した（`scripts/apply-release-version.mjs:64-88` のループに、
+ことを現物で確認した（`scripts/apply-release-version.mjs` の `for (const target of PUBLISH_TARGETS)` のループに、
 「この版は既に上がっているか」を見る分岐は1つも無い）。
 ⟹ **次の Release を出せば `latest` は必ず揃う。訂正を受け入れる。**
 
@@ -1746,8 +1746,9 @@ publish する。**
 - ⚠ **これはオーナー専権の操作である**（`docs/autonomy.md` §3）。
 
 ⚠ **ただし v0.1.4 の失敗の原因は「そのパッケージが registry にまだ存在せず、OIDC
-では初版を作れない」という bootstrap 固有のもの**（`scripts/publish-targets.mjs`
-のコメントが npm/cli#8544 を挙げている。【読んで確かめた】）。**v1.0.0 の時点では
+では初版を作れない」という bootstrap 固有のもの**（npm/cli#8544 を
+[ADR 0066](./decisions/0066-start-publishing-with-oidc.md) が挙げている。かつては
+`scripts/publish-targets.mjs` のコメントも挙げていたが、2026-10-07 のコメント整理で消えた）。**v1.0.0 の時点では
 6本とも registry に既に在るので、この原因そのものは再発しない。**⟹ **再発しうる
 のは「原因」ではなく「形」**——ループが途中で止まり、後ろが上がらない、という
 形である。
@@ -1770,13 +1771,13 @@ publish する。**
 ### 4.1 どのステップで・どんなエラーが出るか（`publish.yml` から読めるものだけ）
 
 **OIDC のトークン自体が発行されない場合**（`id-token: write` 権限の欠落など）:
-この repo では `publish.yml:44-46` に `permissions: id-token: write` が明示されているため、
+この repo では `publish.yml` の `publish` ジョブの `permissions:` に `id-token: write` が明示されているため、
 **通常は起きないはず**（【未検証・理屈上こうなるはず】——欠落時にどんなメッセージが出るかは、
 この repo でその状態を作って試していない）。
 
 **npm CLI が古い場合**: `npm install -g npm@latest` を飛ばすと、OIDC の交換を知らない
 npm 10.x が「長期トークンが無い」という顔で **401** を返す
-（`publish.yml:63-65` のコメント。【読んで確かめた】。ただしこの repo は既にこのステップを
+（`publish.yml` の「Update npm CLI」ステップのコメント。【読んで確かめた】。ただしこの repo は既にこのステップを
 組み込んでいるので、**削除しない限り再現しない**）。
 
 **信頼発行元が未設定、または権限が不足している場合**（実際に観測された、この repo での
@@ -1823,7 +1824,7 @@ npm error 403 Forbidden - PUT https://registry.npmjs.org/@mnemora%2fcore
 |---|---|
 | Organization / user | `takecchi` |
 | Repository | `mnemora` |
-| **Workflow filename** | **`publish.yml`**（一致必須。改名すると403で止まる。`publish.yml:3-6` にも明記） |
+| **Workflow filename** | **`publish.yml`**（一致必須。改名すると403で止まる。`publish.yml` の冒頭のコメントにも明記） |
 | 「直接 `npm publish` を許可」 | **許可する**（既定は不許可。ADR 0070測ったこと3で実際にこれが原因で403になった） |
 
 **⚠ npm は保存時にこれらの値を検証しない**（ADR 0066「⚠ npm は保存時に設定を検証しない」に明記。誤っていても保存でき、
@@ -1838,7 +1839,7 @@ publish を打った瞬間に初めて分かる）。
 
 ### 4.3 `npm install -g npm@latest` がなぜ要るか
 
-`publish.yml:63-68`（【読んで確かめた】、逐語）:
+`publish.yml` の「Update npm CLI」ステップ（【読んで確かめた】、逐語）:
 
 ```yaml
 - name: Update npm CLI（Trusted Publishing は npm >= 11.5.1 が必要）
@@ -2223,7 +2224,7 @@ git show origin/main:docs/migration-v1.md | grep -n "未リリース"
    が正しく設定されているかは、**オーナーが当日 npm の画面で確認する必要がある**
    （§4.2）。
 3. **`npm publish --tag ""`（NPM_TAG が空文字列）の挙動。**`publish.yml` はこれを
-   手前で検査して落とすようになっているが（213-216行）、それは「確かめていないことを
+   手前で検査して落とすようになっているが（`NPM_TAG` が空なら `exit 1` する検査）、それは「確かめていないことを
    通さない」という設計であって「確かめた」わけではない、と ADR 0070 自身が明記している
    （ADR 0070「`npm publish --tag ""` の挙動をこの器で確かめていない」）。
 4. **`npm publish` ループの途中で1本だけが「再実行しても直らない」形で失敗する
@@ -2257,7 +2258,7 @@ git show origin/main:docs/migration-v1.md | grep -n "未リリース"
    | `@mnemora/local-embedding@0.1.4` | **無し** | 2026-09-10T08:05:57Z |
    | `@mnemora/local-embedding@0.1.5` | **在り** | 2026-09-11T09:53:15Z |
 
-   `publish.yml:227` は `--provenance` を必ず付ける唯一の publish 経路なので、
+   `publish.yml` の「npm publish（依存の向きの順に、tarball を上げる）」ステップは `--provenance` を必ず付ける唯一の publish 経路なので、
    **provenance の有無が「publish.yml（OIDC 経路）を通ったか」の指紋になっている**
    【実測から読める事実】。この指紋を `gh run list --workflow=publish.yml` の run 履歴と
    突き合わせると（`gh run list --workflow=publish.yml --limit 30` で確認）:

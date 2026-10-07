@@ -2,16 +2,8 @@ import { describe, expect, it } from "vitest";
 import { defaultScoringStrategy } from "../strategies/scoring.js";
 
 /**
- * ケース表（Issue #690、ADR 0300 §2）の純関数レベルの歯。
- *
- * `defaultScoringStrategy` を直接呼び、`ScoringInput.timeWeighting` を省略した場合
- * （既定・"legacy"）と `"eventAwareFreshness"` を明示した場合を比較する。
- *
- * ⛔ **このファイルが示さないもの**:
- * - `validAt`/忘却ゲートの挙動（`recall()` レベルの話。
- *   `recall-time-weighting-policy.test.ts` の管轄）。
- * - `RecallQuery.timeWeighting` が実際に `recall-runtime.ts` の3箇所へ配線されているか
- *   （同上、`recall-time-weighting-policy.test.ts` の管轄）。
+ * `defaultScoringStrategy` を直接呼び、`ScoringInput.timeWeighting` を省略した場合（既定・"legacy"）と `"eventAwareFreshness"` を明示した場合を比較する。
+ * `validAt`/忘却ゲートの挙動と、`RecallQuery.timeWeighting` の配線は `recall-time-weighting-policy.test.ts` の管轄。
  */
 
 const HOUR_MS = 1000 * 60 * 60;
@@ -27,7 +19,7 @@ function baseInput() {
     strength: 1,
     halfLifeHours: HALF_LIFE_HOURS,
     // similarity / lexicalMatch は渡さない ⟹ affinity は中立の1に退化する
-    // （同一関連度を保つための固定。ADR 0300 §2）。
+    // （同一関連度を保つための固定）。
   };
 }
 
@@ -74,7 +66,6 @@ describe("ケース A: 恒常的な好み（occurredAt 無し）を古く記録�
   it("eventAwareFreshness: occurredAt が無いので freshness=1 に固定され、total は decay だけで決まる", () => {
     const score = defaultScoringStrategy({ ...input, timeWeighting: "eventAwareFreshness" });
     expect(score.freshness).toBe(1);
-    // decay は直近 reinforce（1時間前）なのでほぼ1
     expect(score.total).toBeGreaterThan(0.99);
   });
 

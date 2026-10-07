@@ -5,14 +5,7 @@ import { PostgresEventStore } from "../event-store.js";
 import { PostgresMemoryStore } from "../memory-store.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
-/**
- * `purgeExpiredEvents` の `reachedLimit` は「候補が `limit` より多い」ときだけ true。
- * 候補がちょうど `limit` 件のときは、取りこぼしが無いので false（クローンの判断。
- * 呼び出し側が `reachedLimit` で「もう一度回す」かを決めるので、`>=` にすると、全部消し終えたのに
- * 空振りの1周が増える）。InMemory と Postgres に同じ入力を流して見る。
- * 「ちょうど `limit` 件」と「`limit` より1件多い」の境目を、実消し・`dryRun` の両方で縛る
- * （Postgres は実消しと `dryRun` で `reachedLimit` を別の行で計算する）。
- */
+/** 候補がちょうど `limit` 件のときは取りこぼしが無いので false。呼び出し側が `reachedLimit` で「もう一度回す」かを決めるので、`>=` にすると全部消し終えたのに空振りの1周が増える。「ちょうど `limit` 件」と「1件多い」の境目を、実消し・`dryRun` の両方で縛る（Postgres は実消しと `dryRun` で `reachedLimit` を別の行で計算する）。 */
 
 const NOW = new Date("2026-09-27T00:00:00.000Z");
 const DAY_MS = 86_400_000;

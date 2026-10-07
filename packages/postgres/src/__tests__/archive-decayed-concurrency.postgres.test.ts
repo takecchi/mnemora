@@ -7,22 +7,16 @@ import { PostgresMemoryStore } from "../memory-store.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
 /**
- * `MemoryStore.archiveDecayed` の契約「同じ範囲の掃引が**同時に**走っても、同じ行が二度
- * archived にならず、`archived` のイベントも1件だけである」（`@mnemora/core` の
- * interface の doc、ADR 0114 の 2026-09-27 追記）を、本物の Postgres で縛る歯。
- *
- * 根拠は `buildArchiveDecayedTargetSelect` の `FOR UPDATE SKIP LOCKED`——後から来た掃引は、
- * 先の掃引が行ロックを持っている行を飛ばす。行ロックを外すと、後の掃引の `UPDATE` は先の
- * 掃引の行ロックが外れるのを待ち、外れた後に同じ行をもう一度 archived にする
+ * 後から来た掃引が飛ばせるのは `buildArchiveDecayedTargetSelect` の `FOR UPDATE SKIP LOCKED` のおかげで、
+ * 行ロックを外すと後の掃引の `UPDATE` は先の掃引の行ロックが外れるのを待ち、同じ行をもう一度 archived にする
  * （`UPDATE ... FROM target WHERE m.id = t.id` は `status` を見直さない）。
  *
  * **順序は sleep ではなく障壁で固定する**:
- * 1. 掃引 A を明示的なトランザクションの中で走らせる——A が選んだ行の行ロックは、
- *    トランザクションを閉じるまで外れない。
+ * 1. 掃引 A を明示的なトランザクションの中で走らせる（A が選んだ行の行ロックは、トランザクションを閉じるまで外れない）。
  * 2. その間に、別の接続で掃引 B を起こす。
- * 3. B が「終わった」か「行ロック待ちに入った」（`pg_stat_activity.wait_event_type =
- *    'Lock'`）かのどちらかを確かめてから、A を commit する。どちらにも倒れないまま
- *    上限の時間が過ぎたら、歯そのものを失敗にする（黙って順序が崩れた測定をしない）。
+ * 3. B が「終わった」か「行ロック待ちに入った」（`pg_stat_activity.wait_event_type = 'Lock'`）かのどちらかを
+ *    確かめてから、A を commit する。どちらにも倒れないまま上限の時間が過ぎたら、歯そのものを失敗にする
+ *    （黙って順序が崩れた測定をしない）。
  */
 
 const TENANT = "archive-decayed-concurrency-tenant";
@@ -77,7 +71,6 @@ describe("PostgresMemoryStore.archiveDecayed — 同じ範囲の掃引を同時�
       const aPid = (rows[0] as { pid: number }).pid;
       const storeA = new PostgresMemoryStore(tx as unknown as Db);
       const result = await storeA.archiveDecayed(ctx, { now: NOW, limit: 10 });
-      // A は行ロックを持ったまま（まだ commit していない）。ここで B を起こす。
       bPromise = storeB.archiveDecayed(ctx, { now: NOW, limit: 10 }).then((r) => {
         bResult = r;
       });

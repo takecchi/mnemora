@@ -33,34 +33,29 @@ import {
 } from "./test-db.js";
 
 /**
- * reextract・consolidate・reflect の書き込みも、「記憶が在るのに `created` が0件」を残さない
- * （穴 D-3 の続き。ADR 0410 は抽出の経路だけを直した。残りは ADR 0416 で扱う）。
+ * reextract・consolidate・reflect の書き込みも、「記憶が在るのに `created` が0件」を残さない。
  *
- * 今の3経路は、記憶を（`supersedeWithNewMemories` または `createMemoryWithOutbox` で）コミットしたあと、
- * `created` を別の文（`appendCreatedEvent` / `eventStore.append`）で積む。`created` の append が一時的に失敗すると
- * 呼び出しは例外になるが、記憶は残る。再試行は、
+ * 記憶を（`supersedeWithNewMemories` または `createMemoryWithOutbox` で）コミットしたあと、`created` を別の文で積むと、
+ * `created` の append が一時的に失敗したとき、呼び出しは例外になるが記憶は残る。再試行は、
  * - reextract: 同じ内容の記憶が「在る」と見て素通しする（`created` は0件のまま）。
  * - consolidate: 統合元が `superseded` になっているので、対象なしになる。
  * - reflect: 孤児の反映先が残ったまま、`created` は揃わない。
  *
  * ## 範囲
- * **`supersedeWithNewMemories` の口がある経路だけ**（reextract の口あり、consolidate の口あり）と、reflect。
- * 口が無い adapter 向けの経路（`createMemoryWithOutbox` + ループ。reextract・consolidate の口なし）は、
- * 直さない負債として残るので、ここでは縛らない。実 adapter 2つ（testkit の InMemory と Postgres）は
- * どちらも口を持つ。
+ * `supersedeWithNewMemories` の口がある経路だけ（reextract の口あり、consolidate の口あり）と、reflect。
+ * 口が無い adapter 向けの経路（`createMemoryWithOutbox` + ループ。reextract・consolidate の口なし）は、ここでは縛らない。
+ * 実 adapter 2つ（testkit の InMemory と Postgres）はどちらも口を持つ。
  *
  * ## 検査の形
  * `observe-created-event-same-tx.postgres.test.ts` と同じ。`created` の書き込みそのものを DB／配列の側で失敗させる
- * （Postgres: `memory_events` への `kind = 'created'` の INSERT を拒むトリガ／InMemory: 共有 `events` 配列の
- * `push` が投げる）ので、別の文で積む今の経路も、記憶と同じトランザクションで積む直した経路も、同じところで落ちる。
+ * （Postgres: `memory_events` への `kind = 'created'` の INSERT を拒むトリガ／InMemory: 共有 `events` 配列の `push` が投げる）ので、
+ * 別の文で積む経路も、記憶と同じトランザクションで積む経路も、同じところで落ちる。
  *
- * 1. 失敗している間、新しい記憶は0件で、`created` も0件（consolidate では統合元が active のまま、reextract では
- *    旧い記憶が superseded になっていない）。
+ * 1. 失敗している間、新しい記憶は0件で、`created` も0件（consolidate では統合元が active のまま、reextract では旧い記憶が superseded になっていない）。
  * 2. 失敗を外して再試行すれば、新しい記憶の数と `created` の数が一致する（直接の呼び出しでは、ちょうど1件ずつ）。
  *
- * ⚠ tick のジョブ経由（`processConsolidateJob` / `processReflectJob`）は、落ちると outbox の `fail()` に
- * 倒れる。再試行後に件数が揃うことは縛らない（ジョブの再配達の仕様は別の話で、この歯の対象ではない）——
- * 「失敗中は何も残らない」と「新しい記憶と `created` が食い違わない」だけを縛る。
+ * ⚠ tick のジョブ経由（`processConsolidateJob` / `processReflectJob`）は、落ちると outbox の `fail()` に倒れる。
+ * 再試行後に件数が揃うことは縛らない（ジョブの再配達の仕様は別の話）。「失敗中は何も残らない」と「新しい記憶と `created` が食い違わない」だけを縛る。
  * 件数が揃うこと自体は、直接の呼び出しで縛っている。
  */
 
@@ -80,11 +75,7 @@ const llm: LLMProvider = {
   },
 };
 
-/**
- * tick のジョブはリース・backoff を経て再配達される。実時間は待たず、時計を進める。
- * 時計は実時刻より1秒だけ未来を返す（歴史的な理由で残している。今は outbox の `available_at` も
- * 注入した時計に従う。ADR 0559。`consolidate-reflect-carryover.postgres.test.ts` の同じ注記を見ること）。
- */
+/** tick のジョブはリース・backoff を経て再配達される。実時間は待たず、時計を進める。 */
 let nowMs = Date.now();
 const clock = { now: () => new Date(nowMs + 1_000) };
 const hashContent = (content: string) => createHash("sha256").update(content).digest("hex");
@@ -370,7 +361,6 @@ for (const [name, makeKit] of KITS) {
       const newMemories = after.memories - base.memories;
       expect(newMemories).toBe(1);
       expect(after.created).toHaveLength(newMemories);
-      // reflect は材料の記憶を動かさない。
       const ids: MemoryId[] = [a.id, b.id];
       for (const id of ids) expect((await kit.memoryStore.get(ctx, id))!.status).toBe("active");
     });

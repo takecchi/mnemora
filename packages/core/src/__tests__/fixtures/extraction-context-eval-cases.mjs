@@ -1,25 +1,6 @@
-// Issue #689 独立意味評価のケース定義。
-//
-// ⚠ これは「実装を見て調整した開発ケース」ではない。このファイルは
-// Issue #689 本文の完了条件だけを読んで書き、commit してから
-// `scripts/record-extraction-context-eval.mjs` で実 API を1回叩いて録音した
-// （録音後にこのファイルの期待値・入力を結果に合わせて直していない — git 履歴の
-// commit 順序がそれを示す: このファイルの commit が先、録音の commit が後）。
-//
-// 開発ケース（`extraction-context-recorded.json`、id: reference / relative-date /
-// other-speaker）とは文面・話題を変えている。tenantId も別にしてある
-// （`context-eval-independent`）。
+// ⚠ これは「実装を見て調整した開発ケース」ではない。録音後にこのファイルの期待値・入力を結果に合わせて直さない。
 //
 // 判定はここでは行わない。ここは「入力・期待値・根拠」の定義だけを持つ。
-// 判定（機械的な包含/非包含/日付正規表現）は
-// `packages/core/src/__tests__/extraction-context-eval.test.ts` が、録音済みの
-// `extraction-context-recorded.eval.json` に対して行う。
-//
-// Issue #689 の完了条件からの引用（本文そのまま）:
-//   - 「文脈内の他人の発話を当該話者の stated として取り込まない。」→ category "c"
-//   - 「文脈不足なら対象や日時を捏造しない。」→ category "d"
-//   - 「会話の参照先・話者・観測日時が抽出に渡らず、「それでお願いします」「明日」の
-//      意味を確定できない。」（問題節）→ category "a"（参照先）・"b"（観測日時）
 
 /** @typedef {{ speaker?: string; text: string }} ContextMessage */
 
@@ -49,8 +30,7 @@
 const RECORDED_AT = "2026-04-15T00:00:00.000Z";
 const TENANT_ID = "context-eval-independent";
 
-// 「文脈なし」ケースで捏造されていないかを確認するための、他ケース由来の固有名詞の
-// ブロックリスト（d4 で使う。d1/d2 は対になる a1/a2 の固有名詞だけを個別に禁止する）。
+// 「文脈なし」ケースで捏造されていないかを確認するための、他ケース由来の固有名詞のブロックリスト。
 const FABRICATION_BLOCKLIST = [
   "さくら亭",
   "19時",

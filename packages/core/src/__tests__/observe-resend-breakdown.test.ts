@@ -7,10 +7,6 @@ import type { Runtime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
 /**
- * ADR 0639: 冪等な再送（同じ `externalId` の Observation が既に在った）の `ObserveResult` には `resend` が付く。
- * 既存の欄（`memoryIds: []`・`extraction: 'skipped'`・ADR 0454 決定4 の3欄）は変えない。
- * `resend.memories` は `listBySourceObservationAllVersions` の写し（版も status も問わない・memoryId の昇順）。
- *
  * ⚠ このファイルは core の Fake で走らせる。同じ本体を testkit の InMemory
  * （`packages/testkit/src/__tests__/observe-resend-breakdown.test.ts`）と実 Postgres
  * （`packages/postgres/src/__tests__/observe-resend-breakdown.postgres.test.ts`）でも走らせている。
@@ -205,7 +201,6 @@ function defineTests(label: string, makeKit: () => Promise<Kit> | Kit): void {
         ctx,
         first.observationId,
       );
-      // 前提: 版違いの記憶が実際に2件在る。
       expect(new Set(all.map((m) => m.extractorVersion))).toEqual(new Set(["v1", "v2"]));
       const resend = await v2.observe(ctx, input("resend-version"));
       expect(resend.resend?.memories.map((m) => m.memoryId)).toEqual(all.map((m) => m.id).sort());

@@ -5,15 +5,6 @@ import { detectLanguageMismatch } from "../language-mismatch.js";
 import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * Issue #1734（2026-09-30 マージ分の確かめ直し）の #1461 のすり抜け（ADR 0391 決定3）。
- * 既存の歯が個別には縛っていなかった条件を、1つずつ、その条件だけが効く入力で縛る。
- *
- * - ラテン割合 0.9 の条件（他の文字体系が混じる本文は陰性。0.9 ちょうどは陽性、0.89 は陰性）
- * - コード片の印のうち、パス・`{}<>|\` の各文字（それぞれ単独でその本文を陰性にする）
- * - `contentLatinShare` は小数第2位までに丸める（TSDoc）
- * - 検査の対象は content だけで、digest ではない（決定4）
- */
 const JA_OBSERVATION = "今日は渋谷のパン屋で働いています。毎朝パンを焼くのが好きです。";
 
 /** 小文字だけの10字の語を `n` 個。ラテン文字が 10n 字・小文字語が n 語になる。 */

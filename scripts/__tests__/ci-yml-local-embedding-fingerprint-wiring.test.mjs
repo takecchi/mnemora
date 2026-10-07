@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { blankOutWorkflowComments } from "../workflow-comment-blank-lib.mjs";
+import { isDraftOnlyJobIf } from "../ci-draft-skip-lib.mjs";
 
 /**
  * YAML は構造として解析せず文字列で見る（依存追加はオーナー専権）。
@@ -110,9 +111,11 @@ describe("ci.yml の local-embedding fingerprint 配線(example-chat ジョブ)"
     expect(/^ {8}["']?if["']?\s*:/m.test(step)).toBe(false);
   });
 
-  it("⛔ 門が居るジョブ(example-chat)は、ジョブの側でも `continue-on-error` と `if:` を持たない", () => {
+  it("⛔ 門が居るジョブ(example-chat)は、ジョブの側でも `continue-on-error` と `if:` を持たない（draft の PR でだけ飛ばす1行は除く）", () => {
     expect(/^ {4}["']?continue-on-error["']?\s*:/m.test(jobBlock)).toBe(false);
-    expect(/^ {4}["']?if["']?\s*:/m.test(jobBlock)).toBe(false);
+    expect(
+      jobBlock.split("\n").filter((l) => /^ {4}["']?if["']?\s*:/.test(l) && !isDraftOnlyJobIf(l)),
+    ).toEqual([]);
   });
 
   it("⭐ ステップの本体が GITHUB_STEP_SUMMARY へ書き出している(一致・保留のどちらでも1行残す設計)", () => {

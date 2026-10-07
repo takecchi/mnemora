@@ -1,30 +1,8 @@
-// Issue #704 の続き。マネージャー判断（ADR 0299 追記節「5」）が指示した独立評価の
-// 追加分——PR #709（`extraction-context-eval-coverage-cases.mjs`、eval-e1/f1/g1/h1）が
-// 4カテゴリを1件ずつしか埋めていなかったところを、同じカテゴリの中でさらに広げる。
+// 各ケースは5回ずつ録音する。
 //
-// ⚠ これは「実装を見て調整した開発ケース」ではない。カテゴリと期待値・根拠は、
-// Issue #704 本文・ADR 0299・`buildExtractionPrompt` がプロンプトへ与えている指示文
-// （「入力JSONのobservationだけを抽出対象にしてください」「分からない対象を補わないで
-// ください」「相対日付はoccurredAtとtimeZoneが両方ある場合だけ…暦日に具体化し」等、
-// extraction.ts 内の system 文面そのもの）だけから導いた。**この実装（extraction.ts）は
-// 1バイトも変えない。**
-//
-// 既存の eval-a1〜d4（`extraction-context-eval-cases.mjs`）・eval-e1/f1/g1/h1
-// （`extraction-context-eval-coverage-cases.mjs`）とは、tenantId
-// （`context-eval-more`）・文面・話題を変えてある（同じ入力の使い回しはしていない）。
-//
-// 各ケースは5回ずつ録音する（`scripts/record-extraction-context-eval-more.mjs`）。
-// 3回中0〜1回ではなく5回中の成功数で判定するのは、既存2本のスクリプトの流儀
-// （eval-a1〜d4: 各1回、eval-e1〜h1: 各3回）よりさらにばらつきを見る解像度を上げる
-// ための、この作業固有の指示（マネージャーからの依頼）による。
-//
-// ⛔ このファイルは録音後に書き換えない——期待値・入力を結果に合わせて直すことはしない。
-// 直したくなった点は commit せず、報告に書く。
+// ⛔ このファイルは録音後に書き換えない。期待値・入力を結果に合わせて直すことはしない。
 //
 // 判定はここでは行わない。ここは「入力・期待値・根拠」の定義だけを持つ。
-// 判定（機械的な包含/非包含/日付正規表現）は
-// `packages/core/src/__tests__/extraction-context-eval-more.test.ts` が、録音済みの
-// `extraction-context-eval-more-recorded.json` に対して行う。
 
 const RECORDED_AT = "2026-04-15T00:00:00.000Z";
 const TENANT_ID = "context-eval-more";
@@ -276,9 +254,7 @@ export const moreEvalCases = [
     },
   },
 
-  // --- l: 長い文脈。eval-h1-long-context-distant-reference（既存カセット、8件中2件目、
-  //        0/3で系統的未達）の変種を3本。件数・対象の位置・話題を変え、どれが長さに、
-  //        どれが位置に効いているかを切り分ける組み方にする。---
+  // --- l: 長い文脈。件数・対象の位置・話題を変え、どれが長さに、どれが位置に効いているかを切り分ける ---
   {
     id: "eval-l1-length8-position3-budget",
     category: "l-long-context-variant",

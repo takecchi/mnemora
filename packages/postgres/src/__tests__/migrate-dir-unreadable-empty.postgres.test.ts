@@ -6,17 +6,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest
 import { runMigrations } from "../migrate.js";
 import { requireDatabaseUrl } from "./test-db.js";
 
-/**
- * `runMigrations` の `migrationsDir` が読めない・空のときの振る舞い（ADR 0448）。
- *
- * - 読めない（存在しない・ディレクトリでない）: 以前は、ロック・`CREATE SCHEMA`・`CREATE EXTENSION`・台帳の
- *   作成が済んだ**後**に、fs の生の例外（`ENOENT: … scandir …`）で落ちていた。いまは DB に触れる前に、
- *   `migrationsDir を読めない` で落ちる（`code` は元のまま）。落ちる入力は増えていない。
- * - `.sql` が1本も無い: 以前も何もせず成功（`applied: []`）していた。いまも成功し、`console.warn` で名乗る。
- *   CLI の終了コードは変えない。
- *
- * このファイル専用のスキーマ名で走らせ、`public` の台帳には触れない。
- */
+/** このファイル専用のスキーマ名で走らせ、`public` の台帳には触れない。 */
 const SCHEMA_MISSING = "mnemora_dir_unreadable_a";
 const SCHEMA_EMPTY = "mnemora_dir_empty_b";
 

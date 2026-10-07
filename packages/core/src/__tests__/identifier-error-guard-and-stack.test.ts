@@ -3,17 +3,7 @@ import { describe, expect, it } from "vitest";
 import { omitParamsFromError } from "../failure-description.js";
 import { isMalformedIdentifierError, MalformedIdentifierError } from "../identifier.js";
 
-/**
- * Issue #1734（2026-09-30 マージ分の確かめ直し）の歯。PR #1520（ADR 0423）の変異試験で、次の2つがすり抜けた。
- * 担当はクローン（miku）の判断で進めている作業であり、オーナーの判断ではない。
- *
- * - I7: `isMalformedIdentifierError` が `instanceof` だけになる。ADR 0423 決定2・3（ADR 0418 の作法）は「`kind`、
- *   無ければ `name`」で見る。core が2つの版に分かれ、別 realm の `MalformedIdentifierError` が来ても通る。
- *   同じ realm では差が出ないので、`node:vm` の別 context で作った例外を渡す。
- * - E2: `omitParamsFromError` が `stack` を書き換えない。ADR 0423 決定6は「`message`（と、それを含む `stack`）を
- *   書き換える」。`stack` に `params:` 以降の本文が残ると、`stack` を表示・ログに出す利用者に本文が漏れる。
- *   既存の歯は `message` しか見ていなかった。
- */
+/** `isMalformedIdentifierError` が `instanceof` だけになる変異は同じ realm では差が出ないので、`node:vm` の別 context で作った例外を渡す。`stack` に `params:` 以降の本文が残ると `stack` を表示・ログに出す利用者に本文が漏れるので、`omitParamsFromError` が `stack` も書き換えることを見る。 */
 
 describe("isMalformedIdentifierError は instanceof ではなく kind（無ければ name）で見る（ADR 0423・0418、Issue #1734）", () => {
   it("陽性対照: 同じ realm のクラスのインスタンスは通る", () => {

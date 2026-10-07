@@ -6,13 +6,8 @@ import { PostgresMemoryStore } from "../memory-store.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
 /**
- * ADR 0596: `createdAt` は作ったときのまま。`archiveDecayed` の後も `purgeMemory` の後も書き換わらない。
- *
- * **明文の約束はない**が、作成時刻が後から書き換わらないことを当然の不変条件として縛る、とクローンが判断した
- * （supersede の `createdAt` を同じ判断で縛った ADR 0592 と同じ線）。
- * Postgres の `now()` はトランザクションの開始時刻で、テストからは止められない。そこで ADR 0592 に倣い、
- * 作成の後に `created_at` を SQL で十分に過去へ書き換えてから操作する（`created_at = now()` が足されると、過去の値は残らない）。
- * Fake・InMemory の同種の歯は `fake-event-time-nul-claim-controls.test.ts`・`in-memory-fixtures-created-at-after-archive-purge.test.ts`。
+ * Postgres の `now()` はトランザクションの開始時刻でテストからは止められない。そこで、作成の後に `created_at` を SQL で十分に過去へ書き換えてから操作する
+ * （`created_at = now()` が足されると、過去の値は残らない）。
  */
 
 const ctx: Ctx = { tenantId: "created-at-after-archive-purge-tenant" };

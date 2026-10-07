@@ -15,19 +15,8 @@ import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
 /**
- * `@mnemora/core` の zod schema の定数が約束していて、どのテストも縛っていなかった制約を縛る（6回目の TSDoc の
- * 棚卸しの (b)）。振る舞いは変えていない。
- *
- * - `AttributesSchema`: キーの文字種（`/^[A-Za-z0-9_.:-]+$/`）と空のキー。
- * - `ExtractionContextSchema`: `speaker` の 1〜200 字、`messages[].text` の空文字。
- * - `RecallQuery`: `text` の空文字は `ZodError`（TSDoc）、`overFetchFactor` は有限の正数だけ（TSDoc）、`channels` の空配列。
- * - `RecallBudgetSchema` の3欄・`RecallAssociationQuery.anchorCount` は正の整数。
- * - `ClaimKeyOptions`: `knownPredicatesFromStore.limit` は正の整数、`knownPredicates`・`knownSubjects` の要素は空文字を拒む。
- * - `MemoryEventSchema`・`NewMemoryEventSchema`: `events_purged` なら `memoryId` は null。
- * - `EventFilterSchema.limit`・`EventActorSchema.id`: schema は `limit: 0`・空文字の `id` を拒むが、store（ここでは core の
- *   Fake）は受け付ける——schema と store の差を今のまま縛る。Postgres と testkit の fixture の側は
- *   `packages/postgres/src/__tests__/event-filter-actor-schema-vs-store.postgres.test.ts`。
- *
+ * `EventFilterSchema.limit`・`EventActorSchema.id` は、schema が `limit: 0`・空文字の `id` を拒むが、store（ここでは core の Fake）は受け付ける。
+ * schema と store の差を今のまま縛る。Postgres と testkit の fixture の側は `packages/postgres/src/__tests__/event-filter-actor-schema-vs-store.postgres.test.ts`。
  * `*-conformance.ts` には足していない。
  */
 

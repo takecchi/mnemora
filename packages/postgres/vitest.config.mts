@@ -51,6 +51,7 @@ const SERIAL_TEST_FILES = [
   "src/__tests__/create-index-lock-mode.postgres.test.ts",
   // ADR 0319 の 2026-09-30 追記。同じく pg_locks を読むので直列群（同じ規約）。
   "src/__tests__/trigram-index-concurrently-lock-mode.postgres.test.ts",
+  "src/__tests__/trigram-index-concurrently-edges.postgres.test.ts",
   "src/__tests__/extension-mode.postgres.test.ts",
   "src/__tests__/migrate-concurrency.test.ts",
   "src/__tests__/vector-space-concurrency.test.ts",
@@ -62,6 +63,9 @@ const SERIAL_TEST_FILES = [
   "src/__tests__/search-many-primary-key-lookup.postgres.test.ts",
   "src/__tests__/search-primary-key-lookup.postgres.test.ts",
   "src/__tests__/search-stats-presence-result-equivalence.postgres.test.ts",
+  // クラスタ全体には効かないが直列群に置く: 適合の suite を import して登録し直すので、
+  // `isolate: false` の並列群では、同じ worker で先に評価された適合ファイルの評価が残り、何も登録されない。
+  "src/__tests__/outbox-concurrent-claim-wiring.postgres.test.ts",
 ];
 
 const SHARED_SETUP_FILES = [

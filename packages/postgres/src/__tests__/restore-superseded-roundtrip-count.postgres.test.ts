@@ -18,14 +18,9 @@ import {
 /**
  * `runtime.restoreSuperseded` の往復数は、戻す群の大きさに比例しない。
  *
- * 群の復帰そのものは `MemoryStore.restoreSupersededBy?` の SQL 1本である。
- * 【実測 2026-09-27】以前は、戻した後の強化を1件ずつ `reinforce` で呼んでいたため、
- * 群が1件増えるごとに往復が2つ増えていた（群 2 / 6 / 21 件で 6 / 14 / 44 往復）。
- * 使用報告（`observe({kind:'memory_usage'})`）が Issue #874 で `reinforceMany?` に束ねたのと
- * 同じ形で束ねる。
+ * 群の復帰そのものは `MemoryStore.restoreSupersededBy?` の SQL 1本で、戻した後の強化は `reinforceMany?` に束ねる（1件ずつ `reinforce` を呼ぶと、群が1件増えるごとに往復が増える）。
  *
- * 固定するのは「群の大きさを変えても往復数が等しい」ことだけで、往復数そのもの
- * （実装の細部で動く値）は固定しない——`recall-roundtrip-count.postgres.test.ts` と同じ考え方。
+ * 固定するのは「群の大きさを変えても往復数が等しい」ことだけで、往復数そのもの（実装の細部で動く値）は固定しない。`recall-roundtrip-count.postgres.test.ts` と同じ考え方。
  */
 
 const ctx: Ctx = { tenantId: "restore-superseded-roundtrip" };

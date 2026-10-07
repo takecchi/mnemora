@@ -6,12 +6,9 @@ import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
 /**
- * ADR 0502 決めたこと3「値は trim して保存しない」を縛る（Issue #1759）。
- * 空白だけを断る検査（`NonBlankTextSchema`）が、通した値を trim して返す形（zod の `.transform`/`.trim()`）に
- * すり替わっても、以前の歯（`observe-rejects-whitespace-only-input.test.ts` は通る／断るだけを見る。
- * `observe-whitespace-only-input.postgres.test.ts` は `.trim()` してから比べる）は緑のままだった。
- * ここでは、スキーマが返す値と、保存される Observation の payload・LLM 失敗時の全文フォールバックの本文が、
- * 渡した文字列と1文字も違わないことを見る。
+ * 空白だけを断る検査（`NonBlankTextSchema`）が、通した値を trim して返す形（zod の `.transform`/`.trim()`）にすり替わっても、
+ * 通る／断るだけを見る歯や、`.trim()` してから比べる歯は緑のままなので、ここではスキーマが返す値と、保存される
+ * Observation の payload・LLM 失敗時の全文フォールバックの本文が、渡した文字列と1文字も違わないことを見る。
  */
 
 const ctx: Ctx = { tenantId: "tenant-1" };

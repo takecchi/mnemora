@@ -1,12 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { INITIAL_ANALYZE_THRESHOLD, isGeometricAnalyzeThreshold } from "../embedding-statistics.js";
 
-/**
- * (丙) Issue #360 / ADR 0194: 等比の閾値判定は純関数であり、DB を要さない。
- *
- * `INITIAL_ANALYZE_THRESHOLD`（1,000）を import して使う——マジックナンバーを
- * このテストに書き写さない（本文書の指示どおり）。
- */
 describe("isGeometricAnalyzeThreshold", () => {
   it("初項未満は false（999 は閾値ではない）", () => {
     expect(isGeometricAnalyzeThreshold(INITIAL_ANALYZE_THRESHOLD - 1)).toBe(false);

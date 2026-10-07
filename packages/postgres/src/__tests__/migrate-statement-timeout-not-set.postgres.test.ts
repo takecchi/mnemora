@@ -7,13 +7,8 @@ import { runMigrations } from "../migrate.js";
 import { requireDatabaseUrl } from "./test-db.js";
 
 /**
- * `runMigrations` は `statement_timeout` を設定しない——接続の側の値が、migration の本体にそのまま届く
- * （ADR 0552 の問8。`migrate.ts` の `runMigrations` の TSDoc。歯は ADR 0589 の P9）。
- *
- * 接続の `options` で `statement_timeout` を渡し、migration の本体の中で `current_setting` を読んで
- * 表に残す。runner が `SET statement_timeout = …`（`SET LOCAL` を含む）を挟めば、残る値が変わる。
- * 値を読むだけなので、実際に timeout を起こすための待ちは要らない。
- *
+ * `runMigrations` は `statement_timeout` を設定しない。接続の `options` で `statement_timeout` を渡し、migration の本体の中で `current_setting` を読んで表に残す。
+ * runner が `SET statement_timeout = …`（`SET LOCAL` を含む）を挟めば、残る値が変わる。値を読むだけなので、実際に timeout を起こすための待ちは要らない。
  * このファイル専用のスキーマ名で走らせ、`public` の台帳には触れない。
  */
 const SCHEMA = "mnemora_statement_timeout_c";

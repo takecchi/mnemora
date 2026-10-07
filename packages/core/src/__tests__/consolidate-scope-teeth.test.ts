@@ -7,18 +7,6 @@ import type { NewMemory } from "../memory.js";
 import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * `consolidate` の近傍探索の範囲の歯（Issue #1775 の #726・#733。ADR 0310・ADR 0317）。
- *
- * - 明示的に `consolidate({ target: { seedMemoryId } })` を呼ぶ側は、呼び手の `ctx.subjectId` で
- *   近傍の範囲を決める。**付けなければテナント全体から集まる**（`ConsolidateTarget` の doc、
- *   ADR 0317 決定2「明示の呼び出しは変えない」）。種の subject へ勝手に絞らない。
- * - `tick()` 経由では、種の `subjectId` が `null` なら今日どおり `tick()` に渡された `ctx` のまま
- *   探索する（ADR 0317 決定1）。種が見つからないジョブも `tick()` は投げない。
- *
- * `consolidate.test.ts` の既存の歯は `tick()` 経由（種の subject へ絞る側）だけを縛っていた。
- */
-
 const ctx: Ctx = { tenantId: "tenant-1" };
 const NOW = new Date("2026-06-01T00:00:00.000Z");
 
@@ -94,7 +82,6 @@ async function createEmbedded(
 describe("runtime.consolidate({ seedMemoryId }) — 近傍は呼び手の ctx の scope で集める（ADR 0317 決定2）", () => {
   async function setup() {
     const { runtime, stores } = buildRuntime();
-    // seed の digest は "seed"（FakeEmbeddingProvider で [4, 0]）。近傍は同じ向きのベクトル。
     const seed = await createEmbedded(stores, [4, 0], {
       content: "seed content",
       digest: "seed",
@@ -126,7 +113,6 @@ describe("runtime.consolidate({ seedMemoryId }) — 近傍は呼び手の ctx �
       { ...ctx, subjectId: "subject-a" },
       { target: { seedMemoryId: seed.id }, dryRun: true },
     );
-    // eligible が種1件だけになり、統合の対象にならない（dry_run には届かない）。
     expect(result.outcome).toBe("nothing_to_consolidate");
     expect(result.sources.map((s) => s.memoryId)).not.toContain(neighbor.id);
   });
@@ -188,7 +174,6 @@ describe("runtime.tick — consolidate ジョブ: 種の subjectId が null な�
       newMemory({ content: "seed content", digest: "seed", subjectId: "subject-a" }),
       ["consolidate"],
     );
-    // ジョブは残したまま、種の行だけ store から消す（payload が存在しない memoryId を指す）。
     const backing = (
       stores.memoryStore as unknown as { backing: { memories: Map<string, unknown> } }
     ).backing;

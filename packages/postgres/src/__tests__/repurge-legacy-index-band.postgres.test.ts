@@ -19,13 +19,8 @@ import {
 } from "./test-db.js";
 
 /**
- * ADR 0512: v1.0.x の `purgeMemory` は `recalls.index_band` の `digestBand` を書き換えなかった
- * （v1.1.0 の ADR 0375 決定3 から purge 時だけ書き換える）。purge より前に撃った recall の
- * `index_band` に、purge 済みの記憶の digest が残る。`scrubPurged`（purge のかけ直し）は
- * `memories`・`memory_labels`・`labels` だけを書き、ここに届かない。
- *
- * v1.0.x の purge が残した状態は、今の purge で作ったあと、`index_band` だけを purge 前の値へ
- * SQL で戻して再現する（v1.0.2 の実物で同じ形になることは ADR 0512 の「測ったこと」）。
+ * 旧版（v1.0.x）の `purgeMemory` は `recalls.index_band` の `digestBand` を書き換えなかったので、purge より前に撃った recall の `index_band` に、purge 済みの記憶の digest が残りうる。
+ * その状態は、今の purge で作ったあと、`index_band` だけを purge 前の値へ SQL で戻して再現する。
  */
 
 type Band = { digestBand: { memoryId: string; digest: string; truncated?: boolean }[] } & Record<
@@ -77,7 +72,6 @@ describe("v1.0.x の purge が recalls.index_band に残した digest は、purg
       });
     }
     await runtime.tick(ctx, { kinds: ["embed"], leaseMs: 60_000, limit: 100 });
-    // 予算に収まらなかった記憶は、返却からは落ち、目次帯（digestBand）に digest だけが載る。
     await runtime.recall(ctx, { text: "東京 会議", limit: 10, budget: { maxMemoryChars: 25 } });
     const original = await bandsOf(db, tenantId);
     const entries = original[0]!.digestBand;
@@ -118,7 +112,7 @@ describe("v1.0.x の purge が recalls.index_band に残した digest は、purg
     });
     const otherBefore = await bandsOf(db, otherTenant);
 
-    // v1.0.x の purge を再現する: 今の purge をかけ、index_band だけを purge 前の値へ戻す。
+    // 旧版の purge を再現する: 今の purge をかけ、index_band だけを purge 前の値へ戻す。
     await runtime.forget(ctx, { memoryId: target.memoryId });
     await runtime.forget(ctx, { memoryId: bystander.memoryId }); // forgotten だが未 purge
     await runtime.purge(ctx, { memoryId: target.memoryId });
@@ -126,23 +120,19 @@ describe("v1.0.x の purge が recalls.index_band に残した digest は、purg
       UPDATE recalls SET index_band = ${JSON.stringify(original[0])}::jsonb
       WHERE tenant_id = ${tenantId}
     `);
-    // 前提: v1.0.x の状態が作れている（purge 済みの記憶の digest が帯に残る）。
     expect(digestsFor(await bandsOf(db, tenantId), target.memoryId)).toEqual([target.digest]);
     const purgedRow = await db.execute(
       sql`SELECT purged_at IS NOT NULL AS purged, digest FROM memories WHERE id = ${target.memoryId}`,
     );
     expect(purgedRow.rows[0]).toMatchObject({ purged: true, digest: "[purged]" });
 
-    // dryRun は何も書かない。
     await runtime.purge(ctx, { memoryId: target.memoryId }, { dryRun: true });
     expect(digestsFor(await bandsOf(db, tenantId), target.memoryId)).toEqual([target.digest]);
 
-    // purge のかけ直し。
     const redo = await runtime.purge(ctx, { memoryId: target.memoryId });
     expect(redo.outcomes[0]?.kind).toBe("already_purged");
     const after = await bandsOf(db, tenantId);
     expect(digestsFor(after, target.memoryId)).toEqual(["[purged]"]);
-    // 帯の他のエントリ（未 purge の forgotten を含む）・件数・他の欄は、そのまま。
     expect(digestsFor(after, bystander.memoryId)).toEqual([bystander.digest]);
     expect(after[0]!.digestBand.map((e) => e.memoryId)).toEqual(
       original[0]!.digestBand.map((e) => e.memoryId),
@@ -153,7 +143,6 @@ describe("v1.0.x の purge が recalls.index_band に残した digest は、purg
     });
     expect(await bandsOf(db, otherTenant)).toEqual(otherBefore);
 
-    // べき等。
     await runtime.purge(ctx, { memoryId: target.memoryId });
     expect(await bandsOf(db, tenantId)).toEqual(after);
 

@@ -13,25 +13,11 @@ import { PostgresMemoryStore } from "../memory-store.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
 /**
- * `lexicalMatch`（= `LexicalStore` が返す `coverage`）の尺度を、3つの store を同じ入力で当てて縛る
- * （[ADR 0553](../../../../docs/decisions/0553-lexical-coverage-scale-across-stores.md)。ADR 0484 の負債1）。
- *
- * 対象: testkit の `InMemoryLexicalStore`・`PostgresLexicalStore`（tsvector）・
- * `PostgresTrigramLexicalStore`（pg_trgm）。core の `FakeLexicalStore` は InMemory と同じ式なので測らない。
- *
- * **固定するのは2種類だけである。**
- * - 式から決まる値: tsvector と InMemory の「一致した語数 ÷ 語の総数」（1/n 刻み）、
- *   trigram の日本語側の 0/1、閾値の前後での 0 と 1 の入れ替わり。
- * - 性質: 当たる語が増えれば coverage は減らない、返り値は `(coverage DESC, rank DESC)` の順、
- *   同点が出る所（単語1つのクエリ、日本語側）。
- *
- * **固定しないもの: `rank`・`word_similarity` の実数。**Postgres・pg_trgm の版で揺れうる。
- * その値は ADR 0553 の表に「測った値」として残してある。閾値の前後の入力は、`word_similarity` が
- * 閾値から {@link MARGIN} 以上離れる文面を選んであり、その前提は下の「前提検査」の it が測る
- * （揺れて前提が崩れたとき、coverage の食い違いより先にここが赤くなる）。
- *
- * SQL_ASCII の leg では `PostgresTrigramLexicalStore.create` が拒むので（ADR 0319）、trigram の組では
- * `create()` の拒否だけを確かめ、検索は飛ばす。
+ * 固定するのは、式から決まる値（tsvector と InMemory の「一致した語数 ÷ 語の総数」、trigram の日本語側の 0/1、閾値の前後での 0 と 1 の入れ替わり）と、
+ * 性質（当たる語が増えれば coverage は減らない、返り値は `(coverage DESC, rank DESC)` の順、同点が出る所）だけである。
+ * `rank`・`word_similarity` の実数は固定しない（Postgres・pg_trgm の版で揺れうる）。閾値の前後の入力は、`word_similarity` が閾値から {@link MARGIN} 以上離れる文面を選んであり、
+ * その前提は下の「前提検査」の it が測る（揺れて前提が崩れたとき、coverage の食い違いより先にここが赤くなる）。
+ * SQL_ASCII の leg では `PostgresTrigramLexicalStore.create` が拒むので、trigram の組では `create()` の拒否だけを確かめ、検索は飛ばす。
  */
 
 const ctx: Ctx = { tenantId: "lexical-coverage-scale-0553" };
@@ -109,7 +95,6 @@ async function searchRows(kit: Kit, byId: Map<string, string>, query: string): P
     coverage: h.coverage,
     rank: h.rank,
   }));
-  // 性質: 返り値は coverage 降順、同じ coverage の中では rank 降順（値は見ない）。
   for (let k = 1; k < rows.length; k++) {
     const prev = rows[k - 1]!;
     const cur = rows[k]!;
@@ -118,7 +103,6 @@ async function searchRows(kit: Kit, byId: Map<string, string>, query: string): P
       expect(prev.rank).toBeGreaterThanOrEqual(cur.rank);
     }
   }
-  // 値域 (0, 1]
   for (const r of rows) {
     expect(r.coverage).toBeGreaterThan(0);
     expect(r.coverage).toBeLessThanOrEqual(1);
@@ -168,7 +152,6 @@ for (const kind of KINDS) {
         for (const [content, c] of expected) {
           expect(got.get(content)).toBeCloseTo(c, 12);
         }
-        // 単調: 本文の語が増えた（部分集合 → 上位集合）とき coverage は減らない。
         for (const a of SUBSET_DOCS) {
           for (const b of SUBSET_DOCS) {
             if (a.every((t) => b.includes(t)) && got.has(a.join(" "))) {
@@ -193,7 +176,6 @@ for (const kind of KINDS) {
         "alpha beta": 2 / 3,
         gamma: 1 / 3,
       });
-      // 3 語中 2 語は、ちょうど 2/3（0.5 でも 1 でもない）。
       expect(coverageOf(rows)["alpha beta"]).toBe(2 / 3);
     });
 
@@ -250,7 +232,6 @@ for (const kind of KINDS) {
         "alpha beta": 1,
         "alpha alpha alpha alpha alpha alpha": 1 / 2,
       });
-      // coverage が rank より先に効く: 繰り返しの多い 1/2 の本文が、1 の本文を追い越さない。
       expect(rows[0]!.content).toBe("alpha beta");
     });
 
@@ -282,7 +263,6 @@ describe("日本語: tsvector と InMemory は引けない、trigram は引け�
     it(`${kind}: ASCII と日本語の混ざったクエリでは、日本語の部分が分母にも分子にも入らない`, async () => {
       const kit = await makeKit(kind);
       if (kit === null) return;
-      // 日本語を落とした "alpha" の1語として数える: alpha を含めば 1。
       const rows = await run(kit, ["alpha", "東京タワー", "alpha 東京タワー"], "alpha 東京");
       expectCoverage(rows, { alpha: 1, "alpha 東京タワー": 1 });
     });
@@ -324,9 +304,7 @@ describe("trigram: 日本語側の coverage は閾値で決まる 0/1 の二値"
         ).toBeGreaterThan(MARGIN);
       }
     }
-    // 大阪城を見た は「東京」に 0（閾値の遥か下）。
     expect(await ws("東京", "大阪城を見た")).toBeLessThan(0.15);
-    // 同じ文字列どうしは ちょうど 1（上の閾値 HIGH より MARGIN 以上上）。
     expect(await ws("東京", "東京")).toBeGreaterThanOrEqual(HIGH + MARGIN);
   });
 
@@ -334,7 +312,6 @@ describe("trigram: 日本語側の coverage は閾値で決まる 0/1 の二値"
     const kit = await makeKit("trigram");
     if (kit === null) return;
     const rows = await run(kit, ["東京タワーに行った", "東京", "大阪城を見た"], "東京");
-    // 東京 は word_similarity が 1、東京タワーに行った は中間。どちらも coverage は同じ 1。
     expectCoverage(rows, { 東京: 1, 東京タワーに行った: 1 });
   });
 
@@ -371,10 +348,8 @@ describe("trigram: 日本語側の coverage は閾値で決まる 0/1 の二値"
   });
 
   it("閾値が 0.9 と 1 の間でも、その値で切る（0.9 で頭打ちにしない）", async () => {
-    // 0.9〜1 の間の閾値を縛る歯（ADR 0589 の TR2）。上の HIGH（0.85）と 1 の歯だけでは、
-    // 閾値を 0.9 で頭打ちにしても通っていた。
+    // 上の HIGH（0.85）と 1 の歯だけでは、閾値を 0.9 で頭打ちにしても通る。0.9〜1 の間の閾値を縛る。
     const BAND = 0.97;
-    // 漢字だけの 15 文字。末尾に1文字足した本文の word_similarity は 15/16（PostgreSQL 17 で 0.9375）。
     const term = "北海道札幌市中央区大通西四丁目";
     const near = `${term}一`;
     const mixedNear = `alpha ${near}`;
@@ -392,7 +367,6 @@ describe("trigram: 日本語側の coverage は閾値で決まる 0/1 の二値"
     expect(v, `word_similarity = ${v}`).toBeGreaterThan(0.9 + 0.02);
     expect(v, `word_similarity = ${v}`).toBeLessThan(BAND - 0.02);
     const rows = await run(kit, [term, near, mixedNear], `alpha beta gamma ${term}`);
-    // near は日本語側が閾値の下なので返らない。mixedNear は ASCII 側の 1/3 で返る（日本語側の 1 にならない）。
     expectCoverage(rows, { [term]: 1, [mixedNear]: 1 / 3 });
   });
 
@@ -409,7 +383,6 @@ describe("trigram: 日本語側の coverage は閾値で決まる 0/1 の二値"
       alpha: 1 / 3,
       東京: 1,
     });
-    // coverage 1 の3件が、1/3 の alpha より先に並ぶ。
     expect(
       rowsDefault
         .slice(0, 3)

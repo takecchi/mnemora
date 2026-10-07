@@ -22,20 +22,6 @@ import {
   TEST_EMBEDDING_SPACE,
 } from "./test-db.js";
 
-/**
- * `consolidate`・`reflect` の LLM を待つ間に、eligible の1件が `forget`（と `purge`）されたときの
- * 今の振る舞いを縛る（Issue #1226、ADR 0375 決定7、クローン miku の判断）。
- *
- * ⚠ **2026-09-30 訂正**: このファイルは元々「今の振る舞い」（直っていない状態）を縛って
- * いたが、もう成り立たない。**今は、LLM が返った直後・書き込みの直前に eligible を
- * 読み直し、1件でも forgotten なら書き込みを一切打ち切る**（`Runtime.consolidate`・
- * `Runtime.reflect` の doc の 2026-09-30 追記、`docs/memory-model.md` の該当箇所参照）。
- * 忘れさせた（消した）記憶の本文から新しい Memory が作られることはもう無い。
- * Postgres と testkit の fixture で同じ（testkit 側は runtime 自身の読み直しだけが保護。
- * `MemoryStore.createMemoryWithOutbox`/`supersedeWithNewMemories` の `opts.abortIfForgotten`
- * の doc コメント参照）。
- */
-
 let release: () => void = () => {};
 let reached: () => void = () => {};
 let gate: Promise<void> = Promise.resolve();
@@ -160,7 +146,6 @@ for (const [name, makeKit] of KITS) {
         hold.resume();
         const result = await pending;
 
-        // 何も書かれていない——打ち切り。
         expect(result.outcome).toBe("aborted_source_forgotten");
         expect(result.atomicity).toBe("not_attempted");
         expect(result.consolidatedMemoryId).toBeNull();
@@ -170,11 +155,9 @@ for (const [name, makeKit] of KITS) {
           { memoryId: b.id, kind: "not_attempted" },
         ]);
 
-        // A は forget/purge した状態のまま（この呼び出しでは何も動いていない）。
         const stillA = await kit.memoryStore.get(ctx, a.id);
         expect(stillA?.status).toBe("forgotten");
         expect(stillA?.purgedAt !== null).toBe(withPurge);
-        // B は superseded へ動いていない——統合が一切起きていない証拠。
         const stillB = await kit.memoryStore.get(ctx, b.id);
         expect(stillB?.status).toBe("active");
         expect(stillB?.supersededById).toBeNull();
@@ -193,7 +176,6 @@ for (const [name, makeKit] of KITS) {
         hold.resume();
         const result = await pending;
 
-        // 何も書かれていない——打ち切り。
         expect(result.outcome).toBe("aborted_source_forgotten");
         expect(result.reflectedMemoryId).toBeNull();
         expect(result.llmCalls).toBe(1);
@@ -202,7 +184,6 @@ for (const [name, makeKit] of KITS) {
           { memoryId: b.id, kind: "eligible" },
         ]);
 
-        // B は今どおり active のまま（reflect は元々既存行を動かさないが、念のため）。
         const stillB = await kit.memoryStore.get(ctx, b.id);
         expect(stillB?.status).toBe("active");
       });

@@ -6,15 +6,9 @@ import type { NewMemory } from "../memory.js";
 import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * `runtime.restoreSuperseded` の強化の束ね方（`MemoryStore.reinforceMany?`）。
- *
- * - 束ねた強化の口が在れば、群全体で1回だけ呼ぶ（群の大きさに比例して往復を増やさない。
- *   Postgres の往復数の歯は `packages/postgres/src/__tests__/restore-superseded-roundtrip-count.postgres.test.ts`）。
- * - 束ねた強化が失敗したら、1件ずつの強化へ戻る——強化の失敗は、失敗した要素の
- *   `reinforceError` にだけ入り、outcome は `restored` のまま（以前からの1件ごとの約束。
- *   `restore-superseded.test.ts` の「reinforce が例外を投げても…」と同じ約束を、束ねた経路でも見る）。
- */
+// Postgres の往復数の歯は `packages/postgres/src/__tests__/restore-superseded-roundtrip-count.postgres.test.ts`。
+// 強化の失敗は、失敗した要素の `reinforceError` にだけ入り、outcome は `restored` のまま
+// （`restore-superseded.test.ts` と同じ約束を、束ねた経路でも見る）。
 
 const ctx: Ctx = { tenantId: "tenant-1" };
 const NOW = new Date("2026-06-01T00:00:00.000Z");
@@ -114,7 +108,6 @@ describe("restoreSuperseded は群の強化を reinforceMany に束ねる", () =
         expect(outcome).not.toHaveProperty("reinforceError");
       }
     }
-    // 復帰そのもの（status）は強化の失敗に関係なく成立している。
     for (const id of ids) {
       expect((await stores.memoryStore.get(ctx, id))?.status).toBe("active");
     }

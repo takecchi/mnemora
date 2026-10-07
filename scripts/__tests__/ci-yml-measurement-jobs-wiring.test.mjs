@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { DRAFT_ONLY_JOB_IF, isDraftOnlyJobIf } from "../ci-draft-skip-lib.mjs";
 import { blankOutWorkflowComments } from "../workflow-comment-blank-lib.mjs";
 
 /**
@@ -56,12 +57,13 @@ function extractJobBlock(text, jobId) {
 
 /**
  * ステップレベルの `if:` は見ない（7本には正当な `if: always()` が多数ある）。
+ * job レベルでも draft の PR でだけ飛ばす1行（`ci-draft-skip-lib.mjs`）は数えない。
  *
  * @param {string} jobBlock `extractJobBlock` が返すブロック
  * @returns {boolean}
  */
 function hasJobLevelIf(jobBlock) {
-  return /^ {4}if:/m.test(jobBlock);
+  return jobBlock.split("\n").some((line) => /^ {4}if:/.test(line) && !isDraftOnlyJobIf(line));
 }
 
 /**
@@ -214,6 +216,30 @@ describe("名指しした測定ジョブに job レベルの if: が無い(Issue
     ].join("\n");
     const blockB = extractJobBlock(syntheticStepLevelOnly, "synthetic-job-step-level-only");
     expect(hasJobLevelIf(blockB)).toBe(false);
+  });
+
+  it("🔴 陰性対照: draft だけを飛ばす条件は検出されず、そこへ条件を1つ足した形は検出される", () => {
+    const withDraftOnly = [
+      "  synthetic-draft-only:",
+      DRAFT_ONLY_JOB_IF,
+      "    runs-on: ubuntu-latest",
+      "  next-job:",
+    ].join("\n");
+    expect(hasJobLevelIf(extractJobBlock(withDraftOnly, "synthetic-draft-only"))).toBe(false);
+
+    const withExtraCondition = [
+      "  synthetic-draft-plus:",
+      `${DRAFT_ONLY_JOB_IF} && github.event_name == 'push'`,
+      "    runs-on: ubuntu-latest",
+      "  next-job:",
+    ].join("\n");
+    expect(hasJobLevelIf(extractJobBlock(withExtraCondition, "synthetic-draft-plus"))).toBe(true);
+  });
+
+  it.each(MEASUREMENT_JOB_IDS)("%s は draft の PR では飛ばす(実行枠を空ける)", (jobId) => {
+    const block = extractJobBlock(workflow, jobId);
+    expect(block, `ci.yml に \`  ${jobId}:\` ジョブが無い`).not.toBeNull();
+    expect(block.split("\n")).toContain(DRAFT_ONLY_JOB_IF);
   });
 });
 

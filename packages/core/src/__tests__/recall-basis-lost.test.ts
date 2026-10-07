@@ -6,16 +6,9 @@ import type { Memory, NewMemory } from "../memory.js";
 import type { InferredProvenance } from "../provenance.js";
 import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
+import { createObservedMemory } from "./observed-memory.js";
 
-/**
- * Issue #883（[ADR 0342](../../../docs/decisions/0342-recalled-memory-basis-lost.md)）:
- * `RecalledMemory.basisLost` — `provenanceKind === "inferred"` の記憶が、根拠
- * （`basis.memoryIds`）を失っている（存在しない/forgotten/purge済み）ときに立つ印。
- *
- * docs/memory-model.md §2 が約束していた「根拠を失った推論に印を付けて返す」の実装。
- * `recall-exclude-provenance-filter.test.ts` と同じ理由で `@mnemora/testkit` に依存しない
- * （`runtime-fakes.ts` 冒頭のコメント参照）。
- */
+/** `@mnemora/testkit` には依存しない（`runtime-fakes.ts` 冒頭と同じ理由）。 */
 
 const ctx: Ctx = { tenantId: "tenant-1" };
 const NOW = new Date("2026-06-01T00:00:00.000Z");
@@ -96,7 +89,8 @@ async function createEmbeddedMemory(
   vector: number[],
   overrides: Partial<NewMemory> = {},
 ): Promise<Memory> {
-  const memory = await stores.memoryStore.createMemory(
+  const memory = await createObservedMemory(
+    stores.memoryStore,
     ctx,
     newMemory({ embeddingStatus: "ready", ...overrides }),
   );
@@ -206,13 +200,8 @@ describe("recall() — RecalledMemory.basisLost（Issue #883、ADR 0342）", () 
   });
 
   it("🔴 status が active のまま purgedAt だけが（不整合に）設定されている basis にも basisLost: true が付く（purgedAt 判定そのものの歯）", async () => {
-    // 公開経路（`runtime.purge`）は forgotten からしか purge できない（docs/memory-model.md
-    // §11 行10）ので、この組み合わせ（status='active' かつ purgedAt が非null）は
-    // `runtime.forget`→`runtime.purge` を素直に呼ぶだけでは作れない。
-    // `contested-pair-invariant` 系の既存の歯（`recall-pipeline.test.ts`）が
-    // `MemoryStore` を直接叩いて不整合な状態を作るのと同じ手法——`FakeMemoryStore.createMemory`
-    // は `input.purgedAt` をそのまま受け取って書き込む（`runtime-fakes.ts` 参照）ので、
-    // ここでも直接その状態を作り、forgotten 判定を経由せずに purgedAt 判定だけを噛ませる。
+    // forgotten→purge の公開経路では status='active' かつ purgedAt 非null を作れないため、
+    // `FakeMemoryStore.createMemory` に `purgedAt` を直接渡して作る（forgotten 判定を経由させない）。
     const { runtime, stores } = buildRuntime();
     const basis = await stores.memoryStore.createMemory(
       ctx,
@@ -230,18 +219,7 @@ describe("recall() — RecalledMemory.basisLost（Issue #883、ADR 0342）", () 
   });
 });
 
-/**
- * (d) 往復数の歯: `MemoryStore.getMany` の呼び出し回数を数える。基準（inferred 無し）を
- * `getManyCallCount` の基準値とし、inferred が1件（basis 1件）でも複数件（basis 多数）でも
- * 「+1」のまま増えないことを確認する（PR 本文・Issue #883 の決定4「集めた id を1回だけ
- * `getMany` する」の実測）。
- *
- * `association: null`・contested companion 無し・`scope.attributes` 無し、という条件を
- * 揃えて、他の経路が呼ぶ `getMany`（段1候補フェッチ以外に、連想枠・同伴取得・属性再検査が
- * それぞれ独立に `getMany` を呼びうる）を混ぜないようにする——`recall-runtime.ts` の
- * `getMany` 呼び出し箇所は grep で4箇所確認済み（候補フェッチ・連想枠・同伴取得・
- * 目次帯の属性再検査）。
- */
+/** `association: null`・contested companion 無し・`scope.attributes` 無しにして、他の経路の `getMany` を混ぜない。 */
 function countingMemoryStore(store: MemoryStore): {
   wrapped: MemoryStore;
   getManyCallCount: () => number;
@@ -267,7 +245,6 @@ function countingMemoryStore(store: MemoryStore): {
 
 describe("recall() — RecalledMemory.basisLost の往復数（Issue #883、ADR 0342 決定4）", () => {
   it("inferred が無ければ getMany は候補フェッチの1回のみ、1件の basis でも多数の basis でも+1回のまま増えない", async () => {
-    // 基準: inferred を含まない recall。
     const baselineStores = createFakeRuntimeStores();
     const { wrapped: baselineStore, getManyCallCount: baselineCount } = countingMemoryStore(
       baselineStores.memoryStore,
@@ -279,7 +256,6 @@ describe("recall() — RecalledMemory.basisLost の往復数（Issue #883、ADR 
     const baselineCalls = baselineCount();
     expect(baselineCalls).toBe(1);
 
-    // 1件の inferred、basis 1件。
     const oneBasisStores = createFakeRuntimeStores();
     const { wrapped: oneBasisStore, getManyCallCount: oneBasisCount } = countingMemoryStore(
       oneBasisStores.memoryStore,
@@ -297,7 +273,6 @@ describe("recall() — RecalledMemory.basisLost の往復数（Issue #883、ADR 
     await oneBasisRuntime.recall(ctx, { vector: [1, 0], association: null });
     expect(oneBasisCount()).toBe(baselineCalls + 1);
 
-    // 5件の inferred、それぞれ basis 5件（合計25件のユニークな basis memoryId）。
     const manyBasisStores = createFakeRuntimeStores();
     const { wrapped: manyBasisStore, getManyCallCount: manyBasisCount } = countingMemoryStore(
       manyBasisStores.memoryStore,

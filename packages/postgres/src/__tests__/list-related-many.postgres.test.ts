@@ -13,15 +13,7 @@ import {
   TEST_EMBEDDING_SPACE,
 } from "./test-db.js";
 
-/**
- * Issue #1449 の案A（ADR 0402）: `PostgresRelationStore.listRelatedMany` が本物の Postgres で
- * (1) `listRelated` と同じ結果を返し、(2) 起点の数に依らず1文で済み、(3) `Runtime` の段3が
- * 1段1文になる（無い store では起点ごとに1文のまま）ことを縛る。
- *
- * 往復数は `restore-superseded-roundtrip-count.postgres.test.ts` と同じく `Client.prototype.query` を
- * 数える。ただし数えるのは `memory_relations` を `from_memory_id` で引く SELECT だけ（他の文の数は
- * 実装の細部で動くので固定しない）。
- */
+/** 往復数は `Client.prototype.query` を数える。数えるのは `memory_relations` を `from_memory_id` で引く SELECT だけで、他の文の数は実装の細部で動くので固定しない。 */
 
 const TENANT = "list-related-many-tenant";
 const ctx: Ctx = { tenantId: TENANT };
@@ -173,7 +165,6 @@ describe("PostgresRelationStore.listRelatedMany（本物の Postgres）", () => 
       expect(norm(many[i]!)).toEqual(norm(await relationStore.listRelated(ctx, id)));
       expect(many[i]).toHaveLength(ids.length - 1);
     }
-    // 大文字の綴りで渡した id も、その位置に同じ集合が返る。
     expect(norm(many[ids.length]!)).toEqual(norm(many[3]!));
     expect(many[ids.length + 1]).toEqual([]);
     expect(many[ids.length + 2]).toEqual([]);

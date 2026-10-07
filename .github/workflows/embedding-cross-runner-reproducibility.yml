@@ -3,6 +3,7 @@ name: "embedding 出力のランナー間再現性を測る（測るだけ。門
 on:
   workflow_dispatch: {}
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
     # ⛔ 他の PR で勝手に24脚が走らないよう、この workflow 自身と、この workflow だけが使う
     # 新しい script に絞る（packages/ や examples/ の変更では走らない——既定の CI の振る舞いを
     # 変えないため）。それ以外で測りたいときは workflow_dispatch で手動に起こす。
@@ -12,11 +13,18 @@ on:
       - "scripts/measure-cross-runner-embedding-fingerprint.mjs"
       - "scripts/compare-cross-runner-embedding-fingerprints.mjs"
 
+# 同じ PR の実行は後勝ちにする(新しい push が来たら古い24脚を取り消す)。式は ci.yml と同じ形に
+# 揃えてある(この workflow は push で起きないので、手動起動は run_id に落ちて互いに切り合わない)。
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'push' && github.ref || github.head_ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name != 'push' }}
+
 permissions:
   contents: read
 
 jobs:
   measure:
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     name: "脚 runner=${{ matrix.runner }} numThreads=${{ matrix.numThreads }} rep=${{ matrix.rep }}"
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 20
@@ -87,7 +95,7 @@ jobs:
   compare:
     name: "全脚を基準脚と突き合わせ、群ごとに要約する(測るだけ。門にはしない。常に成功する。Issue #565)"
     needs: [measure]
-    if: always()
+    if: always() && (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
     runs-on: ubuntu-latest
     steps:
       - name: Checkout

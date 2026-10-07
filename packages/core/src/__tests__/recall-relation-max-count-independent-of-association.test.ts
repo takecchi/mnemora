@@ -8,16 +8,7 @@ import { createRuntime } from "../runtime.js";
 import { defaultDecayStrategy } from "../strategies/decay.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * Issue #1734（2026-09-30 マージ分の確かめ直し）の #1470 のすり抜け M11（ADR 0396・`RecallQuery.relationMaxCount` の TSDoc）。
- * 約束: `relationMaxCount` は `association.maxCount`（連想枠）とは別の欄。**連想枠には効かず、連想枠の上限もこの欄に連動しない**。
- * `relationMaxCount` を省略したとき、群ごとの同伴の上限は既定の10で、`association.maxCount` を渡してもそれには従わない。
- * 既存の歯（省略時の1バイト不変の対照）は、`association` を渡さない recall しか見ていなかったので、
- * 省略時の既定を `association.maxCount` に差し替えても赤にならなかった。
- *
- * ⚠ 逆の向き（`relationMaxCount` を指定しても連想枠の件数が変わらない）は、この歯では縛っていない
- * （報告のすり抜けは省略時の既定の側だけ）。
- */
+/** `relationMaxCount` を省略したとき群ごとの上限は既定の10で、`association.maxCount` には従わない。`association` を渡さない recall だけでは、省略時の既定を差し替えても赤にならない。逆向き（`relationMaxCount` を指定しても連想枠の件数が変わらない）は縛っていない。 */
 const ctx: Ctx = { tenantId: "tenant-relation-vs-association" };
 const NOW = new Date("2026-06-01T00:00:00.000Z");
 

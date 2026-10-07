@@ -23,15 +23,6 @@ import { rowToOutboxJob, toPgTimestamp, type OutboxJobRow } from "../mapping.js"
 import { registerEmbeddingSpace } from "../vector-space.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
-/**
- * `packages/testkit` の適合テストを、本物の Postgres 実装に対して実行する
- * （roadmap.md 段階2の完了条件: 「testkit の適合テストが postgres 実装に対してすべて通る」）。
- *
- * 擬似物（in-memory）ではなく実際に繋がっていることは、`docs/decisions/0001-orm-drizzle.md`
- * が要求する外部キー・一意制約・partial index が実際に効くかどうかで検証される
- * （in-memory 実装は制約を一切模していないため、この種の不整合はここでしか見つからない）。
- */
-
 describeMemoryStoreConformance({
   name: "postgres",
   createStore: async () => {
@@ -41,9 +32,7 @@ describeMemoryStoreConformance({
   },
   prepareRecallId: async (ctx: Ctx) => {
     const { db } = await getTestClient();
-    // Issue #298 / ADR 0155: `returned_memories` は NOT NULL・DEFAULT 無し
-    // （意図的——「決定」節「DEFAULT を置かない」参照）。このフィクスチャは
-    // `recall_usages.recall_id` の外部キーの相手が要るだけで内訳の中身は問わないため、
+    // `returned_memories` は NOT NULL・DEFAULT 無し。このフィクスチャは `recall_usages.recall_id` の外部キーの相手が要るだけなので、
     // 「内訳ありの新規行」の最小形 `{ breakdownCaptured: true, memories: [] }` を渡す。
     const result = await db.execute(sql`
       INSERT INTO recalls (id, tenant_id, query, usage, index_band, returned_memories)
@@ -55,18 +44,14 @@ describeMemoryStoreConformance({
     `);
     return (result.rows[0] as unknown as { id: string }).id;
   },
-  // ⚠ 生 SQL ではなく PostgresEventStore.list を通す。
-  // このフックは「イベントが積まれていないこと」を測る道具であり、**形式不正な id を
-  // 渡される検査でも使われる**（updateStatusWithEvent の歯）。生 SQL のままだと
-  // memory_id が uuid 型なのでドライバのパースエラーになり、**測りたい差ではなく
-  // フィクスチャ側の都合で赤くなる**（実際に CI でそうなった）。adapter が読むのと
-  // 同じ経路で読めば、その経路のガード（isUuidLike）がそのまま効く。
+  // ⚠ 生 SQL ではなく PostgresEventStore.list を通す。このフックは形式不正な id を渡される検査でも使われ、
+  // 生 SQL のままだと memory_id が uuid 型なのでドライバのパースエラーになり、測りたい差ではなくフィクスチャ側の都合で赤くなる。
+  // adapter が読むのと同じ経路で読めば、その経路のガード（isUuidLike）がそのまま効く。
   listEventsForMemory: async (ctx: Ctx, memoryId: string) => {
     const { db } = await getTestClient();
     return new PostgresEventStore(db).list(ctx, { memoryId });
   },
-  // ADR 0079: 積み直した `embed` ジョブを、運搬役が実際に claim できるところまで見る。
-  // `leaseMs` はこの検査の中だけの値であり、実運用のリース長とは無関係（ADR 0032）。
+  // 積み直した `embed` ジョブを、運搬役が実際に claim できるところまで見る。`leaseMs` はこの検査の中だけの値。
   claimEmbedJobs: async (ctx: Ctx, now: Date) => {
     const { db } = await getTestClient();
     return new PostgresOutboxStore(db).claimBatch(ctx, {
@@ -77,22 +62,12 @@ describeMemoryStoreConformance({
       leaseMs: 60_000,
     });
   },
-  // Issue #134 / ADR 0100: PostgresMemoryStore は supersedeWithNewMemories を実装している。
   supportsSupersedeWithNewMemories: true,
-  // Issue #1226 / ADR 0375 決定7: PostgresMemoryStore は createMemoryWithOutbox/
-  // supersedeWithNewMemories の opts.abortIfForgotten（SELECT … FOR UPDATE による見直し）を
-  // 実装している。
   supportsAbortIfForgotten: true,
-  // ADR 0420 / ADR 0546: PostgresMemoryStore は opts.abortIfSuperseded・opts.abortIfAllConflicted
-  // （`createMemoryWithOutbox`・`supersedeWithNewMemories`・`createMemoriesWithOutboxAndEvents`）を実装している。
   supportsAbortIfSuperseded: true,
   supportsAbortIfAllConflicted: true,
-  // Issue #210 / ADR 0115: PostgresMemoryStore は purgeExpiredEvents を実装している。
   supportsPurgeExpiredEvents: true,
-  // ADR 0404: PostgresMemoryStore は purgeExpiredRecalls を実装している。
   supportsPurgeExpiredRecalls: true,
-  // ADR 0354 / ADR 0546: PostgresMemoryStore は purgeExpiredEventsByRetention を実装している。保持期間は
-  // PostgresTenantSettingsStore.setEventRetention（`tenant_settings` の行）で設定する。
   supportsPurgeExpiredEventsByRetention: true,
   setEventRetention: async (ctx: Ctx, retention) => {
     const { db } = await getTestClient();
@@ -102,12 +77,9 @@ describeMemoryStoreConformance({
     const { db } = await getTestClient();
     return new PostgresEventStore(db).list(ctx, { kind: "events_purged" });
   },
-  // ADR 0114: PostgresMemoryStore は archiveDecayed を実装している。
   supportsArchiveDecayed: true,
-  // Issue #198 / ADR 0124: PostgresMemoryStore は purgeMemory を実装している。
   supportsPurgeMemory: true,
-  // ADR 0437 決定3: PostgresMemoryStore は scrubPurged を実装している。v1.0.x の purge が残した状態
-  // （purged_at だけ立ち、tags・attributes・claim key・memory_labels が残る）は、生 SQL で作る。
+  // v1.0.x の purge が残した状態（purged_at だけ立ち、tags・attributes・claim key・memory_labels が残る）は、生 SQL で作る。
   supportsScrubPurged: true,
   seedLegacyPurgedRow: async (ctx: Ctx, memoryId: string) => {
     const { db } = await getTestClient();
@@ -117,48 +89,27 @@ describeMemoryStoreConformance({
       WHERE tenant_id = ${ctx.tenantId} AND id = ${memoryId}
     `);
   },
-  // Issue #197 / ADR 0134: PostgresMemoryStore は markContestedPair を実装している。
   supportsMarkContestedPair: true,
-  // Issue #197 / ADR 0150: PostgresMemoryStore は resolveContestedPair を実装している。
   supportsResolveContestedPair: true,
-  // 本 PR: PostgresMemoryStore は restoreSupersededBy を実装している。
   supportsRestoreSupersededBy: true,
-  // Issue #515: PostgresMemoryStore は previewRestoreSupersededBy を実装している。
   supportsPreviewRestoreSupersededBy: true,
-  // Issue #515 方向①、ADR 0258: PostgresMemoryStore は onlyMemoryIds フィルタを
-  // 実装している。
   supportsOnlyMemoryIdsFilter: true,
-  // Issue #201 / ADR 0318: PostgresMemoryStore は listLabels/registerLabel を
-  // 実装している。
   supportsLabels: true,
-  // Issue #372: PostgresMemoryStore は findActiveByClaimKey を実装している。
   supportsFindActiveByClaimKey: true,
-  // Issue #933 案2 / ADR 0378: PostgresMemoryStore は findContestedByClaimKey を実装している。
   supportsFindContestedByClaimKey: true,
-  // Issue #691続き / ADR 0329: PostgresMemoryStore は listActiveClaimPredicates を
-  // 実装している。
   supportsListActiveClaimPredicates: true,
-  // Issue #1412 コメント1 / ADR 0373: PostgresMemoryStore は resolveOrphanedContested を
-  // 実装している。
   supportsResolveOrphanedContested: true,
-  // Issue #1207 / ADR 0383: PostgresMemoryStore は eraseTenant を実装している。
   supportsEraseTenant: true,
-  // Issue #207/#933 PR2 / ADR 0381: PostgresMemoryStore は markContestedGroup /
-  // resolveContestedGroup を実装している。
   supportsMarkContestedGroup: true,
   supportsResolveContestedGroup: true,
-  // ADR 0410（穴 D-3）: PostgresMemoryStore は createMemoriesWithOutboxAndEvents を実装している。
   supportsCreateMemoriesWithOutboxAndEvents: true,
-  // ADR 0416: supersedeWithNewMemories の opts.buildCreatedEvent（created を同じトランザクションで積む）。
   supportsSupersedeCreatedEvents: true,
   listRelationsForMemory: async (ctx: Ctx, memoryId: string) => {
     const { db } = await getTestClient();
     return new PostgresRelationStore(db).listRelated(ctx, memoryId);
   },
-  // ADR 0384 案C: `aggregateScope(..., { scopeAggregate: "skip" })` が
-  // `GROUP BY subject_id`（`agg` CTE、件数集計本体）を含む SQL を実際に発行しないことを
-  // 計測する。`recall.postgres.test.ts`「aggregateScope は単一の SQL 往復で完結する」と
-  // 同じ `pool.query` の差し替えによる計測手法。
+  // `aggregateScope(..., { scopeAggregate: "skip" })` が `GROUP BY subject_id`（`agg` CTE）を含む SQL を発行しないことを、
+  // `pool.query` の差し替えで計測する。
   countScopeAggregateQueries: async (fn) => {
     const { pool } = await getTestClient();
     let count = 0;
@@ -182,7 +133,6 @@ describeMemoryStoreConformance({
   },
 });
 
-// Issue #207/#933 PR2（ADR 0381）: `RelationStore` の Postgres 実装。
 describeRelationStoreConformance({
   name: "postgres",
   implementsListRelatedMany: true,
@@ -245,24 +195,15 @@ describeVectorStoreConformance({
     );
     return memory.id;
   },
-  // ADR 0065: `PostgresVectorStore` は `memory_embeddings_<space>` が
-  // `registerEmbeddingSpace` で事前に作られている前提で動く（`PostgresVectorStore` の
-  // クラス doc）。既定の space（`TEST_EMBEDDING_SPACE`）は `getTestClient()` が登録済みだが、
-  // 「space 分離」の歯が使う2つ目の space はここで登録する。`registerEmbeddingSpace` は
-  // `CREATE TABLE IF NOT EXISTS`/`CREATE INDEX IF NOT EXISTS`（advisory lock で排他）なので
-  // 何度呼んでもべき等——毎 `it()` で呼んでも問題ない。テーブルの行は
-  // `resetTestDatabase()` の `TRUNCATE ... CASCADE` が `memories` への外部キー経由で
-  // 巻き込んで空にする（`DOMAIN_TABLES` に明示していなくても、CASCADE は FK 参照元を
-  // 自動的に含める）。
+  // 既定の space は `getTestClient()` が登録済みだが、「space 分離」の歯が使う2つ目の space はここで登録する。
+  // `registerEmbeddingSpace` は `IF NOT EXISTS` でべき等なので、毎 `it()` で呼んでも問題ない。
+  // テーブルの行は `resetTestDatabase()` の `TRUNCATE ... CASCADE` が `memories` への外部キー経由で空にする。
   prepareEmbeddingSpace: async (space) => {
     const { pool } = await getTestClient();
     await registerEmbeddingSpace(pool, space);
   },
-  // Issue #200 / ADR 0151: PostgresVectorStore は getVectors を実装している。
   supportsGetVectors: true,
-  // Issue #1207 / ADR 0383: PostgresVectorStore は eraseTenant を実装している。
   supportsEraseTenant: true,
-  // Issue #377 / Issue #1412 の続き: PostgresVectorStore は searchMany を実装している。
   supportsSearchMany: true,
 });
 
@@ -273,9 +214,7 @@ describeLexicalStoreConformance({
     const { db } = await getTestClient();
     return new PostgresLexicalStore(db);
   },
-  // `LexicalStore` は upsert/delete を持たない（`interfaces/lexical-store.ts` のクラス doc）
-  // ——`memories.content` の上に張った式索引の上で `search` するだけなので、ここでの
-  // 書き込み口は `PostgresMemoryStore.createMemory` の一択（`prepareMemory` の doc 参照）。
+  // `LexicalStore` は upsert/delete を持たない。`memories.content` の上の式索引を `search` するだけなので、書き込み口は `createMemory` の一択。
   prepareMemory: async (ctx: Ctx, attrs) => {
     const { db } = await getTestClient();
     const store = new PostgresMemoryStore(db);
@@ -333,17 +272,11 @@ describeOutboxStoreConformance({
       : null;
   },
   /**
-   * 並行 claim の歯（ADR 0206）を走らせる。`pg.Pool` 上の `Promise.all` は、別の
-   * バックエンドで実際に時間的に重なることを実測してある【2026-09-17: 別 PID
-   * （29583/29584 など）・実行区間が重複・`pool.options.max` の既定値は 10】。
-   *
    * ⚠ この pool は `getTestClient()` がプロセス内で使い回す単一のものである。
    * 並行数が `max` を超えると、超えたぶんは接続待ちになり並行度が落ちる。
    */
   supportsRealConcurrency: true,
-  // Issue #1207 / ADR 0383: PostgresOutboxStore は eraseTenant を実装している。
   supportsEraseTenant: true,
-  // ADR 0404: PostgresOutboxStore は purgeCompletedJobs を実装している。
   supportsPurgeCompletedJobs: true,
 });
 
@@ -362,21 +295,15 @@ describeTenantSettingsStoreConformance({
       ON CONFLICT (tenant_id) DO UPDATE SET default_half_life_hours = EXCLUDED.default_half_life_hours
     `);
   },
-  // ADR 0165 決めたこと13（Issue #305）: PostgresTenantSettingsStore は4メソッドとも実装している。
   supportsDecayClock: true,
-  // ADR 0197: `PostgresTenantSettingsStore.setDefaultHalfLifeRecalls` は本番の書き込み口
-  // そのものになったため、生 SQL の UPSERT で行を作る代わりにそれを直接呼ぶ——`setDecayClock`
-  // に対して分離した hook を持たない（`store.setDecayClock!` を直接呼ぶ）のと同じ理由。
-  // `PostgresTenantSettingsStore` はステートレス（`db` クライアントを包むだけ）なので、
-  // ここで新しいインスタンスを作っても `createStore()` が返したものと同じ DB 行を指す。
+  // 本番の書き込み口を直接呼ぶ（生 SQL の UPSERT で行を作らない）。
+  // `PostgresTenantSettingsStore` はステートレスなので、新しいインスタンスを作っても `createStore()` が返したものと同じ DB 行を指す。
   setDefaultHalfLifeRecalls: async (ctx: Ctx, recalls: number) => {
     const { db } = await getTestClient();
     await new PostgresTenantSettingsStore(db).setDefaultHalfLifeRecalls(ctx, recalls);
   },
-  // `getActivitySeq` は読み出し専用（ADR 0165 決めたこと2・5・13）——進める唯一の口は
-  // `PostgresMemoryStore.createRecall({ advanceActivityClock: true })` であり、同じ DB
-  // （`tenant_activity`）を共有するので、`TenantSettingsStore` とは別 adapter でも
-  // 書いた値がそのまま読み直せる。
+  // `getActivitySeq` は読み出し専用で、進める唯一の口は `createRecall({ advanceActivityClock: true })`。
+  // 同じ DB（`tenant_activity`）を共有するので、別 adapter でも書いた値がそのまま読み直せる。
   advanceActivitySeq: async (ctx: Ctx) => {
     const { db } = await getTestClient();
     await new PostgresMemoryStore(db).createRecall(ctx, {
@@ -398,10 +325,6 @@ describeTenantSettingsStoreConformance({
       advanceActivityClock: true,
     });
   },
-  // [ADR 0353](../../../docs/decisions/0353-activity-counting-per-call.md)
-  // （Issue #338）: `advanceActivitySeq`（上）と同じ形——`tenant_subject_activity` は
-  // `PostgresMemoryStore.createRecall({ advanceActivityClock: { scope: "subject", subjectId } })`
-  // 経由でだけ進む。
   advanceSubjectActivitySeq: async (ctx: Ctx, subjectId: string) => {
     const { db } = await getTestClient();
     await new PostgresMemoryStore(db).createRecall(ctx, {
@@ -423,20 +346,15 @@ describeTenantSettingsStoreConformance({
       advanceActivityClock: { scope: "subject", subjectId },
     });
   },
-  // Issue #201 / ADR 0318: PostgresTenantSettingsStore は getTaxonomyMode/setTaxonomyMode
-  // を実装している。
   supportsTaxonomyMode: true,
-  // Issue #1207 / ADR 0383: PostgresTenantSettingsStore は eraseTenant を実装している。
   supportsEraseTenant: true,
 });
 
 /**
- * Issue #1040（PR #1052）の約束: SQL に `Date` を渡す口は、すべて `toPgTimestamp`（UTC の文字列）を通す。
- * node-postgres は `Date` のパラメータをプロセスのローカル時刻の文字列にして時差を分に切り捨てるので、
- * 素の `Date` が `pg` まで届くと、地方平均時の時代の日時が秒単位でずれて保存される。
- * 個別の口の歯（`timestamp-write-process-tz`）は memory の insert と event の append/list だけを見るので、
- * 適合テストが一巡する間に発行されたすべてのクエリの束縛値を見て、`Date` のインスタンスが1つでも
- * 届いたら、その SQL の頭を名指しして落とす。
+ * SQL に `Date` を渡す口は、すべて `toPgTimestamp`（UTC の文字列）を通す。node-postgres は `Date` のパラメータを
+ * プロセスのローカル時刻の文字列にして時差を分に切り捨てるので、素の `Date` が `pg` まで届くと、
+ * 地方平均時の時代の日時が秒単位でずれて保存される。個別の口の歯は memory の insert と event の append/list だけを見るので、
+ * 適合テストが一巡する間に発行されたすべてのクエリの束縛値を見て、`Date` のインスタンスが1つでも届いたら、その SQL の頭を名指しして落とす。
  */
 const rawDateParamSites = new Set<string>();
 const originalClientQuery = Client.prototype.query;

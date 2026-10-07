@@ -21,15 +21,13 @@ import { PostgresRelationStore } from "../relation-store.js";
 import { getTestClient, resetTestDatabase, TEST_EMBEDDING_SPACE } from "./test-db.js";
 
 /**
- * ADR 0521: 操作の対象の id（記憶・observation・recall・outbox のジョブ）を大文字で渡したときの振る舞いを、
+ * 操作の対象の id（記憶・observation・recall・outbox のジョブ）を大文字で渡したときの振る舞いを、
  * `@mnemora/postgres` を正として、testkit の `InMemory*`・core の Fake が同じにするための 3 実装の突き合わせ。
- * ADR 0446 が「既存の違い」としていた点（Postgres は大文字の uuid を同じ行として受け、fixture は別 id として
- * 不在扱いにする）を、ADR 0521 で fixture 側を Postgres に揃えた。
  *
  * 各 `it` は 1 つの口について、(1) Postgres で大文字が小文字と同じ結果（返り値・最終状態・積まれたイベントの
  * `memoryId` が小文字）になること＝基準、(2) InMemory・Fake の大文字・小文字が、Postgres と同じになること、を見る。
  * 返り値の中の id の綴りの echo（呼び出し側が渡した綴りで返る outcome の `memoryId`）と、順序を規定しない配列の並びは
- * 比べない。conformance suite には何も足していない（ADR 0434 決定5。約束を足すのはオーナーの判断）。
+ * 比べない。
  */
 
 const ctx = { tenantId: "tenant-1" };
@@ -367,8 +365,8 @@ const cases: Case[] = [
         .updateStatus(ctx, e.ids[0], "superseded", { supersededById: up(e.ids[1]) })
         .then((m: any) => ({ id: m.id, by: m.supersededById })),
   },
-  // 大文字小文字だけが違う自己置換（ADR 0558）。Postgres は断る（`normalizeUuidCase` で両側を畳む）。
-  // core の Fake も ADR 0557 で両側を `normId` で畳んで断る（InMemory は ADR 0558）。
+  // 大文字小文字だけが違う自己置換。Postgres は断る（`normalizeUuidCase` で両側を畳む）。
+  // core の Fake も InMemory も両側を畳んで断る。
   {
     name: "edge.updateStatus(self supersededById UP, id lo)",
     run: (e) =>
@@ -401,7 +399,7 @@ const cases: Case[] = [
         eventFor(e.ids[0]!, "superseded"),
       ),
   },
-  // superseded 以外の status に自分自身を supersededById に付ける（ADR 0558 の歯の穴）。断る文面は
+  // superseded 以外の status に自分自身を supersededById に付ける。断る文面は
   // 「must not be set unless status is "superseded"」で、自己置換の文面にならない（Postgres と揃える）。
   {
     name: "edge.updateStatus(active + self supersededById lo)",
@@ -836,8 +834,8 @@ async function observe(be: string, c: Case, variant: "lo" | "UP"): Promise<strin
   return `${res} || ${await states(e)}`;
 }
 
-// Fake は全文の語彙一致を持たず、text だけの recall は候補を返さない（ADR 0492 の fuzz も `fcc` は `excludeMemoryIds` の除外だけを見る）。
-// 自己置換の 4 件（ADR 0558）は、core の Fake も ADR 0557 で断るようになったので、ここには入れない。
+// Fake は全文の語彙一致を持たず、text だけの recall は候補を返さない（fuzz の `fcc` は `excludeMemoryIds` の除外だけを見る）。
+// 自己置換の 4 件は、core の Fake も断るので、ここには入れない。
 const SKIP_FAKE = new Set(["rt.findCorrectionCandidates(exclude)", "rt.applyCorrection"]);
 
 describe("操作の対象の id を大文字で渡したとき、3 実装が同じになる（ADR 0521）", () => {
@@ -860,9 +858,8 @@ describe("操作の対象の id を大文字で渡したとき、3 実装が同�
   }
 });
 
-// ADR 0556: ADR 0521 が残した 2 点。(1) `abortIfSuperseded` に大文字の id を渡したとき（testkit の InMemory が見落としていた）、
-// (2) `EventStore.get` に大文字のイベント id を渡したとき（testkit・Fake が null を返していた）。
-// Fake は `abortIf*` を持たない（ADR 0493。`createFakeRuntimeStores().memoryStore` は渡された opts を見ない）ので、(1) は pg と testkit だけで比べる。
+// (1) `abortIfSuperseded` に大文字の id を渡したとき、(2) `EventStore.get` に大文字のイベント id を渡したとき。
+// Fake は `abortIf*` を持たない（`createFakeRuntimeStores().memoryStore` は渡された opts を見ない）ので、(1) は pg と testkit だけで比べる。
 function newMemoryInput(e: Env, hash: string): any {
   return {
     tenantId: ctx.tenantId,
@@ -909,7 +906,7 @@ async function observeAbortIfSuperseded(
     status: "superseded",
     supersededById: e.ids[0],
   });
-  // ADR 0580: "ABSENT" は、どの記憶の id でもない（形は正しい）uuid。`src` は使わない。
+  // "ABSENT" は、どの記憶の id でもない（形は正しい）uuid。`src` は使わない。
   const id = variant === "ABSENT" ? ABSENT_ID : variant === "UP" ? up(src.id) : src.id;
   // 書かれたかどうかは、観測値に紐づく抽出キー付きの記憶と、積まれたイベントの数で見る。
   await mkObs(e);
@@ -1002,8 +999,8 @@ describe("EventStore.get に大文字のイベント id を渡したとき、3 �
   });
 });
 
-// ADR 0568: ADR 0556 の歯が通した変異（テナントの検査の緩め・畳み・status の広げ）と、綴り違いの同じ id を渡したときの `changed` を塞ぐ陽性対照。
-// どれも、Postgres の現物を基準に testkit（と、`EventStore.get` は Fake）が同じになることを見る。基準は走らせて確かめた値で、推測ではない。
+// テナントの検査の緩め・畳み・status の広げ、綴り違いの同じ id を渡したときの `changed` を塞ぐ陽性対照。
+// どれも、Postgres の現物を基準に testkit（と、`EventStore.get` は Fake）が同じになることを見る。
 type AbortEntry =
   "createMemoryWithOutbox" | "createMemoriesWithOutboxAndEvents" | "supersedeWithNewMemories";
 const ABORT_ENTRIES: AbortEntry[] = [
@@ -1231,8 +1228,8 @@ describe("abortIfSuperseded: 綴り違いの同じ id を渡したとき、`chan
   }, 120_000);
 });
 
-// ADR 0580: ADR 0568 の監査（変異試験）で生き残った A19・A19b——testkit の `assertNoneSuperseded` が「存在しない id」を superseded 扱い
-// （投げる・`changed` に積む）にしても、どの歯も赤くならなかった。Postgres は存在しない id では投げず、書く（基準は走らせて確かめた値）。
+// testkit の `assertNoneSuperseded` が「存在しない id」を superseded 扱い（投げる・`changed` に積む）にすると赤くなる。
+// Postgres は存在しない id では投げず、書く。
 describe("abortIfSuperseded: 存在しない id は断らず、書く。testkit は Postgres と同じ（ADR 0580）", () => {
   for (const entry of ABORT_ENTRIES) {
     it(

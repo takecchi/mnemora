@@ -6,16 +6,9 @@ import { PostgresTenantSettingsStore } from "../tenant-settings-store.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
 /**
- * `docs/memory-model.md` の `CREATE TABLE` に書かれた列の既定（`DEFAULT …`）と、列の値を名前で縛る
- * `CHECK (col IN (…))` の名前の集合と、列の型・NULL 可否が、マイグレーションを当てた本物の DB と一致することを縛る。**doc の値は `docs/memory-model.md` を実行時に読んで**、
- * **実装の値は DB の `information_schema.columns`・`pg_constraint` から**取って突き合わせる。
- *
- * - doc の DDL は、後から migration で足した列をすべては写していない（同文書の 2026-09-27 追記）。
- *   なので、**doc に書かれた列だけ**を見る。doc に書かれた列が DB に無ければ赤にする。
- * - DB に表そのものが無いもの（空間ごとに登録時に作る埋め込みの表の例、Phase 2 の表）は飛ばす。
- *   全部を飛ばしていないこと（何かを見ていること）は `it` の中で確かめる。
- * - 比べるのは既定の式（型の後ろの `::text` などの cast は外す）と、CHECK の値の名前の集合である。
- *   列の数・値の数は比べない（名前の集合が一致すれば足りる）。
+ * doc の DDL は、後から migration で足した列をすべては写していないので、doc に書かれた列だけを見る。doc に書かれた列が DB に無ければ赤にする。
+ * DB に表そのものが無いもの（空間ごとに登録時に作る埋め込みの表の例、Phase 2 の表）は飛ばす。全部を飛ばしていないこと（何かを見ていること）は `it` の中で確かめる。
+ * 比べるのは既定の式（型の後ろの cast は外す）と、CHECK の値の名前の集合である。列の数・値の数は比べない。
  */
 
 const MEMORY_MODEL_DOC = readFileSync(
@@ -189,7 +182,6 @@ describe("docs/memory-model.md の CREATE TABLE の列の既定は、マイグ�
     const actual = new Map(rows.rows.map((r) => [`${r.table_name}.${r.column_name}`, r]));
 
     const compared = docColumns.filter((d) => tablesInDb.has(d.table));
-    // 全部を飛ばしていないこと（memories・observations・recalls など主要な表の列を見ていること）。
     expect(compared.length).toBeGreaterThan(50);
     const mismatches = compared
       .map((d) => {

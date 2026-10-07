@@ -9,21 +9,10 @@ import {
 } from "../pgvector-capability.js";
 
 /**
- * `assertPgvectorCapabilityRow`（Issue #1301 / ADR 0367）を **DB 無しで**検査する歯。
- *
- * ## なぜ版の文字列（`extversion`）ではなく、この形の行で表すか
- *
- * `../pgvector-capability.ts` のファイル doc コメントが実測とともに説明しているとおり、
- * 判定は `pg_settings`（`vartype`/`enumvals`）だけを見る——`extversion` はエラーメッセージに
- * 添えるだけで、合否には一切関与しない。この歯はその境界線自体も固定する
- * （「`vartype`/`enumvals` が同じでも `extversion` が変われば判定が変わる」ことが
- * 無いことを、`extversion` だけを変えた行のペアで示す）。
- *
- * 本物の PostgreSQL 17.11 + pgvector 0.8.0 に対する実測（ADR 0367 決定2）で得られた
- * 実際の行の形を、下の `PGVECTOR_0_8_0_ROW` に固定してある。
+ * 判定は `pg_settings`（`vartype`/`enumvals`）だけを見る。`extversion` はエラーメッセージに添えるだけで、合否には一切関与しない。この歯はその境界線自体も固定する（`vartype`/`enumvals` が同じでも `extversion` が変われば判定が変わることが無いことを、`extversion` だけを変えた行のペアで示す）。
+ * 本物の PostgreSQL + pgvector 0.8.0 に対する実測で得られた実際の行の形を、下の `PGVECTOR_0_8_0_ROW` に固定してある。
  */
 
-/** 実測（PostgreSQL 17.11 + pgvector 0.8.0、自分専用の `initdb` インスタンス）どおりの行。 */
 const PGVECTOR_0_8_0_ROW: PgvectorCapabilityRow = {
   extversion: "0.8.0",
   vartype: "enum",
@@ -36,9 +25,7 @@ describe("PGVECTOR_CAPABILITY_QUERY: SQL 文そのものの形", () => {
     expect(PGVECTOR_CAPABILITY_QUERY).toContain("pg_extension");
     expect(PGVECTOR_CAPABILITY_QUERY).toContain("pg_settings");
     expect(PGVECTOR_CAPABILITY_QUERY).toContain("hnsw.iterative_scan");
-    // 能力検査は SET を一切発行しない——`hnsw-ef-search-window-ceiling.test.ts` 検査2
-    // （ADR 0284、「SET している箇所は vector-store.ts の search() 1箇所だけ」）を
-    // 壊さないことの直接の裏付け。
+    // 能力検査は SET を一切発行しない。`hnsw-ef-search-window-ceiling.test.ts` が見る「SET している箇所は `search()` の1箇所だけ」を壊さないことの直接の裏付け。
     expect(PGVECTOR_CAPABILITY_QUERY).not.toMatch(/\bSET\b/i);
   });
 });
@@ -79,10 +66,7 @@ describe("assertPgvectorCapabilityRow: 判定は pg_settings の行だけで決�
   });
 
   it("extversion だけを変えても、vartype/enumvals が対応していれば判定は変わらない（版の文字列を見ていないことの直接証明）", () => {
-    // 実際の pgvector にはこの extversion は存在しないが、「判定が extversion を
-    // 一切参照しない」ことを示すための合成値である——`extversion` は "0.7.4"
-    // （本来なら対応していないはずの古い版）のままでも、`vartype`/`enumvals`
-    // だけで通ることを見る。
+    // 実際の pgvector にはこの extversion は存在しない合成値。「判定が extversion を一切参照しない」ことを示すため、本来なら対応していないはずの古い版のままでも、`vartype`/`enumvals` だけで通ることを見る。
     expect(() =>
       assertPgvectorCapabilityRow({
         extversion: "0.7.4",

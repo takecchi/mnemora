@@ -5,21 +5,6 @@ import { buildNewMemoryFixture } from "@mnemora/testkit";
 import { PostgresMemoryStore } from "../memory-store.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
-/**
- * Issue #1734（2026-09-30 マージ分の確かめ直し）で、PR #1458（ADR 0390）の変異試験が**すり抜けた**次の2本を
- * 塞ぐ歯。担当はクローン（miku）の判断で進めている作業であり、オーナーの判断ではない。
- * `memory-store-conformance.ts` には足さない（Issue #809 の方針）。
- *
- * 1. 「FILTER から `has_qualifying_label` を外す」（`scope.labels` に合わない行も数える）。
- *    `aggregate-scope-exclude-provenance.postgres.test.ts` は `scope.labels` を渡していなかった
- *    （ADR 0390 の「確かめていないこと」も未固定と書いていた）。archived・別 subject・期間の外の行も
- *    同じ形で見る。
- * 2. 「`scopeAggregate: "skip"` のとき、除外を指定しても集計の SQL を1本余計に撃つ」
- *    （ADR 0390 決定5「skip のときは SQL も返り値も変わらない」。返り値の側は既存の歯が見ている）。
- *    skip で撃つ SQL は、digestBand があれば digest を引く1本だけ、無ければ0本で、除外の指定の有無で
- *    1文字も変わらない。
- */
-
 const ctx: Ctx = { tenantId: "agg-exclude-prov-scope-tenant" };
 const consolidated: Provenance = { kind: "consolidated", sources: ["a", "b"] };
 const IN_PERIOD = new Date("2026-06-10T00:00:00.000Z");
@@ -76,15 +61,12 @@ describe("PostgresMemoryStore.aggregateScope × excludeProvenanceKinds: 絞り�
   }
 
   async function seed() {
-    // 数える: スコープ内・active・ready・除外 kind
     await put({ provenance: consolidated });
     await put({ provenance: consolidated });
-    // 数えない（絞りで落ちる行。どれも除外 kind・ready）
     await put({ provenance: consolidated, status: "archived" });
     await put({ provenance: consolidated, subjectId: "s2" });
     await put({ provenance: consolidated, recordedAt: BEFORE_PERIOD });
     await put({ provenance: consolidated, tags: ["beta"] });
-    // 除外 kind ではない行（スコープ内）
     await put();
   }
 
@@ -100,7 +82,6 @@ describe("PostgresMemoryStore.aggregateScope × excludeProvenanceKinds: 絞り�
       excludeProvenanceKinds: ["consolidated"],
     });
     expect(aggregate.excludedProvenanceIndexedCount).toBe(2);
-    // 対照: スコープ内の行は除外 kind の2件と、除外 kind でない1件（totalInScope の意味は変えない）
     expect(aggregate.totalInScope).toBe(3);
     expect(aggregate.filteredArchived.count).toBe(1);
     expect(aggregate.filteredTaxonomy?.count).toBe(1);

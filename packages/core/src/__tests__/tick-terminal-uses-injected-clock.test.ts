@@ -6,13 +6,8 @@ import { createRuntime } from "../runtime.js";
 import { defaultDecayStrategy } from "../strategies/decay.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * `tick` がジョブを終端に落とす（`complete`・`fail`）とき、その時刻（`completedAt`・`failedAt`）は
- * 注入した時計（`RuntimeDeps.clock`）の値である。省くと store が壁時計で埋めるので、
- * 壁時計と違う時刻の時計を注入して見分ける。
- *
- * 失敗の終端は2か所ある（handler が投げた失敗と、対応していない kind）。どちらも見る。
- */
+// 壁時計と違う時刻の時計を注入して見分ける（省くと store が壁時計で埋めるため）。
+// 失敗の終端は2か所ある（handler が投げた失敗と、対応していない kind）。どちらも見る。
 
 const ctx: Ctx = { tenantId: "tenant-1" };
 /** 壁時計（いま）より十分に未来。claim の対象（`availableAt <= now`）にはなる。 */

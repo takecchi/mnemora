@@ -13,8 +13,6 @@ import type { MemoryId } from "../ids.js";
 import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/** `excludeMemoryIds` の端（穴探し56巡目）。 */
-
 const ctx: Ctx = { tenantId: "tenant-1" };
 const NOW = new Date("2026-06-01T00:00:00.000Z");
 
@@ -65,12 +63,7 @@ function countingLlm(): LLMProvider & { calls: number } {
   return provider;
 }
 
-/**
- * `recall()` が実際に ANN 段まで進んだかどうかを、埋め込みの呼び出し回数で数えるための
- * 薄いラッパー（歯7用）。`recall()` は text クエリにつき `embeddingProvider.embed` を
- * 必ず1回呼ぶ（`recall-runtime.ts` の該当箇所）——`RangeError` で早期に落ちた呼び出しは
- * この回数を1つも増やさないはずである。
- */
+/** `recall()` が ANN 段まで進んだかを埋め込みの呼び出し回数で数える薄いラッパー。`RangeError` で早期に落ちた呼び出しはこの回数を増やさない。 */
 function countingEmbeddingProvider(inner: EmbeddingProvider): EmbeddingProvider & {
   calls: number;
 } {
@@ -104,11 +97,7 @@ function buildRuntime(llmProvider?: LLMProvider) {
   return { runtime, stores, embeddingSpy };
 }
 
-/**
- * `FakeEmbeddingProvider` は文字列長・'a' の数から決定的にベクトルを作る
- * （`runtime-fakes.ts` 参照）。`"seed"` → `[4, 0]`——`consolidate.test.ts` の
- * `{ seedMemoryId }` の歯と同じ約束事を流用する。
- */
+/** `FakeEmbeddingProvider` は文字列長・'a' の数から決定的にベクトルを作る。`"seed"` → `[4, 0]`。 */
 const QUERY_TEXT = "seed";
 
 async function createCandidate(

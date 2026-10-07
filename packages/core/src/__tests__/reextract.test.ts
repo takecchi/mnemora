@@ -2,18 +2,8 @@ import { describe, expect, it } from "vitest";
 import { classifySupersedeFailure } from "../strategies/reextract.js";
 import { MemoryStatusConflictError } from "../interfaces/memory-store.js";
 
-/**
- * `classifySupersedeFailure`（ADR 0030、安全弁3）の純関数テスト。
- *
- * `reextract` が `updateStatus(..., { expectedStatus: "active" })` に投げられた例外を
- * どう仕分けるかがこの関数の全責務——DB を持たないここで直接変異を撃てる
- * （`decay.test.ts`・`scoring.test.ts` と同じ「純関数の戦略」）。
- *
- * **⚠ ここが芯である**: 競合でない例外を skip に化けさせて飲み込むと、
- * TOCTOU の穴を別の場所に開け直すことになる（`reextract.ts` の doc コメント参照）。
- * だから「`MemoryStatusConflictError` → skip」「それ以外 → null（呼び出し側が再送出）」の
- * 2つを両方とも歯にする。
- */
+// ⚠ ここが芯: 競合でない例外を skip に化けさせて飲み込むと、TOCTOU の穴を別の場所に開け直すことになる。
+// だから「`MemoryStatusConflictError` → skip」「それ以外 → null（呼び出し側が再送出）」の2つを両方とも歯にする。
 describe("classifySupersedeFailure", () => {
   it("MemoryStatusConflictError を skip（status_changed_concurrently）に変換し、observedStatus を運ぶ", () => {
     const error = new MemoryStatusConflictError("mem-1", "active", "forgotten");

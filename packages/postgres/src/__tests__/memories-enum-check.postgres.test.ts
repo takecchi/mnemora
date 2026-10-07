@@ -6,16 +6,6 @@ import { PostgresMemoryStore } from "../memory-store.js";
 import { PostgresEventStore } from "../event-store.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
-/**
- * `memories` の列挙の列（`status`・`digest_source`・`embedding_status`・`provenance_kind`）に、型の
- * 列挙に無い値（型を外した呼び出し・JavaScript からの呼び出し）を渡すと、Postgres は CHECK 制約
- * （`memories_status_check` など）で拒み、何も書かない。testkit の fixture も同じく拒み、何も書かない。
- *
- * 【実測 2026-09-27】以前は testkit の `InMemoryMemoryStore` がどの値も受け付けて記録していた
- * （`createMemory` の4欄・`updateStatus`・`updateStatusWithEvent`・`setEmbeddingStatus`・
- * `resolveContestedPair`）。
- */
-
 interface Kit {
   memoryStore: MemoryStore;
   eventStore: EventStore;
@@ -60,8 +50,7 @@ describe.each(KITS)("memories の列挙の列の検査（%s）", (_name, build) 
     ["provenance.kind", { provenance: { kind: BOGUS } }],
   ];
   for (const [field, override] of createCases) {
-    // 1行の INSERT なので、Postgres で何も書かないのは自明。fixture 側は DB 無しの歯
-    // （`packages/testkit/src/__tests__/in-memory-memory-enum-check.test.ts`）が件数で縛る。
+    // 1行の INSERT なので、Postgres で何も書かないのは自明。fixture 側は DB 無しの歯が件数で縛る。
     it(`createMemory は列挙に無い ${field} を拒む`, async () => {
       const { memoryStore } = await build();
       await expect(

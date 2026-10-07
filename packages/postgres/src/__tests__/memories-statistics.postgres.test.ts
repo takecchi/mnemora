@@ -24,36 +24,12 @@ import {
 import { dropTempDatabase } from "./temp-database.js";
 
 /**
- * Issue #269 / ADR 0221: ADR 0194 が `memory_embeddings_*` に入れた「等比の閾値越えの
- * ときだけ ANALYZE を撃つ」自動発火を、JOIN の相手側である `memories` にも足す歯。
+ * `PostgresVectorStore.search()` は埋め込み表を `memories` と `JOIN` してテナントで絞るので、`memories` 側の統計欠如はプランを誤らせうる。
+ * この歯は、その JOIN を含む本物の `search()` の SQL を直接 EXPLAIN する（`embedding-statistics.postgres.test.ts` は埋め込み表側の統計が主題なので JOIN を含まない SQL を見る）。
  *
- * ## なぜこの歯が要るか(実測は Issue #269 / #418)
- *
- * `PostgresVectorStore.search()` は埋め込み表を `memories` と `JOIN` してテナントで
- * 絞る(`vector-store.ts` 参照)。ADR 0194 は埋め込み表側の統計だけを守り、
- * `memories` 側の統計欠如は「引き受けた負債」として残していた——実際に CI
- * (`pgvector/pgvector:pg17`)が、使い捨てデータベース(`memories` に一度も
- * `ANALYZE` が走らない)でこの JOIN のプランを誤らせることを実測で示した
- * (ADR 0194「CI が実際に教えたこと」)。
- *
- * この歯は、その JOIN を含む本物の `search()` の SQL を直接 EXPLAIN する
- * (`embedding-statistics.postgres.test.ts` の (甲) が CI の実測を受けて
- * 「等価クエリ」に後退させたのと逆に、本 PR はまさに `memories` 側の統計が
- * 主題なので、JOIN を含む本物の SQL を検査対象にする)。
- *
- * ## autovacuum を切る理由
- *
- * `ALTER TABLE memories SET (autovacuum_enabled = false)` を投入前に打つ。そうしないと
- * 「upsert 内蔵の ANALYZE が効いた」のか「autovacuum がたまたま拾った」のか区別が
- * 付かない(Issue #269 の実測: autovacuum は既定のままだと、初回投入中に拾うまでの
- * 時間が試行によって 7秒 〜 挿入完了(約60秒)後まで大きくばらつく——歯としては
- * 決定的でなければならない)。
- *
- * ## 使い捨てデータベースを使う理由
- *
- * このテストファイル専用の使い捨てデータベースを使う——他のテストファイルが
- * 積んだ行や `ANALYZE` のノイズから隔離するため(`embedding-statistics.postgres.test.ts`
- * / `dedicated-schema.postgres.test.ts` と同じ作法)。
+ * `ALTER TABLE memories SET (autovacuum_enabled = false)` を投入前に打つ。切らないと「自動発火の ANALYZE が効いた」のか「autovacuum がたまたま拾った」のか区別が付かず、
+ * 拾うまでの時間が試行によって大きくばらつくので、歯として決定的でなくなる。
+ * このテストファイル専用の使い捨てデータベースを使うのは、他のテストファイルが積んだ行や `ANALYZE` のノイズから隔離するため。
  */
 
 const TEST_DATABASE = "mnemora_memories_statistics_test";
@@ -83,12 +59,6 @@ async function disableAutovacuum(pool: Pool, table: string): Promise<void> {
   await pool.query(`ALTER TABLE ${table} SET (autovacuum_enabled = false)`);
 }
 
-// `captureQuery` はかつてこのファイル固有のローカル関数だったが、`Client.prototype.query`
-// をパッチする版（`captureClientQuery`、ADR 0284）へ寄せて test-db.ts に集約した——
-// `pool.query` をパッチする旧実装は、ADR 0284 で `db.transaction()` 経由に変わった
-// `PostgresVectorStore.search()` のクエリを「観測されなかった」で捕まえ損ねる
-// （`pool.connect()` が返す生の `pg.Client` の上で発行されるため）。
-
 describe("PostgresMemoryStore.createMemory と memories の ANALYZE 自動発火(Issue #269)", () => {
   let client: PostgresClient | undefined;
 
@@ -110,14 +80,9 @@ describe("PostgresMemoryStore.createMemory と memories の ANALYZE 自動発火
     }
   }, 30_000);
 
-  // Issue #1419: (甲)(乙) は同じ describe・同じ DB を共有するので、`memories-statistics.ts`
-  // モジュールスコープの書き込みカウンタも共有してしまう——既定の宣言順どおり
-  // (甲) が先に走ると (乙) の開始時点でカウンタが既に4,000になり、(乙) が跨ぐつもりの
-  // 閾値（1,000）を素通りしたまま「跨いでも ANALYZE を撃たない」が緑になる（判定
-  // ロジック自体が一度も走らない空振り）。各 it() の頭でカウンタを 0 に戻し、
-  // どちらが先に走っても「このプロセスの memories カウンタは0から始まる」という
-  // 各 it() 自身の前提を実際に保証する（丙側の describe は元から自分の `beforeAll` で
-  // 同じことをしている——ここでも揃える）。
+  // (甲)(乙) は同じ describe・同じ DB を共有するので、`memories-statistics.ts` のモジュールスコープの書き込みカウンタも共有してしまう。
+  // 宣言順どおり (甲) が先に走ると (乙) の開始時点でカウンタが既に4,000になり、(乙) が跨ぐつもりの閾値（1,000）を素通りしたまま「跨いでも ANALYZE を撃たない」が緑になる（判定ロジックが一度も走らない空振り）。
+  // 各 it() の頭でカウンタを 0 に戻す。
   beforeEach(() => {
     resetMemoriesWriteCounterForTesting();
   });
@@ -133,25 +98,17 @@ describe("PostgresMemoryStore.createMemory と memories の ANALYZE 自動発火
     const space = uniqueSpace("crossing");
     await registerEmbeddingSpace(pool, space);
     const table = embeddingSpaceTableName(space);
-    // 埋め込み表側は ADR 0194 の仕組みに任せる(この歯が検査したいのは memories 側のみ)。
 
-    // migration 0005（`0005_analyze_memories.sql`）が新規インストール時に空の
-    // memories へ無条件で ANALYZE を打つため、ここで一度控えておく——「ループの後に
-    // last_analyze が非nullである」だけでは、それが 0005 の ANALYZE を見ているだけなのか
-    // このループ中に本 PR のコードが実際に撃ったものなのかを区別できない（後述）。
+    // migration 0005 が新規インストール時に空の memories へ無条件で ANALYZE を打つので、ループの前の last_analyze を控えておく。
+    // 「ループの後に last_analyze が非 null」だけでは、0005 の ANALYZE を見ているだけなのか、このループ中に撃ったものなのかを区別できない。
     const statBeforeLoop = await pool.query(
       `SELECT last_analyze FROM pg_stat_user_tables WHERE relname = 'memories'`,
     );
     const lastAnalyzeBeforeLoop = statBeforeLoop.rows[0]?.last_analyze;
 
-    // Issue #1419: beforeEach でカウンタが0から始まることは保証したが、それだけでは
-    // 「ループの間に本当に閾値（1,000/2,000/4,000）を跨いだか」までは分からない
-    // （たとえば rowCount を先々誰かが閾値未満へ減らしても、この歯は気付かず緑のまま
-    // になりうる）。ループの前後のカウンタを控え、実際に閾値ちょうどの値へ着地した
-    // ことまで assert する——判定ロジックが空振りしていないことの直接の証拠。
+    // ループの前後のカウンタを控え、実際に閾値ちょうどの値へ着地したことまで assert する（判定ロジックが空振りしていないことの直接の証拠）。
     const counterBeforeLoop = peekMemoriesWriteCounterForTesting();
 
-    // 4,000 = 4 * INITIAL_ANALYZE_THRESHOLD(等比の閾値ちょうど)。
     const rowCount = 4 * INITIAL_ANALYZE_THRESHOLD;
     const rand = seededRandom(20260917269);
     for (let i = 0; i < rowCount; i += 1) {
@@ -173,18 +130,13 @@ describe("PostgresMemoryStore.createMemory と memories の ANALYZE 自動発火
         "そうでなければ maybeAnalyzeMemoriesAfterWrite の閾値判定が一度も走っていない",
     ).toBe(true);
 
-    // 事前条件の確認: autovacuum を切ってあるので、last_analyze がループの前後で
-    // 動いたなら、それは本 PR のコード（maybeAnalyzeMemoriesAfterWrite）が撃った
-    // 以外にありえない（migration 0005 の ANALYZE は beforeAll の時点で1回だけ
-    // 起き、ループ中には起きない）。
+    // 事前条件: autovacuum を切ってあるので、last_analyze がループの前後で動いたなら、それは `maybeAnalyzeMemoriesAfterWrite` が撃った以外にありえない。
     const statResult = await pool.query(
       `SELECT last_analyze, last_autoanalyze FROM pg_stat_user_tables WHERE relname = 'memories'`,
     );
     expect(statResult.rows[0]?.last_analyze).not.toEqual(lastAnalyzeBeforeLoop);
     expect(statResult.rows[0]?.last_autoanalyze).toBeNull();
 
-    // JOIN を含む本物の search() SQL を捕まえて EXPLAIN する(#418/ADR 0194 が壊れると
-    // 実測した、まさにその形)。
     const queryVector = [0.5, 0.5, 0.5];
     const captured = await captureClientQuery(
       (text) => text.includes(table) && /order by/i.test(text),
@@ -194,8 +146,6 @@ describe("PostgresMemoryStore.createMemory と memories の ANALYZE 自動発火
           filter: { tenantId: TENANT },
         }),
     );
-    // 本番と同じ transaction の文脈（ADR 0284 の SET LOCAL）で EXPLAIN する
-    // （test-db.ts の explainCaptured の doc コメント参照）。
     const plan = await explainCaptured(pool, captured);
     expect(plan).toMatch(/Index Scan.*using idx_memory_embeddings_hnsw/);
     expect(plan).not.toMatch(/Seq Scan/);
@@ -208,10 +158,7 @@ describe("PostgresMemoryStore.createMemory と memories の ANALYZE 自動発火
 
     await disableAutovacuum(pool, "memories");
 
-    // 事前に、このプロセスの memories カウンタを一切進めない形で行を作る
-    // (生 SQL で直接 INSERT する——createMemory() を使うとカウンタが進んでしまい、
-    // 「まだ createMemory していないのに統計だけ大きい」という(乙)が検査したい
-    // 状況を作れない)。
+    // 事前に、このプロセスの memories カウンタを一切進めない形で行を作る（生 SQL で直接 INSERT する）。`createMemory()` を使うとカウンタが進み、「まだ書いていないのに統計だけ大きい」という状況を作れない。
     const preExistingCount = INITIAL_ANALYZE_THRESHOLD + 100; // 1,100
     for (let i = 0; i < preExistingCount; i += 1) {
       await pool.query(
@@ -227,7 +174,6 @@ describe("PostgresMemoryStore.createMemory と memories の ANALYZE 自動発火
       );
     }
 
-    // ここで初めて、テスト側が明示的に ANALYZE を撃つ((乙) の前提条件そのもの)。
     await pool.query(`ANALYZE memories`);
     const beforeStat = await pool.query(
       `SELECT last_analyze FROM pg_stat_user_tables WHERE relname = 'memories'`,
@@ -235,15 +181,9 @@ describe("PostgresMemoryStore.createMemory と memories の ANALYZE 自動発火
     const lastAnalyzeBefore = beforeStat.rows[0]?.last_analyze;
     expect(lastAnalyzeBefore).not.toBeNull();
 
-    // このプロセスの memories カウンタは、上の beforeEach で0にリセット済み
-    // ——ちょうど INITIAL_ANALYZE_THRESHOLD (1,000)回だけ createMemory を呼び、
-    // 閾値を跨がせる。reltuples(≈1,100、上のテーブル全行数と一致)はこのプロセスの
-    // 累計(1,000)以上なので、guard により ANALYZE は撃たれないはずである。
-    //
-    // Issue #1419: 「カウンタが0から始まる」を beforeEach に任せるだけでは、
-    // 万一 beforeEach が効かなかった場合に閾値そのものを跨がず判定ロジックが
-    // 一度も走らないまま緑になる、という空振りが再発しうる。ループの前後の
-    // カウンタを控え、実際に閾値ちょうどへ着地したことまで assert する。
+    // ちょうど `INITIAL_ANALYZE_THRESHOLD`（1,000）回だけ createMemory を呼び、閾値を跨がせる。
+    // reltuples（≈1,100）はこのプロセスの累計（1,000）以上なので、guard により ANALYZE は撃たれないはずである。
+    // ループの前後のカウンタを控え、実際に閾値ちょうどへ着地したことまで assert する（判定ロジックが一度も走らないまま緑になる空振りを防ぐ）。
     const counterBeforeLoop = peekMemoriesWriteCounterForTesting();
     const rand = seededRandom(20260917001);
     for (let i = 0; i < INITIAL_ANALYZE_THRESHOLD; i += 1) {
@@ -276,22 +216,9 @@ describe("PostgresMemoryStore.createMemory と memories の ANALYZE 自動発火
 });
 
 /**
- * Issue #269 の 2026-09-17T09:11:04Z コメント: `supersedeWithNewMemories` も
- * `memories` へ `INSERT` するが、ADR 0221 が入れたフック
- * (`maybeAnalyzeMemoriesAfterWrite`)を呼んでいなかった——`createMemory` /
- * `createMemoryWithOutbox` の2箇所しか呼んでいなかった残りの1経路。
- *
- * この歯は上の (甲) と同じ検査(JOIN を含む本物の search() の EXPLAIN)を、
- * 書き込み経路だけ `createMemory` から `supersedeWithNewMemories` に替えて行う——
- * 「呼ばれたか」ではなく「実際に効いたか」(プランが Seq Scan から Index Scan へ
- * 変わったか)を見る、上の2本と同じ形。
- *
- * `resetMemoriesWriteCounterForTesting()` でプロセスローカルの累計カウンタを
- * 0へ戻してから始める——このカウンタは `memories-statistics.ts` のモジュール
- * スコープに persist するため、同一ファイル内で先に走る (甲)/(乙) の書き込みが
- * 残した累計に依存すると、この歯が本当に閾値を跨いだのか、それとも
- * たまたま前段の残りで跨いだだけなのかが分からなくなる。専用の使い捨て
- * データベースも (甲) と同じ理由(他のテストの行や ANALYZE のノイズからの隔離)で使う。
+ * `supersedeWithNewMemories` も `memories` へ `INSERT` するので、書き込み経路だけ `createMemory` から替えて、(甲) と同じ検査（JOIN を含む本物の `search()` の EXPLAIN）を行う。
+ * 「呼ばれたか」ではなく「実際に効いたか」（プランが Seq Scan から Index Scan へ変わったか）を見る。
+ * `resetMemoriesWriteCounterForTesting()` でプロセスローカルの累計カウンタを 0 へ戻してから始める。前段の書き込みが残した累計に依存すると、この歯が本当に閾値を跨いだのかが分からなくなる。
  */
 describe("PostgresMemoryStore.supersedeWithNewMemories と memories の ANALYZE 自動発火(Issue #269 残経路)", () => {
   const TEST_DATABASE_SUPERSEDE = "mnemora_memories_statistics_supersede_test";
@@ -328,21 +255,14 @@ describe("PostgresMemoryStore.supersedeWithNewMemories と memories の ANALYZE 
     await registerEmbeddingSpace(pool, space);
     const table = embeddingSpaceTableName(space);
 
-    // (甲) と同じ理由（migration 0005 が新規インストール時に空の memories へ
-    // 無条件で ANALYZE を打つため）で、ループの前の last_analyze を控えておく。
     const statBeforeLoop = await pool.query(
       `SELECT last_analyze FROM pg_stat_user_tables WHERE relname = 'memories'`,
     );
     const lastAnalyzeBeforeLoop = statBeforeLoop.rows[0]?.last_analyze;
 
-    // Issue #1419: (甲)/(乙) と同じ保険——beforeAll の resetMemoriesWriteCounterForTesting()
-    // が効いていること自体を、ループの前後のカウンタで確かめる。
     const counterBeforeLoop = peekMemoriesWriteCounterForTesting();
 
-    // 4,000 = 4 * INITIAL_ANALYZE_THRESHOLD(等比の閾値ちょうど)。(甲) と同じ行数だが、
-    // 書き込み経路だけ supersedeWithNewMemories にする——`supersede` は空配列にして
-    // news の作成だけを起こす(この歯が検査したいのは news 側の INSERT が
-    // ANALYZE フックを起動するかどうかだけである)。
+    // `supersede` は空配列にして、news の作成だけを起こす（news 側の INSERT が ANALYZE フックを起動するかどうかだけを見る）。
     const rowCount = 4 * INITIAL_ANALYZE_THRESHOLD;
     const rand = seededRandom(20260917270);
     for (let i = 0; i < rowCount; i += 1) {
@@ -372,15 +292,12 @@ describe("PostgresMemoryStore.supersedeWithNewMemories と memories の ANALYZE 
         "そうでなければ maybeAnalyzeMemoriesAfterWrite の閾値判定が一度も走っていない",
     ).toBe(true);
 
-    // 事前条件の確認: autovacuum を切ってあるので、last_analyze がループの前後で
-    // 動いたなら、それは本 PR のコードが撃った以外にありえない((甲) と同じ検査)。
     const statResult = await pool.query(
       `SELECT last_analyze, last_autoanalyze FROM pg_stat_user_tables WHERE relname = 'memories'`,
     );
     expect(statResult.rows[0]?.last_analyze).not.toEqual(lastAnalyzeBeforeLoop);
     expect(statResult.rows[0]?.last_autoanalyze).toBeNull();
 
-    // JOIN を含む本物の search() SQL を捕まえて EXPLAIN する((甲) と同じ検査)。
     const queryVector = [0.5, 0.5, 0.5];
     const captured = await captureClientQuery(
       (text) => text.includes(table) && /order by/i.test(text),
@@ -390,8 +307,6 @@ describe("PostgresMemoryStore.supersedeWithNewMemories と memories の ANALYZE 
           filter: { tenantId: TENANT },
         }),
     );
-    // 本番と同じ transaction の文脈（ADR 0284 の SET LOCAL）で EXPLAIN する
-    // （test-db.ts の explainCaptured の doc コメント参照）。
     const plan = await explainCaptured(pool, captured);
     expect(plan).toMatch(/Index Scan.*using idx_memory_embeddings_hnsw/);
     expect(plan).not.toMatch(/Seq Scan/);

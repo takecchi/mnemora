@@ -21,15 +21,8 @@ import {
 } from "./test-db.js";
 
 /**
- * 多数のテナントで、observe → tick → recall → forget を**1つの Runtime を共有して並行に**回したとき、
- * テナントが混ざらないこと（端から端まで）。store の口ごとの分離は各 store の適合テストが見ているので、
- * ここでは Runtime を通した並行の流れだけを見る。
- *
- * - 15テナントを `Promise.all` で同時に回す。1テナント（`BAD`）だけ、LLM と埋め込みの偽物が毎回失敗する。
- * - どの recall も自分のテナントの記憶しか返さない（返った記憶を1件ずつ DB で引いて確かめる）。
- * - イベント・outbox・recall の記録・出どころ・置き換え・埋め込みの行が、別テナントの記憶を指さない
- *   （下の `CROSS_TENANT_CHECKS` を SQL で数え、どれも0件）。
- * - `BAD` の失敗が、ほかのテナントの処理を止めない（ほかのテナントの outbox は全部完了する）。
+ * 多数のテナントで、observe → tick → recall → forget を1つの Runtime を共有して並行に回したとき、テナントが混ざらないこと。store の口ごとの分離は各 store の適合テストが見ているので、ここでは Runtime を通した並行の流れだけを見る。
+ * 1テナント（`BAD`）だけ、LLM と埋め込みの偽物が毎回失敗する。`BAD` の失敗が、ほかのテナントの処理を止めない。別テナントの記憶を指しているものは `CROSS_TENANT_CHECKS` を SQL で数え、どれも0件であること。
  */
 
 const BAD = "t-bad";
@@ -132,7 +125,6 @@ describe("多数のテナントを1つの Runtime で並行に回しても、テ
         },
       } as never,
       hashContent: (content: string) => createHash("sha256").update(content).digest("hex"),
-      // runtime の時計を先に進める。歴史的な理由で残している（今は available_at も注入した時計に従う。ADR 0559。operation-roundtrip-shape も見ること）。
       clock: { now: () => new Date(Date.now() + 60_000) },
       config: { autoQueueConsolidateReflectOnExtract: true },
     } as never);
@@ -164,8 +156,7 @@ describe("多数のテナントを1つの Runtime で並行に回しても、テ
               limit: 5,
             } as never);
             for (const memory of r.memories) {
-              // 行の tenant_id と、本文の目印（書いたテナント）の両方を見る——行の tenant_id が
-              // 書き換わって混ざった場合も、目印で分かる。
+              // 行の tenant_id と、本文の目印（書いたテナント）の両方を見る。行の tenant_id が書き換わって混ざった場合も、目印で分かる。
               const row = await pool.query<{ tenant_id: string; content: string }>(
                 "SELECT tenant_id, content FROM memories WHERE id = $1",
                 [memory.memoryId],
@@ -206,7 +197,6 @@ describe("多数のテナントを1つの Runtime で並行に回しても、テ
       expect({ label, n: result.rows[0]?.n }).toEqual({ label, n: 0 });
     }
 
-    // BAD の失敗が、ほかのテナントの outbox を止めない。
     const others = await pool.query<{ n: number }>(
       "SELECT count(*)::int AS n FROM outbox WHERE tenant_id <> $1 AND completed_at IS NULL",
       [BAD],
@@ -217,7 +207,6 @@ describe("多数のテナントを1つの Runtime で並行に回しても、テ
       [BAD],
     );
     expect(othersDone.rows[0]?.n).toBe(TENANTS.length - 1);
-    // BAD 自身も止まらずに進んだ（未処理のまま残ったジョブが無い）。
     const badPending = await pool.query<{ n: number }>(
       "SELECT count(*)::int AS n FROM outbox WHERE tenant_id = $1 AND completed_at IS NULL AND failed_at IS NULL",
       [BAD],

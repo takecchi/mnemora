@@ -4,11 +4,7 @@ import type { Ctx } from "../ctx.js";
 import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * `RecallQuery.scopeAggregate` が取れる値は `"exact"` と `"skip"` の2つだけである（省略は `"exact"` と同じ）。
- * それ以外は、段1〜6を走らせる前に `ZodError` で断る。値の意味の解釈は `MemoryStore` の仕事なので、
- * 通してしまうと、知らない値が adapter にそのまま渡り、`"skip"` ではない値が黙って集計する側に倒れる。
- */
+/** 値の意味の解釈は `MemoryStore` の仕事なので、知らない値を通すと adapter にそのまま渡り、`"skip"` ではない値が黙って集計する側に倒れる。 */
 
 const ctx: Ctx = { tenantId: "tenant-1" };
 

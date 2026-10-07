@@ -17,18 +17,9 @@ import { POOL_ERROR_WARNING_PREFIX } from "../pool-error-warning.js";
 import { closeTestClient, getTestClient, requireDatabaseUrl } from "./test-db.js";
 
 /**
- * `packages/postgres/README.md` が約束していて、どのテストも縛っていなかった振る舞いを縛る。
  * 今の振る舞いの固定であり、望ましい姿の主張ではない。
- *
- * - 「動く最小の例」を、LLM・埋め込みだけ `@mnemora/testkit` の決定的な provider に差し替えて、
- *   本物の Postgres に対して observe → tick → recall まで走らせる（README の2026-09-27 追記が手で1回やったこと）。
- *   store は README の片から名前を読んで組み立てる——片の store を差し替えたらこのテストが追う。
- * - `error` リスナーが無い pool は、待機中の接続を切られるとプロセスごと落ちる（付けた場合は
- *   `pool-idle-connection-loss.test.ts` が縛っている。ここは付けない側）。
- * - 拡張を作る段の advisory lock のキー（`EXTENSION_LOCK_KEY`）が README に書いてある
- *   （既定の2本は `scripts/__tests__/readme-postgres-objects.test.mjs` が縛っている）。
- * - 「例外の見分け方」の表の、名前の無い `Error` と DB が拒んだ例外の顔。
- * - 「ほかに export しているもの」の表の名前が、どれも入口から export されている。
+ * 「動く最小の例」は、LLM・埋め込みだけ testkit の決定的な provider に差し替えて、本物の Postgres に対して observe → tick → recall まで走らせる。store は README の片から名前を読んで組み立てる（片の store を差し替えたらこのテストが追う）。
+ * `error` リスナーが無い pool は、待機中の接続を切られるとプロセスごと落ちる（付けた場合は `pool-idle-connection-loss.test.ts` が縛る。ここは付けない側）。
  */
 
 const PACKAGE_ROOT = fileURLToPath(new URL("../../", import.meta.url));
@@ -210,7 +201,6 @@ describe("README「例外の見分け方」の表の顔", () => {
       expect(err.constructor).toBe(Error);
       expect(err.name).toBe("Error");
       expect(err.cause).toBeUndefined();
-      // 文面は約束しない（README）ので、ここでは見ない。
     }
   });
 

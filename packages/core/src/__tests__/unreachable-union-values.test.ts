@@ -3,61 +3,18 @@ import { join, relative } from "node:path";
 import { describe, expect, it } from "vitest";
 
 /**
- * Issue #206 / [ADR 0117](../../../../docs/decisions/0117-unreachable-union-values-inventory.md):
- * **型（union）には値が在るのに、それを生成するコードがリポジトリに1行も無い**値の棚卸し。
+ * 型（union）には値が在るのに、それを生成するコードがリポジトリに1行も無い値の棚卸しを、回帰を機械的に捕まえる歯にする。
+ * 棚卸しの対象は、書く側の実際のコード（`condition: "tenant"` のようなオブジェクトリテラルの構築）であって、
+ * `interface`/`z.enum([...])` の宣言そのものではない（監視したいのは「値が生成される」こと）。
  *
- * このテストは、その棚卸しを「一度 grep して終わり」にせず、**回帰を機械的に捕まえる歯**に
- * している。棚卸しの対象は、書く側の実際のコード（`condition: "tenant"` のような
- * オブジェクトリテラルの構築）であって、`interface`/`z.enum([...])` の宣言そのものではない
- * ——後者は「値が union に在る」ことの出所であり、監視したいのは「値が**生成される**」こと
- * だからである。
- *
- * **⚠ この歯の限界（確かめていないこと）**:
- * - **静的な文字列一致でしか見ていない。** `condition: someVariable` のように、変数経由で
- *   これらの値が間接的に生成される経路までは検出できない。
- * - **対象は「本番として出荷されるパッケージの `src/`」に絞ってある**
- *   （下の `PACKAGES_TO_SCAN`）。`packages/testkit/src` は意図的に対象外——
- *   あのパッケージの仕事は adapter の適合テストであり、DB 制約を検査するために
- *   本番では起きない値をわざと組み立てることがある（例:
- *   `event-store-conformance.ts` が `kind: "events_purged"` を作ってその FK 制約を検査する）。
- *   それを「生成された」と数えると、この歯が本来捕まえたい回帰と見分けが付かなくなる。
- * - 各パッケージの `__tests__/` と `__fixtures__/` も同じ理由で対象外。
- *
- * **歯が実際に噛むことの変異試験**: `packages/core/src/recall-runtime.ts` に
- * `condition: "tenant"` 等のオブジェクトリテラルを一時的に挿入し、このテストが赤くなる
- * ことを手元で確認した（挿入前後で `git diff` が無いことも確認済み。PR 本文の
- * 「測ったこと」節に出力を貼ってある）。
- *
- * **2026-09 追記（Issue #198、[ADR 0124](../../../../docs/decisions/0124-purge-physical-delete.md)）**:
- * `kind: "purged"`（分類2「後続 Phase 待ち」）を棚卸しの対象から外した。`Runtime.purge` が
- * 実際にこの値を生成するようになったため——この歯自身が「生成された」ことを検知して
- * 赤くなった（後述の変異試験と同じ仕組みが、今回は実装漏れではなく実装完了を検知した）。
- *
- * **2026-09-16 追記（Issue #206、[ADR 0144](../../../../docs/decisions/0144-drop-unreachable-classification-3-union-values.md)）**:
- * 分類3（「設計が消えたのに値だけ残った」）の4値
- * （`retrievedVia: "tag_match"`/`"recency"`、`reason: "budget_exhausted"`、
- * `axis: "time_window"`）を棚卸しの対象から外した。オーナー判断（`docs/autonomy.md` §3の
- * 破壊的変更条項が解けたこと）を受けて union そのものから落としたため——他の分類（1・2）と
- * 違い、「まだ来ない値を監視し続ける」対象ではなくなった。**この歯がこれらの値について
- * 主張していたこと（「生成されない」）は、値そのものが型に無くなったことでより強く
- * 成立している**（型検査そのものが、これらの値を持つオブジェクトリテラルを拒む）。
- *
- * **2026-09-25 追記（Issue #201 PR-B、[ADR 0323](../../../../docs/decisions/0323-taxonomy-recall-filter.md)）**:
- * `condition: "taxonomy"`（`FilteredOmission`）と `axis: "taxonomy"`（`GroupCount`）を
- * 棚卸しの対象から外した——`RecallQuery.labels`/`taxonomyGroups` の実装により、
- * どちらも実際に生成されるようになったため（`kind: "purged"` を外したときと同じ、
- * 「実装漏れではなく実装完了を検知した」ケース）。
- *
- * **2026-09-26 追記**: `kind: "events_purged"`（`MemoryEventKind`、分類2）を棚卸しの対象から外した。
- * この値は `PostgresMemoryStore.purgeExpiredEvents`（Issue #210、
- * [ADR 0115](../../../../docs/decisions/0115-event-retention-purge.md)）が生の SQL の文字列
- * `'events_purged'` として積んでおり、既に生成されている。この歯は `kind: "events_purged"` という
- * オブジェクトリテラルしか探さないので、それを見つけられず、事実と違う「生成されない」を
- * 緑のまま固定していた。検出の仕組みは変えていない（SQL の中の生成は、上の「静的な文字列一致」の
- * 限界の外に在る）。判断はクローン miku のもの（オーナー本人の決定ではない）。
- * 同じ日に、残る `condition: "tenant"` が本当に生成されていないこと（SQL を含め）を確かめた。
- * ⚠ この歯が赤くなるのは「一覧に載せた値が生成されたとき」だけである。union に到達できない値が
- * 新しく足されても、一覧に載せない限りこの歯は赤くならない（同日に実測した）。
+ * ⚠ この歯の限界:
+ * - 静的な文字列一致でしか見ていない。`condition: someVariable` のように変数経由で間接的に生成される経路や、
+ *   SQL の文字列中の生成は検出できない。
+ * - 対象は「本番として出荷されるパッケージの `src/`」に絞ってある（下の `PACKAGES_TO_SCAN`）。`packages/testkit/src` は意図的に対象外:
+ *   adapter の適合テストは DB 制約を検査するために本番では起きない値をわざと組み立てることがあり
+ *   （例: `event-store-conformance.ts` が `kind: "events_purged"` を作ってその FK 制約を検査する）、
+ *   それを「生成された」と数えると、この歯が本来捕まえたい回帰と見分けが付かなくなる。各パッケージの `__tests__/` と `__fixtures__/` も同じ理由で対象外。
+ * - この歯が赤くなるのは「一覧に載せた値が生成されたとき」だけ。union に到達できない値が新しく足されても、一覧に載せない限り赤くならない。
  */
 
 const PACKAGES_ROOT = join(__dirname, "../../../");

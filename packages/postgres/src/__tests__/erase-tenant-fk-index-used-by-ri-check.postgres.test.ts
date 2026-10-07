@@ -8,24 +8,11 @@ import {
 } from "./test-db.js";
 
 /**
- * Issue #1207 / [ADR 0383](../../../../docs/decisions/0383-erase-tenant.md):
- * `memories` の行を消すときの参照整合性チェック（Postgres が内部で打つ
- * `SELECT 1 FROM memory_relations WHERE from_memory_id = $1 FOR KEY SHARE` 等）が、
- * `migrations/0027_erase_tenant_fk_indexes.sql` の単一列索引
- * `idx_memory_relations_from_memory_id`/`idx_memory_relations_to_memory_id` を使うことを縛る。
+ * ⚠ EXPLAIN では測れない。参照整合性チェックはトリガの中で打たれる問い合わせで、`EXPLAIN ANALYZE DELETE ...` はトリガの時間と回数しか返さず、
+ * その中の計画は見せない。代わりに、索引ごとの使用回数 `pg_stat_user_indexes.idx_scan` が削除の前後で増えることを見る。
  *
- * ⚠ **EXPLAIN では測れない**——参照整合性チェックはトリガの中で打たれる問い合わせで、
- * `EXPLAIN ANALYZE DELETE ...` はトリガの時間と回数しか返さず、その中の計画は見せない
- * （`auto_explain` の `log_nested_statements` ならサーバのログには出るが、テストから
- * 読めない）。代わりに、索引ごとの使用回数 `pg_stat_user_indexes.idx_scan` が、削除の
- * 前後で増えることを見る。
- *
- * ⚠ 専用の接続で `enable_seqscan = off` にする。テストの表は小さく、そのままでは
- * プランナーは全件走査を選ぶ——この歯が縛るのは「検査の問い合わせがこの索引で引ける
- * 形になっている」ことであり、表が大きいときに実際に索引が選ばれることは ADR 0383 の
- * 実測（10万行、索引なし2000行で90秒・ありで0.5秒）が示している。既存の
- * `(tenant_id, from_memory_id, kind)` 索引は先頭が `tenant_id` なので、同じ設定でも
- * この問い合わせには1点で引けない（索引を抜く変異で、この歯は赤になる）。
+ * ⚠ 専用の接続で `enable_seqscan = off` にする。テストの表は小さく、そのままではプランナーは全件走査を選ぶ。
+ * 既存の `(tenant_id, from_memory_id, kind)` 索引は先頭が `tenant_id` なので、同じ設定でもこの問い合わせには1点で引けない。
  */
 
 afterAll(async () => {
@@ -58,8 +45,7 @@ describe("memory_relations の外部キーの検査は、単一列索引を使�
       );
       return rows[0]!.id;
     };
-    // 消す1件（victim）と、関係の行を張っておく別の2件。victim 自身は関係を持たない
-    // ——参照している行があると削除が外部キー違反で落ちるので、検査は「空振り」させる。
+    // victim 自身は関係を持たない（参照している行があると削除が外部キー違反で落ちるので、検査は「空振り」させる）。
     const victim = await insertMemory("victim");
     const a = await insertMemory("a");
     const b = await insertMemory("b");
@@ -90,7 +76,6 @@ describe("memory_relations の外部キーの検査は、単一列索引を使�
       };
 
       const before = await readIdxScan();
-      // 索引が無ければ、ここで名指しで落ちる（行が返らない）。
       expect(Object.keys(before).sort()).toEqual([...INDEXES].sort());
 
       await client.pool.query("DELETE FROM memories WHERE id = $1", [victim]);

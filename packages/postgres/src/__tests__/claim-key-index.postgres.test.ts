@@ -12,29 +12,10 @@ import {
 } from "./test-db.js";
 
 /**
- * 抽出時の矛盾検出（claimKey）が打つ3つの SQL——`findActiveByClaimKey`・
- * `findContestedByClaimKey`（Issue #933 案2、ADR 0378）・`listActiveClaimPredicates`——が、
- * `idx_memories_claim_key`
- * （`(tenant_id, subject_id, claim_key_subject, claim_key_predicate) WHERE claim_key_subject IS NOT NULL`、
- * `migrations/0021_memories_claim_key.sql`）を **`subject_id` まで**索引の条件に使うこと。
- *
- * `findContestedByClaimKey` は `findActiveByClaimKey` と完全に同じクエリ形で `status` の
- * リテラルだけが違う（`'active'` → `'contested'`）。この索引は `status` を条件に含めない
- * 汎用索引（`0021_memories_claim_key.sql` の doc コメント）なので、新しい索引・新しい
- * migration は要らない——ここではそれを EXPLAIN で確かめる。
- *
- * 【実測 2026-09-27、1テナント 20,000 行（20 subject）+ 別テナント 5,000 行、ANALYZE 済み】以前は:
- * - `listActiveClaimPredicates` は **Seq Scan**（別テナントを含む表全体を走査）。
- *   `knownPredicatesFromStore` を有効にすると observe のたびに呼ばれる。doc コメントは
- *   「先頭2列（tenant_id, subject_id）で絞り込む」と書いていたが、実際には索引を使っていなかった。
- * - `findActiveByClaimKey` は索引を使うが、`subject_id` は Index Cond に入らず Filter に落ちていた
- *   （同じ claim key を持つテナント中の全 subject の行を読んでから subject で捨てる）。
- * 原因は `subject_id IS NOT DISTINCT FROM $n`（索引で引けない形）と、部分索引の述語
- * （`claim_key_subject IS NOT NULL`）を WHERE から導けないこと。
- *
- * 期待値は時間ではなく計画の形で書く（CI で揺れないため）: 索引名を含み、`subject_id` が
- * Index Cond（または Recheck Cond）に入り、`Seq Scan on memories` を含まない。
- * `subjectId` が文字列のときと `null` のとき（`subject_id IS NULL` で索引を引く）の両方を見る。
+ * `findContestedByClaimKey` は `findActiveByClaimKey` と `status` のリテラルだけが違う。`idx_memories_claim_key` は
+ * `status` を条件に含めない汎用索引なので、新しい索引は要らないことも EXPLAIN で確かめる。
+ * 期待値は時間ではなく計画の形で書く（CI で揺れないため）。`subjectId` が文字列のときと `null` のとき
+ * （`subject_id IS NULL` で索引を引く）の両方を見る。
  */
 
 const TENANT = "claim-key-index";
@@ -43,7 +24,6 @@ const SUBJECTS = 20;
 
 async function seed(pool: Pool): Promise<MemoryId> {
   const ids = Array.from({ length: ROWS }, () => randomUUID());
-  // 3行に1行が claim key を持つ。subject は 's0'..'s19'、ただし i % 20 = 0 の行は subject なし。
   await pool.query(
     `INSERT INTO memories (id, tenant_id, subject_id, content, content_hash, digest, digest_source,
         provenance_kind, provenance, status, tags, recorded_at, strength, half_life_hours,
@@ -65,12 +45,8 @@ async function seed(pool: Pool): Promise<MemoryId> {
      FROM unnest($1::uuid[]) AS m`,
     [other],
   );
-  // Issue #933 案2（ADR 0378）: `findContestedByClaimKey` の EXPLAIN も見るため、`contested`
-  // な行も同じ分布（claim key・subject）で作る。`idx_memories_contested`
-  // （`(tenant_id, status) WHERE status = 'contested'`、0004）だけでは `subject_id`/
-  // `claim_key_*` を絞れないので、`contested` の行数がある程度無いと、プランナが
-  // `idx_memories_claim_key` より `idx_memories_contested` を安く見積もることがある
-  // （0行なら後者はほぼ即座に空を返せるため）——実運用に近い分布にする。
+  // `findContestedByClaimKey` の EXPLAIN も見るため、`contested` な行も同じ分布で作る。`contested` の行数がある程度無いと、
+  // プランナが `idx_memories_claim_key` より `idx_memories_contested` を安く見積もることがある（0行なら後者はほぼ即座に空を返せるため）。
   const contested = Array.from({ length: ROWS }, () => randomUUID());
   await pool.query(
     `INSERT INTO memories (id, tenant_id, subject_id, content, content_hash, digest, digest_source,
@@ -83,8 +59,7 @@ async function seed(pool: Pool): Promise<MemoryId> {
      FROM unnest($1::uuid[]) WITH ORDINALITY AS t(m, i)`,
     [contested, TENANT, SUBJECTS],
   );
-  // 統計が無いと、プランナが誤った見積もりで無関係な索引や Seq Scan を選ぶ
-  // （recall-gate-index.test.ts / contested-with-index.test.ts と同じ勘所）。
+  // 統計が無いと、プランナが誤った見積もりで無関係な索引や Seq Scan を選ぶ。
   await pool.query("ANALYZE memories");
   return ids[5]! as MemoryId;
 }
@@ -131,7 +106,7 @@ describe("claimKey の SQL は idx_memories_claim_key を subject_id まで使�
         validUntil: null,
       }),
     );
-    // 緩めた理由: 0029 の部分索引 `idx_memories_claim_predicates` も `findActiveByClaimKey` のプランナが選びうるため。
+    // 緩めた理由: 部分索引 `idx_memories_claim_predicates` も `findActiveByClaimKey` のプランナが選びうるため。
     // 残した確認: Seq Scan にならない・`subject_id` が Index Cond に入る（下の2行）。
     expect(text).toMatch(/idx_memories_claim_(key|predicates)/);
     expect(text).not.toContain("Seq Scan on memories");
@@ -164,17 +139,15 @@ describe("claimKey の SQL は idx_memories_claim_key を subject_id まで使�
     const text = await plan(listMatcher, () =>
       store.listActiveClaimPredicates(ctx, { subjectId, limit: 50 }),
     );
-    // 緩めた理由: 0029 の部分索引 `idx_memories_claim_predicates` を `listActiveClaimPredicates` のプランナが選ぶため。
+    // 緩めた理由: 部分索引 `idx_memories_claim_predicates` を `listActiveClaimPredicates` のプランナが選ぶため。
     // 残した確認: Seq Scan にならない・`subject_id` が Index Cond に入る（下の2行。Index Only Scan は専用の歯が見る）。
     expect(text).toMatch(/idx_memories_claim_(key|predicates)/);
     expect(text).not.toContain("Seq Scan on memories");
     expect(text).toMatch(/(Index|Recheck) Cond: [^\n]*subject_id/);
   });
 
-  // 上の歯は `subject_id` が Index Cond に入ることまでしか見ない。述語（claim_key_predicate）の比較が
-  // 索引で引けない形に変わると、索引は subject までで止まり、同じ subject の全 claim key の行を読んで
-  // Filter で捨てる（この表では述語が 200 種、subject あたり約 330 行）のに、上の歯は緑のままだった。
-  // `idx_memories_claim_key` でも `idx_memories_claim_predicates` でも、述語の等値は Index Cond に入る。
+  // 上の歯は `subject_id` が Index Cond に入ることまでしか見ない。述語（claim_key_predicate）の比較が索引で引けない形に変わると、
+  // 索引は subject までで止まり、同じ subject の全 claim key の行を読んで Filter で捨てるのに、上の歯は緑のままになる。
   it.each([
     ["findActiveByClaimKey", "文字列", "s3", findMatcher],
     ["findActiveByClaimKey", "null", null, findMatcher],

@@ -1,5 +1,5 @@
 /**
- * `packages/postgres` の DB テストをファイル並列にするための部品（Issue #1277 / ADR 0371）。
+ * `packages/postgres` の DB テストをファイル並列にするための部品。
  *
  * ## 何のためか
  *
@@ -11,8 +11,7 @@
  * 並列の project は、`DATABASE_URL` が指す1つの DB を worker ごとに複製した
  * 専用 DB（`<base>_w<N>`）を使う。**「DB ごと」を選んだ理由・「スキーマごと」を
  * 採らなかった理由・直列の群の一覧と根拠は ADR 0371 を見ること**（ここには写さない
- * ——AGENTS.md「⚠ ここに北極星の要約を置かない」と同じ理由で、決定の中身は
- * 唯一の出所である ADR に置く）。
+ * ——決定の中身は唯一の出所である ADR に置く）。
  *
  * `global-setup-worker-databases.ts`（vitest の `globalSetup`。1回だけ、メインプロセスで
  * 実行される）が worker DB を作り、この `setup-worker-database.ts`（`setupFiles`。
@@ -25,7 +24,7 @@ import os from "node:os";
 /** 並列に走らせる project の名前。`vitest.config.mts` の `test.projects[].test.name` と一致させる。 */
 export const PARALLEL_PROJECT_NAME = "postgres-db-parallel";
 
-/** 直列に走らせる project の名前（Issue #1277 の「直列の群」）。 */
+/** 直列に走らせる project の名前。 */
 export const SERIAL_PROJECT_NAME = "postgres-db-serial";
 
 /**
@@ -115,9 +114,7 @@ export function isDatabaseUnreachableError(error: unknown): boolean {
 
 /**
  * vitest 5.0.0 の既定の `maxWorkers` 計算式と同じもの（`getDefaultThreadsCount`、
- * non-watch の場合: `Math.max(os.availableParallelism() - 1, 1)`。【実測】2026-09-29、
- * vitest のソース（`node_modules/vitest/dist/chunks/index.*.js`）を読んで確認した——詳細は
- * ADR 0371）。
+ * non-watch の場合: `Math.max(os.availableParallelism() - 1, 1)`）。
  *
  * ⚠ **なぜ vitest 自身の自動解決に任せず、ここで明示的に計算して `vitest.config.mts` の
  * 並列 project の `maxWorkers` に固定するか**: project の `maxWorkers` を config で
@@ -126,7 +123,7 @@ export function isDatabaseUnreachableError(error: unknown): boolean {
  * `project.config` には書き戻さない。`global-setup-worker-databases.ts` は
  * worker 用 DB を何個作るかを `project.config.maxWorkers` を読んで決めるため、
  * 明示しないと実際より少ない数の DB しか作らず、後から "database ... does not exist" で
- * 落ちる（【実測】2026-09-29、48コアの手元環境で実際に踏んだ——詳細は ADR 0371）。
+ * 落ちる。
  * ⟹ ここで明示的に計算し、`test.maxWorkers` に固定することで、
  * 「project がその値を実際に使う」と「globalSetup がその値を読める」を一致させる。
  */

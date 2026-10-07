@@ -24,16 +24,6 @@ import {
   TEST_EMBEDDING_SPACE,
 } from "./test-db.js";
 
-/**
- * LLM・埋め込みの provider が返らない・遅いときの今の振る舞いを縛る（Issue #1200。
- * `LLMProvider`・`EmbeddingProvider`・`TickOptions.leaseMs` の doc の 2026-09-27 追記）。振る舞いは変えていない。
- *
- * 1. runtime は時間の上限も中断の口も持たないので、provider が返るまで observe・recall・tick も返らない
- *    （provider を返すと返る）。Postgres と testkit の fixture で同じ。
- * 2. 待っている間、DB の接続を握らない（Postgres、`max: 1` の pool の横から別の DB 操作が通る）。
- * 3. tick の処理がリースより長く掛かっても、別の tick が取らなければ完了は通り、何も名乗らない。
- */
-
 let release: () => void = () => {};
 let reached: () => void = () => {};
 let gate: Promise<void> = Promise.resolve();

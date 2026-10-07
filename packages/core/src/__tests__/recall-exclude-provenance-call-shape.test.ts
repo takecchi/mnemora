@@ -5,18 +5,7 @@ import type { Provenance } from "../provenance.js";
 import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * Issue #1734（2026-09-30 マージ分の確かめ直し）で、PR #1458（ADR 0390）の変異試験が
- * **すり抜けた**2本を塞ぐ歯。担当はクローン（miku）の判断で進めている作業であり、オーナーの判断ではない。
- *
- * 1. `recall()` は、除外の指定が無い（`excludeProvenanceKinds` が省略・空配列）とき、
- *    `aggregateScope` の第3引数に `excludeProvenanceKinds` の**キーを足さない**（ADR 0390 決定3
- *    「呼び出しの形も含めて今日と同じ」）。受け取る3実装（Fake・InMemory・Postgres）は
- *    undefined と `[]` をどちらも no-op にするので、結果を見る歯では捕まらない。引数の形を見る。
- * 2. 除外を指定した `recall()` の `index.totalInScope`・`index.groups` は、除外なしの `recall()`
- *    と同じ（ADR 0390 決定1「`totalInScope`・`groups`・`filtered*` の意味は変えない」）。
- *    除外した行も、スコープ内の件数には数える。
- */
+/** 除外の指定が無いとき、`aggregateScope` の第3引数に `excludeProvenanceKinds` のキーを足さない。受け取る3実装は undefined と `[]` をどちらも no-op にするので、結果を見る歯では捕まらず、引数の形を見る。 */
 
 const ctx: Ctx = { tenantId: "tenant-1" };
 const NOW = new Date("2026-06-01T00:00:00.000Z");

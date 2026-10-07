@@ -8,11 +8,6 @@ import { createRuntime } from "../runtime.js";
 import { defaultDecayStrategy } from "../strategies/decay.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * `processEmbedJob` は `vectorStore.upsert` に成功したあとで `setEmbeddingStatus(…, "ready")` が
- * 一時的に失敗すると、`catch` が `failed` を書いて投げ直す。この歯は、その結果の姿を実測で固定する。
- */
-
 const ctx: Ctx = { tenantId: "tenant-1" };
 const LATER = new Date(Date.now() + 60_000);
 
@@ -69,7 +64,6 @@ describe("processEmbedJob — upsert 成功後の ready の書き込みが一時
     });
     const { memory } = await stores.memoryStore.createMemoryWithOutbox(ctx, newMemory(), ["embed"]);
 
-    // `setEmbeddingStatus` の最初の1回だけ失敗する（= "ready" の書き込み）。
     const statusWrites: string[] = [];
     const original = stores.memoryStore.setEmbeddingStatus.bind(stores.memoryStore);
     stores.memoryStore.setEmbeddingStatus = async (c, id, status) => {
@@ -85,19 +79,15 @@ describe("processEmbedJob — upsert 成功後の ready の書き込みが一時
     expect(first).toEqual({ processed: 0, failed: 1, unsupported: [], leaseConflicts: [] });
     expect(statusWrites).toEqual(["ready", "failed"]);
     expect((await stores.memoryStore.get(ctx, memory.id))?.embeddingStatus).toBe("failed");
-    // ベクトルは書けている（upsert は成功していた）。
     expect(await stores.vectorStore.getVectors(ctx, space, [memory.id])).toHaveLength(1);
-    // ジョブは終端（failedAt）で、`lastError` に元の失敗が載る。自動リトライには戻らない。
     const [job] = stores.outboxStore.listJobs(ctx);
     expect(job?.failedAt).not.toBeNull();
     expect(job?.lastError).toContain("connection reset while marking ready");
 
-    // 次の tick では何も起きない（ジョブは claim の対象から外れている）。
     const second = await runtime.tick(ctx, { leaseMs: 60_000 });
     expect(second).toEqual({ processed: 0, failed: 0, unsupported: [], leaseConflicts: [] });
     expect((await stores.memoryStore.get(ctx, memory.id))?.embeddingStatus).toBe("failed");
 
-    // 回復の道: reembed で積み直して tick すれば ready に戻る（failed → ready は許される）。
     const requeued = await runtime.reembed(ctx, { statuses: ["failed"], limit: 10 });
     expect(requeued.requeued).toBe(1);
     const third = await runtime.tick(ctx, { leaseMs: 60_000 });
@@ -127,8 +117,7 @@ describe("processEmbedJob の注釈 — この性質を書いてある", () => {
     expect(start).toBeGreaterThanOrEqual(0);
     expect(end).toBeGreaterThan(start);
     const body = source.slice(start, end);
-    // 結論の向き。上の語の検査は4語の存在だけで、結論が逆になっても通る。
-    // 「`failed` を書いて投げ直す」は、手前の別の注釈（catch への指し示し）にもあるので、
+    // 上の語の検査は4語の存在だけで、結論が逆になっても通る。「`failed` を書いて投げ直す」は手前の別の注釈にもあるので、
     // 追記の側の結論の一句を「区別しない——」まで含めて見る。
     expect(body).toContain("区別しない——`failed` を書いて投げ直す");
   });

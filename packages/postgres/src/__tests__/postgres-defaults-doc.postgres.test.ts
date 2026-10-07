@@ -20,13 +20,7 @@ import {
   resetTestDatabase,
 } from "./test-db.js";
 
-/**
- * `@mnemora/postgres` の options を省いたときの既定値が、TSDoc・CLI の説明・README に書かれた値と一致することを縛る。
- * **doc の値はソースと README を実行時に読んで**（`{@link DEFAULT_…}` で定数を指している欄は、その定数を公開の入口から
- * 解決して）、**実装の値は options を省いたときの振る舞いから**取って突き合わせる。
- * 対象は `extensionMode`・`extensionSchema`・`lockTimeoutMs`（`runMigrations` と `registerEmbeddingSpace`）と、
- * trigram の store の閾値（`DEFAULT_TRIGRAM_WORD_SIMILARITY_THRESHOLD`）。
- */
+/** doc の値は ソースと README を実行時に読み（`{@link DEFAULT_…}` で定数を指している欄は、その定数を公開の入口から解決して）、実装の値は options を省いたときの振る舞いから取って突き合わせる。 */
 
 const read = (path: string) => readFileSync(fileURLToPath(new URL(path, import.meta.url)), "utf8");
 const MIGRATE = read("../migrate.ts");
@@ -98,7 +92,6 @@ describe("@mnemora/postgres の既定値は doc の値と一致する", () => {
     try {
       const lockTimeouts = recordLockTimeouts(pool);
       const result = await runMigrations(pool);
-      // `extensionMode: "create"` の経路では extensionCheck が載らない（`RunMigrationsResult.extensionCheck` の doc）。
       expect(result.extensionCheck).toBeUndefined();
       expect(lockTimeouts[0]).toBe(
         String(linkedDefault(docOf(MIGRATE, "RunMigrationsOptions", "lockTimeoutMs"))),

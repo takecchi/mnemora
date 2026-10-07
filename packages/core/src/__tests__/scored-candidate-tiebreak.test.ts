@@ -3,21 +3,10 @@ import { compareScoredCandidates } from "../recall-runtime.js";
 import type { ScoreBreakdown } from "../recall.js";
 
 /**
- * 段2（再スコア）の並び順（`recall-runtime.ts` の `scored.sort`）のタイブレーク
- * （Issue #339 / ADR 0170）。
- *
- * **背景**: `Array.prototype.sort` は安定（ES2019+）——`score.total` が同点のとき、
- * 明示のタイブレークが無ければ入力配列の順序（= adapter が返した順序）をそのまま
- * 保つ。⭐門 `compare`（`examples/chat`）の 322 ターン行で、`PostgresVectorStore`
- * の ANN 検索が返す重複コンテンツ（同じ filler 文を大量に使い回す合成会話）の
- * 完全な distance タイが、`memory_id`（fresh ingest のたびに振り直されるランダムな
- * UUID）に依存する並びを透過させ、`recall()` の結果を ingest のたびに変えていた
- * （Issue #339）。`compareScoredCandidates` は、`packages/core` 自身がこれに
- * 依存しないよう明示のタイブレークを持つ。
- *
- * `ScoredCandidate` の最小の作り方は `threshold-partition.test.ts` の
- * `candidate()` ヘルパーと同じ作法（型は export していないので `as unknown as
- * Parameters<...>[0]` で組み立てる）。
+ * `Array.prototype.sort` は安定なので、`score.total` が同点のとき明示のタイブレークが無ければ入力配列の順序（= adapter が返した順序）が
+ * そのまま残り、`memory_id`（ingest のたびに振り直されるランダムな UUID）に依存する並びが `recall()` の結果を変えてしまう。
+ * `ScoredCandidate` の最小の作り方は `threshold-partition.test.ts` の `candidate()` と同じ作法（型は export していないので
+ * `as unknown as Parameters<...>[0]` で組み立てる）。
  */
 
 function candidate(
@@ -41,7 +30,6 @@ describe("compareScoredCandidates（Issue #339 / ADR 0170）", () => {
   it("score.total が違えば、それだけで決まる（高い方が先）", () => {
     const higher = candidate("higher", 0.9, { recordedAt: new Date("2026-01-01T00:00:00Z") });
     const lower = candidate("lower", 0.1, { recordedAt: new Date("2026-01-02T00:00:00Z") });
-    // recordedAt は逆向き（lower の方が新しい）でも、score.total が優先される。
     expect(compareScoredCandidates(higher, lower)).toBeLessThan(0);
     expect(compareScoredCandidates(lower, higher)).toBeGreaterThan(0);
   });
@@ -49,8 +37,6 @@ describe("compareScoredCandidates（Issue #339 / ADR 0170）", () => {
   it("score.total が同点なら、実効時刻（occurredAt ?? recordedAt）が新しい方を先にする", () => {
     const older = candidate("older", 0.5, { recordedAt: new Date("2026-01-01T00:00:00Z") });
     const newer = candidate("newer", 0.5, { recordedAt: new Date("2026-01-02T00:00:00Z") });
-    // 入力の順序に関わらず、常に newer が先に来ることを両方向で確認する
-    // （Array.prototype.sort に丸投げしていないことの直接証拠）。
     expect(compareScoredCandidates(older, newer)).toBeGreaterThan(0);
     expect(compareScoredCandidates(newer, older)).toBeLessThan(0);
     const sorted = [older, newer].sort(compareScoredCandidates);
@@ -60,7 +46,6 @@ describe("compareScoredCandidates（Issue #339 / ADR 0170）", () => {
   });
 
   it("occurredAt が在ればそちらを実効時刻として使う（recordedAt は無視する）", () => {
-    // occurredAt が同じなら、recordedAt が逆向きでも同点 → id にフォールバックする。
     const a = candidate("a-id", 0.5, {
       occurredAt: new Date("2020-06-01T00:00:00Z"),
       recordedAt: new Date("2026-01-02T00:00:00Z"),
@@ -70,7 +55,6 @@ describe("compareScoredCandidates（Issue #339 / ADR 0170）", () => {
       recordedAt: new Date("2026-01-01T00:00:00Z"),
     });
     const sorted = [b, a].sort(compareScoredCandidates);
-    // occurredAt が完全一致 ⟹ id の昇順（a-id が先）にフォールバックする。
     expect(sorted.map((c) => c.memory.id)).toEqual(["a-id", "b-id"]);
   });
 

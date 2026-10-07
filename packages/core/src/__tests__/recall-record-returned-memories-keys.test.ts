@@ -4,15 +4,9 @@ import type { Memory, NewMemory } from "../memory.js";
 import { createRuntime } from "../runtime.js";
 import { defaultDecayStrategy } from "../strategies/decay.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
+import { createObservedMemory } from "./observed-memory.js";
 
-/**
- * 永続化する recall の記録（`RecallRecord.returnedMemories`）は、「後から再現できないもの」だけを運ぶ
- * （ADR 0155）。`RecalledMemory` に後から足された欄（`speaker`・`subjectId`、#684 / ADR 0289、
- * `recordedAt`・`occurredAt`、#703 / ADR 0298 決定6）は、記録に足さない。
- *
- * 記録のキーを固定する歯が無く、足しても緑だった（Issue #1776 の #684・#703 のコメント、ADR 0665）。
- * 記録に足すと、recall のたびに保存される行が太る。
- */
+/** 記録に足すと recall のたびに保存される行が太るので、後から再現できないものだけを運ぶ。キーを固定する。 */
 
 const NOW = new Date("2026-06-01T00:00:00.000Z");
 const ctx: Ctx = { tenantId: "tenant-record-keys", subjectId: "user-a" };
@@ -76,14 +70,14 @@ describe("recall の記録の returnedMemories は、memoryId・score・retrieve
       hashContent: (content: string) => `sha256(${content})`,
       clock: { now: () => NOW },
     });
-    const anchor: Memory = await stores.memoryStore.createMemory(ctx, newMemory());
+    const anchor: Memory = await createObservedMemory(stores.memoryStore, ctx, newMemory());
     await stores.vectorStore.upsert(
       ctx,
       stores.embeddingProvider.space,
       anchor.id,
       [0.70710678, 0.70710678],
     );
-    const associated: Memory = await stores.memoryStore.createMemory(ctx, newMemory());
+    const associated: Memory = await createObservedMemory(stores.memoryStore, ctx, newMemory());
     await stores.vectorStore.upsert(ctx, stores.embeddingProvider.space, associated.id, [0, 1]);
 
     const result = await runtime.recall(ctx, {
@@ -98,7 +92,6 @@ describe("recall の記録の returnedMemories は、memoryId・score・retrieve
     expect(viaAnn?.subjectId).toBe("user-a");
     expect(viaAnn?.recordedAt).toEqual(NOW);
     expect(viaAnn?.occurredAt).toEqual(new Date("2026-05-01T00:00:00.000Z"));
-    // 検算: 連想の枠の行もある。
     expect(result.memories.some((m) => m.retrievedVia === "association")).toBe(true);
 
     const record = await stores.memoryStore.getRecall(ctx, result.recallId);

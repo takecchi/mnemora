@@ -5,15 +5,6 @@ import { InMemoryMemoryStore } from "@mnemora/testkit/fixtures";
 import { PostgresMemoryStore } from "../memory-store.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
-/**
- * `listBySourceObservationAllVersions` は、`observationId` を大文字の UUID で渡しても、小文字で渡したときと
- * 同じ Observation の記憶を返す（id の綴りの扱いは、`listBySourceObservation` と同じ。`@mnemora/postgres` は
- * uuid 型の列で比べるので綴りを問わない。testkit の InMemory も同じにそろえる）。
- *
- * `reextract` は Observation の id をそのまま渡すので、利用者が大文字で持っている id でも、退けた記憶を
- * 見落とさず、reextract が打ち切られる。
- */
-
 const KITS: Array<[string, () => Promise<MemoryStore>]> = [
   ["testkit の InMemory", async () => new InMemoryMemoryStore()],
   [

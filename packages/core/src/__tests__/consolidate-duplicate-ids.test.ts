@@ -6,16 +6,6 @@ import type { NewMemory } from "../memory.js";
 import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * `Runtime.consolidate` の材料（eligible）は重複を除いて数える——`{ memoryIds: [a, a] }` は
- * eligible 1件として `single_eligible_source` になり、同じ Memory を自分自身と統合しない。
- * `sources` は入力と同じ長さ（重複も保つ）のまま。
- *
- * 約束: `runtime.ts` の `Runtime.consolidate` の doc の手順3（2026-09-27 追記、ADR 0089 の追記）。
- * `reflect` の手順3の「eligible（重複除去）」と揃えた。変異試験（PR #1045 の S34）で、重複除去を
- * 外しても既存の歯がすり抜けたため足した。
- */
-
 const ctx: Ctx = { tenantId: "tenant-1" };
 const NOW = new Date("2026-06-01T00:00:00.000Z");
 

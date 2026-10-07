@@ -2,12 +2,7 @@ import { describe, expect, it } from "vitest";
 import { buildExtractionPrompt } from "../extraction.js";
 import type { Observation } from "../observation.js";
 
-/**
- * Issue #1734（2026-09-30 マージ分の確かめ直し）の #1460 のすり抜け。
- * `observationSpeaker` の `typeof speaker === "string"` を外しても、既存の歯は赤にならなかった
- * （歯が与えていたのは空文字だけで、非文字列を与えていなかった）。
- * 約束（#1460 本文）: speaker が空文字・非文字列なら、候補経路でも何も足さない（本文だけ）。
- */
+/** 既存の歯が与えていたのは空文字だけで非文字列を与えていなかったので、`typeof speaker === "string"` を外しても赤にならなかった。 */
 const TEXT = "明日は東京に出張する予定です";
 
 function observationWithSpeaker(speaker: unknown): Observation {
