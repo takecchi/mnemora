@@ -79,6 +79,38 @@ describe("db.transaction(): begin が reject しても接続は pool へ戻る�
     }
   }, 30_000);
 
+  it("分離レベル・読み取り専用を指定した begin（begin isolation level …）が失敗しても、借りられたままの接続は 0 になる", async () => {
+    const client = createPostgresClient(requireDatabaseUrl(), {
+      max: 2,
+      application_name: "bg1-begin-config-kill",
+      onPoolError: () => {},
+    });
+    try {
+      for (let i = 0; i < 4; i += 1) {
+        const restore = killConnectionBeforeStatement({
+          admin: admin.pool,
+          applicationName: "bg1-begin-config-kill",
+          matches: (text) => /^\s*begin\b/i.test(text),
+        });
+        try {
+          await expect(
+            client.db.transaction(
+              async (tx) => {
+                await tx.execute(sql`SELECT 1`);
+              },
+              { isolationLevel: "serializable", accessMode: "read only" },
+            ),
+          ).rejects.toThrow();
+        } finally {
+          restore();
+        }
+        expect(checkedOut(client.pool), `${i + 1}回目の後`).toBe(0);
+      }
+    } finally {
+      await closeWithin(client);
+    }
+  }, 30_000);
+
   it("release は冪等: begin の失敗で返した後にもう一度 release しても、pg-pool の二重 release の例外は出ない", async () => {
     const client = createPostgresClient(requireDatabaseUrl(), {
       max: 2,
