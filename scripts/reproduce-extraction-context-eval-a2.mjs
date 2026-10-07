@@ -1,16 +1,5 @@
-// Issue #704 の下読み: eval-a2-meeting-time-reference（Issue 本文が「未達」とした 1 件）は
-// `extraction-context-recorded.eval.json` では **1回しか録っていない**。AGENTS.md
-// 「「出なかった」を、事象が無いことの証明にしない」節と、Issue #704 自身の
-// 「未評価の範囲」節（「出力のばらつき…今回は1回しか録っていない」）に従い、
-// **実装を1バイトも変えずに**、同じ入力を複数回叩いて再現性（ばらつき）を測るための
-// 手順専用スクリプト。
-//
-// ⛔ このスクリプトはチューニング用途ではない。`buildExtractionPrompt` は main のまま
-// （このスクリプトは import するだけで書き換えない）。
-//
-// 使い方: node --env-file=.env scripts/reproduce-extraction-context-eval-a2.mjs <output.json> [N]
-// 既定 N=5。実行前に費用の保守的な上限を合算し、超えるなら1回も呼ばずに中断する
-// （record-extraction-context-eval.mjs と同じ規律）。
+// ⛔ このスクリプトはチューニング用途ではない。実装を1バイトも変えずに同じ入力の再現性を測る。`buildExtractionPrompt` は main のまま(import するだけで書き換えない)。
+// 実行前に費用の保守的な上限を合算し、超えるなら1回も呼ばずに中断する。
 import { createRequire } from "node:module";
 import { writeFileSync } from "node:fs";
 import { buildExtractionPrompt, ExtractionResultSchema } from "../packages/core/dist/index.js";

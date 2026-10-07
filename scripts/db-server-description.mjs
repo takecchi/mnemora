@@ -1,49 +1,16 @@
 /**
- * DB 段が接続する先の Postgres が「何であるか」を、門の出力に出すための小さな道具。
- *
- * **なぜ要るか**
- *
- * この repo の歯には、**プランナがどちらの経路を選ぶか**を assert しているものが
- * いくつも在る（`Index Scan` が出ること / `Seq Scan` が出ないこと、等）。
- * **プランナの選択は Postgres のメジャー版・統計・データ分布に依存する。**
- * 実際、`packages/postgres/src/__tests__/count-over-window.test.ts` の分岐B
- * （ADR 0011）は **PostgreSQL 16.15 では赤くなる**——`count(*) OVER ()` を足しても
- * HNSW が捨てられず、`Index Scan using idx_memory_embeddings_hnsw_...` が出るためである
- * （実測。CI の PostgreSQL 17 では緑）。
- *
- * **⟹ 歯が赤くなったとき、「自分の変更が壊した」のか「版が違う」のかが、
- * 出力からは一切分からなかった。**切り分けるには `origin/main` を別 worktree に
- * 取り出して対照を取るしかなく、それは毎回発生する。
- *
- * **この道具は歯を1本も弱めない。skip も入れない。**出力に接続先を1行足すだけである
- * ——赤くなった人が、対照を取る前に「版が違う」に気づけるように。
- *
- * **⚠ 取れなかったときも必ず何かを出す。**「PostgreSQL 16.15 / pgvector 0.8.6」と
- * 「（版を取得できませんでした）」は**どちらも情報**であり、前者だけを出す形にすると
- * 取れなかったときに**何も無かったように見える**（ADR 0008「無いには種類がある」の、
- * この文脈への適用）。
+ * ⛔ 歯を1本も弱めない。skip も入れない。出力に接続先を1行足すだけ。
+ * ⚠ 取れなかったときも必ず何かを出す（出さないと、何も無かったように見える）。
  */
 import { spawnSync } from "node:child_process";
 
 /**
- * この repo の歯が前提にしている Postgres。**「検証済み」の意味は次のとおり:**
- *
- * - `17` — CI（`.github/workflows/ci.yml` の service container `pgvector/pgvector:pg17`）が
- *   毎回この版で全ての DB テストを緑にしている。
- * - `18` — [ADR 0011](../docs/decisions/0011-no-window-count-in-ann-stage.md) の実測環境
- *   （PostgreSQL 18.6 + pgvector 0.8.6）。`count-over-window.test.ts` の主張はここで測られた。
- *
- * **⚠ この一覧は「他の版では動かない」という主張ではない。**
- * 「**ここに無い版は、誰も確かめていない**」という主張である。
+ * ⚠ この一覧は「他の版では動かない」という主張ではない。「ここに無い版は、誰も確かめていない」という主張である。
  */
 export const VERIFIED_MAJOR_VERSIONS = Object.freeze([17, 18]);
 
 /**
- * 接続先の Postgres と pgvector の版を問い合わせる。
- *
- * **`pg` はルートの依存に無い**ため、`packages/postgres`（`pg` を持つ唯一の
- * ワークスペース）を `cwd` にした子プロセスから問い合わせる。
- * **⟹ この道具のためにルートへ依存を1つも足していない。**
+ * ⛔ `pg` はルートの依存に無い。ルートへ依存を足さず、`packages/postgres` を `cwd` にした子プロセスから問い合わせる。
  *
  * @param {string} databaseUrl
  * @param {string} postgresPackageDir `packages/postgres` の絶対パス
@@ -93,9 +60,6 @@ export function describeDatabaseServer(databaseUrl, postgresPackageDir) {
 }
 
 /**
- * `describeDatabaseServer` の結果から、`server_version` のメジャー番号を取り出す。
- * 取り出せなければ `null`（**推測しない**）。
- *
  * @param {string} serverVersion 例: `"16.15 (Debian 16.15-1.pgdg12+2)"`
  * @returns {number | null}
  */
@@ -105,13 +69,6 @@ export function majorVersionOf(serverVersion) {
 }
 
 /**
- * 門の出力に出す行を組み立てる。**純関数**（DB にも子プロセスにも触らない）。
- *
- * **3つの状態を、どれも黙って落とさない:**
- * 1. 取れた・**検証済みの版** — 版を出すだけ。
- * 2. 取れた・**検証されていない版** — 版に加えて**警告と、次の一手**を出す。
- * 3. **取れなかった** — 何が起きたかを出す（黙らない）。
- *
  * @param {{ ok: true, serverVersion: string, vectorVersion: string | null }
  *        | { ok: false, reason: string }} description
  * @returns {string[]}

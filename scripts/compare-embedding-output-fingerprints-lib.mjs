@@ -1,29 +1,13 @@
 /**
- * `scripts/compare-embedding-output-fingerprints.mjs`（同一 workflow run 内の2ジョブが
- * 残した embedding 出力の指紋を突き合わせる CLI）の**純関数の側**。ファイル I/O・
- * `process.argv`・`process.exit` を一切持たない（`lexical-regime-coverage-lib.mjs` と
- * 似た分担だが、⛔ **あちらと違ってこちらは門ではない**——Issue #565「採るとしたら何が
- * 要るか」4番の比較段は、n が溜まり偽陽性率が測れるまで、一致・不一致のどちらでも
- * exit 0 のままである）。
- *
- * ## 3つの結果
- *
- * - `"match"` — 両方の artifact が揃っており、sha256・dimensions が一致した。
- * - `"mismatch"` — 両方の artifact が揃っているが、sha256 か dimensions が食い違った。
- *   **両方の CPU 情報の差を添える**（Issue #565「これが無いと、不一致だったときに原因を
- *   切り分けられない」）。
- * - `"incomparable"` — 片方（または両方）の artifact が無い・読めない・
- *   `weights_unavailable`・sha256 が欠けている、のいずれか。**「一致」とも「不一致」とも
- *   名乗らない**——「出なかった」を「一致した」の証拠にしない、という
- *   `AGENTS.md`「⚠『出なかった』を、事象が無いことの証明にしない」の適用。
+ * ⛔ 門ではない。一致・不一致のどちらでも exit 0 のまま(n が溜まり偽陽性率が測れるまで門にしない)。
+ * `"mismatch"` には両方の CPU 情報の差を添える。無いと不一致の原因を切り分けられない。
+ * 片方でも artifact が無い・読めない・`weights_unavailable`・sha256 欠けのときは `"incomparable"` で、
+ * 「一致」とも「不一致」とも名乗らない。
  */
 
 /**
- * 比較対象の2ジョブと、それぞれが upload する artifact 名。
- *
- * ⚠ **`.github/workflows/ci.yml` の該当ジョブ・upload-artifact の `name:` と
- * 二重管理である。**ずれたら `scripts/__tests__/ci-yml-embedding-output-fingerprint-wiring.test.mjs`
- * が赤くなる（`lexical-regime-coverage-lib.mjs` の `EXPECTED_SERVER_ENCODINGS` と同じ形）。
+ * ⚠ `.github/workflows/ci.yml` の該当ジョブ・upload-artifact の `name:` と二重管理。
+ * ずれたら `ci-yml-embedding-output-fingerprint-wiring.test.mjs` が赤くなる。
  *
  * @type {ReadonlyArray<{ id: string, artifactName: string }>}
  */
@@ -35,20 +19,17 @@ export const EMBEDDING_FINGERPRINT_JOBS = Object.freeze([
   }),
 ]);
 
-/** 各 artifact ディレクトリの下に置かれる測定 JSON のファイル名。 */
 export const EMBEDDING_FINGERPRINT_FILENAME = "embedding-fingerprint.json";
 
 /**
  * @typedef {object} FingerprintLeg
- * @property {string} id `EMBEDDING_FINGERPRINT_JOBS` の要素の `id`
- * @property {boolean} present artifact のディレクトリ/ファイルが存在したか
- * @property {string} [error] 存在したが読めない/parse できなかった理由
- * @property {Record<string, unknown>} [record] 読めた測定 JSON(パース済み)
+ * @property {string} id
+ * @property {boolean} present
+ * @property {string} [error]
+ * @property {Record<string, unknown>} [record]
  */
 
 /**
- * `cpuInfo` 同士の差分を取る。**両方に無い欄・両方で同じ値の欄は出さない。**
- *
  * @param {Record<string, unknown> | undefined} a
  * @param {Record<string, unknown> | undefined} b
  * @returns {{ field: string, a: unknown, b: unknown }[]}
@@ -67,10 +48,7 @@ function diffCpuInfo(a, b) {
 }
 
 /**
- * 2つの leg を突き合わせる。
- *
- * 🔴 **どの分岐でも exit code を決めない**——それは呼び出し側(CLI)の役目であり、
- * かつ CLI 側も常に 0 を選ぶ設計である(このスクリプトは門ではない)。
+ * 🔴 どの分岐でも exit code を決めない。
  *
  * @param {FingerprintLeg} legA
  * @param {FingerprintLeg} legB
@@ -141,8 +119,6 @@ export function compareFingerprints(legA, legB) {
 }
 
 /**
- * Job Summary に載せる Markdown を組み立てる。
- *
  * @param {FingerprintLeg[]} legs
  * @param {ReturnType<typeof compareFingerprints>} result
  * @returns {string}
@@ -195,7 +171,6 @@ export function buildComparisonSummaryMarkdown(legs, result) {
     return lines.join("\n");
   }
 
-  // status === "mismatch"
   lines.push(
     "⚠ **不一致**（🔴 落とさない——測るだけである）。sha256・dimensions:",
     "",

@@ -1,25 +1,10 @@
 #!/usr/bin/env node
 /**
- * `examples/chat` の `identifier-probes`/`numeral-token-probes` サブコマンドが
- * **追加で**書き出す OpenAI 実埋め込み(`recorded` provider 再生)の JSON を
- * 人が読める Markdown へ変換し、CI の Job Summary(`$GITHUB_STEP_SUMMARY`)へ
- * 載せる CLI(Issue #109 後半)。
- *
- * 組み立ては `./openai-arm-summary-lib.mjs` の純関数に委ねる
- * (`identifier-probe-summary.mjs`/`-lib.mjs` と同じ分担)。
- *
- * 使い方:
- *   node scripts/openai-arm-summary.mjs --title <title> --measured <path> [--baseline <path>]
- *
- * 🔴 **`--measured` のファイルが無くても exit 0 のままである。**
- * `examples/chat/src/cli.ts` の openai arm ブロックは、例外を握って local embedding
- * 測定・ジョブ自体を落とさない設計であり(そのブロック自身の doc コメント参照)、
- * その結果 JSON が1件も書かれないことがある——**「measure しようとしたが失敗した」を
- * 「入力が壊れている」と同じ顔で落とさない**(`identifier-probe-summary.mjs` の
- * `weights_unavailable` と同じ形の区別)。
- *
- * ⛔ **相違しても exit 0 のまま。**非0になるのは、**在るファイルが壊れている**とき
- * (JSON が parse できない・`status` が未知・必須項目が無い)だけである。
+ * 🔴 `--measured` のファイルが無くても exit 0。openai arm ブロックは例外を握ってジョブを落とさない設計で、
+ * 結果 JSON が1件も書かれないことがある。「measure しようとして失敗した」を「入力が壊れている」と
+ * 同じ顔で落とさない。
+ * ⛔ 相違しても exit 0。非0になるのは、在るファイルが壊れているとき(JSON が parse できない・
+ * `status` が未知・必須項目が無い)だけ。
  */
 import { existsSync, readFileSync } from "node:fs";
 import {

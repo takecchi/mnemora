@@ -1,20 +1,5 @@
 // Manual recording only. Requires OPENAI_API_KEY and a freshly built core/openai.
-//
-// Issue #704「未評価の範囲」（曖昧な参照・複雑な日時・3人以上の会話・長い文脈）を埋める、
-// packages/core/src/__tests__/fixtures/extraction-context-eval-coverage-cases.mjs に
-// commit 済みの独立評価ケースを録音するためのスクリプト。
-//
-// `scripts/record-extraction-context-eval.mjs`（eval-a1〜d4、10ケース・各1回）とは別物。
-// このスクリプトは各ケースを3回ずつ叩き、ばらつき（再現性）を記録する
-// （eval-a2 が1回の録音だけで「未達」と誤って断定されていた反省。ADR 0299 追記節参照）。
-//
-// ⛔ このスクリプトは書き換えない ── 実行して結果を見てからケースや期待値を
-// 結果に合わせて直すことはしない。
-//
-// 実行回数はケース数 × 3 に固定される（試し撃ちはしない）。呼ぶ前に全リクエスト分の
-// 保守的な費用見積りを合算し、上限を超えるなら1回も呼ばずに中断する。
-//
-// 使い方: node --env-file=.env scripts/record-extraction-context-eval-coverage.mjs <output.json>
+// ⛔ ケースや期待値は、実行して結果を見てから結果に合わせて直さない。
 import { createRequire } from "node:module";
 import { writeFileSync } from "node:fs";
 import { buildExtractionPrompt, ExtractionResultSchema } from "../packages/core/dist/index.js";
@@ -55,8 +40,6 @@ function buildObservation(c) {
 
 const format = translateForOpenAIStructuredOutput("extraction", ExtractionResultSchema);
 
-// 1) 全ケース × 3回分のプロンプトを先に組み立て、費用の保守的な上限を合算する。
-//    実 API はまだ1回も呼ばない。
 const planned = coverageEvalCases.map((c) => {
   const observation = buildObservation(c);
   const prompt = buildExtractionPrompt(observation);
@@ -80,7 +63,6 @@ if (totalReserve > MAX_USD) {
   );
 }
 
-// 2) 予算内であることを確認できたので、ここで初めて実 API を呼ぶ（ケースごとに3回、計画通り）。
 const cases = [];
 let usd = 0;
 for (const p of planned) {

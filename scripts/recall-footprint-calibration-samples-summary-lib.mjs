@@ -1,27 +1,6 @@
 /**
- * `scripts/recall-footprint-calibration-samples-summary.mjs`(CI の Job Summary に載せる
- * Markdown を組み立てる CLI)の純関数の側。ファイル I/O・`process.argv`・`process.exit` を
- * 一切持たない——`consolidation-cost-summary-lib.mjs`/`archive-sweep-cost-summary-lib.mjs`
- * と同じ分担(Issue #340 フォローアップ、ADR 0314)。
- *
- * `examples/chat` の `recall-footprint-calibration-samples` サブコマンド
- * (`MNEMORA_RECALL_FOOTPRINT_CALIBRATION_SAMPLES_JSON` が吐く JSON、
- * `examples/chat/src/recall-footprint-calibration-samples-json.ts` の
- * `RecallFootprintCalibrationSamplesRunJson`)を Markdown へ変換する。
- *
- * ## ⛔ 門にしない(基準値ファイルは、書いた当時は無かった。いまは `examples/chat/recall-footprint-calibration-samples-baseline.json` が在り、`ci.yml` が `--baseline` に渡している。それでも門ではない)
- *
- * `compare`(ADR 0133)と違い、この bench はまだ CI で複数回一致することを実測して
- * いない——ADR 0314 §2 の決定どおり、`examples/chat/compare-baseline.json` のような
- * ⭐門の CI-sourcing 手順(ADR 0119/0121/0133、artifact を2回以上取り、一致した値だけを
- * 基準値にする)を、この bench ではまだ踏めていない(手元の作業環境から CI artifact を
- * 取得する経路が無い——ADR 0314「引き受けた負債2」)。⟹ 他5本(retrieval-quality等)と
- * 同じ非ゲートの形を踏襲する: `--baseline` を渡しても相違では落とさない(exit 0)。
- * 非0になるのは入力そのものが壊れているときだけ。
- *
- * 基準値ファイルができた後(CI artifact で2回以上一致を確認した後)は、`--baseline` に
- * それを渡せば相違が Job Summary に出る——**その時点でもまだ門にするかどうかは
- * 別の判断**(ADR 0133 が `compare` について行ったのと同じ実測・決定の手順を要る)。
+ * ⛔ 門にしない。この bench は CI で複数回一致することをまだ実測していない。`--baseline` を渡しても相違では落とさない(exit 0)。
+ * 非0になるのは入力そのものが壊れているときだけ。門にするかは別の判断(ADR 0133 の実測・決定の手順を要る)。
  */
 
 const REQUIRED_TOP_STRING_FIELDS = ["llmMode", "embeddingMode"];
@@ -62,15 +41,11 @@ function findRowFieldProblems(row, label) {
   return problems;
 }
 
-/** `(fillerPairs, recallLimit)` を1つの文字列キーにする。`compare` の `turnCount` に相当。 */
 function rowKey(row) {
   return `${row.fillerPairs}:${row.recallLimit}`;
 }
 
 /**
- * `MNEMORA_RECALL_FOOTPRINT_CALIBRATION_SAMPLES_JSON` が吐いた JSON(パース済み)の
- * 形を検査する。
- *
  * @param {unknown} data
  * @returns {{ ok: true, value: Record<string, unknown> } | { ok: false, error: string }}
  */
@@ -109,11 +84,6 @@ export function validateMeasured(data) {
 }
 
 /**
- * 基準値ファイル(パース済み)の形を検査する。実測と同じ必須項目を要求する。
- * ⚠ **書いた当時は、この形の基準値ファイルは存在しなかった**(冒頭 docstring。
- * （2026-10-03 訂正）いまは `examples/chat/recall-footprint-calibration-samples-baseline.json` が在り、
- * この関数はそれを検査している)。
- *
  * @param {unknown} data
  * @returns {{ ok: true, value: { rows: Record<string, unknown>[] } } | { ok: false, error: string }}
  */
@@ -146,7 +116,6 @@ export function validateBaseline(data) {
   return { ok: true, value: /** @type {{ rows: Record<string, unknown>[] }} */ (data) };
 }
 
-/** Job Summary の差分節で比べる項目(門にはしない。冒頭 docstring 参照)。 */
 const DIFF_FIELDS = [
   "turnCount",
   "totalInScope",

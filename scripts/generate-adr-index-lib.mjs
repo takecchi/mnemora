@@ -1,77 +1,22 @@
 /**
- * ADR 索引（`docs/decisions/README.md` の「## 一覧」表）を、`docs/decisions/*.md` の
- * 実ファイルから機械生成するための純関数（Issue #230 案A、ADR 0137）。
+ * ⚠ 索引の更新は、ADR を追加する PR の側で `node scripts/generate-adr-index.mjs` を実行して索引も一緒にコミットする。
+ * ADR 0137 の当初の文面(README を触らない)とは違う。
  *
- * ## なぜ生成物にしたか
+ * ⛔ ファイル名の番号と見出しの番号が食い違ったら、黙って片方を信じず生成を失敗させる。
+ * マーカーが無い・2組以上あるときも、間違った場所へ書くより原因を名指しして落とす。
  *
- * これまでの索引（ADR 0128 まで）は、1つの ADR につき1行を**手で末尾に追記する**形
- * だった。並行 PR が同じ行位置（末尾）に追記すると、git の3-way merge は
- * 「同じ最終行の直後に挿入する」という2つのパッチを区別できず、必ず衝突する
- * ——ADR 0128 の歯はこの衝突が起きたあとの「穴」を検出できたが、**衝突そのものは
- * 消せなかった**（同 ADR「引き受けた負債」1番）。
- *
- * この生成物は、手で書く行の位置取りの衝突を、機械で作り直せるものに変える。
- * ADR 0137 は当初、「ADR を追加する PR は新しいファイルを1本足すだけで
- * `docs/decisions/README.md` を触らない」ことで、衝突が物理的に起こりようがない
- * 形を狙った（再現手順は ADR 0137 の「測ったこと」を見ること）。
- * ⚠ **実際の運用は、その文面とは違う。** ADR を追加する PR の側で
- * `node scripts/generate-adr-index.mjs` を実行して索引も一緒にコミットし、
- * ほかの ADR の PR と索引の行が衝突したら、`main` を merge で取り込んで
- * 生成器で作り直す（ADR 0137 末尾の 2026-09-30 の追記）。生成し直せば
- * 衝突は解ける。
- *
- * 索引の生成部分が陳腐化したまま `main` へ持ち込まれてはならない。
- * squash merge する**前**に PR ブランチ上で生成して commit し、push して
- * からマージする（手順は README 自身のコメントと ADR 0137「決定」2番を
- * 見ること）。こうすると `main` に着地する squash
- * コミットは最初から索引が最新であり、`main` が陳腐化した状態を持つ瞬間が
- * 無い。この「陳腐化していないか」を `main` に限って検査するのが
- * `scripts/__tests__/adr-index-freshness.test.mjs` であり、ADR 0128 の歯が
- * 担っていた役割を引き継ぐ（ただし PR を塞ぐ門ではなく、上の手順が実際に
- * 守られたかを見る `main` の安全網としてのみ働く——手順が守られている限り
- * routine では鳴らない。理由は ADR 0137 の「決定」2番・3番）。
- * （2026-10-03 訂正）この括弧の中身は ADR 0137 の当時の設計である。ADR 0192 以降、この歯は
- * `main` の push だけでなく CI の `pull_request` でも有効で、`typecheck / lint / test / build`
- * は required status check なので、索引が陳腐化した PR は GitHub がマージを拒む
- * （`adr-index-freshness-branch-lib.mjs` の docstring、`docs/autonomy.md` §4.0）。
- *
- * ## ソースにするもの
- *
- * 各 ADR ファイルの**1行目の見出し**（`# ADR NNNN: <題>`）から番号と題を取る。
- * ファイル名の4桁番号と見出しの4桁番号が食い違っていたら、生成そのものを失敗させる
- * （黙って片方を信じない——ADR 0128 が「壊れたリンク」として警戒していた壊れ方の
- * 発生源そのものを、生成の入口で塞ぐ）。
- *
- * 状態欄は `- **状態**: ...` 行（太字は無くてもよい）から取る。多くの ADR は
- * この行の中に `(YYYY-MM)` の形で日付を直接埋め込んでいる（例:
- * `採用 (2026-09)`）。埋め込まれていない ADR（実測で4本: 0019 / 0074 / 0099 / 0117）は
- * 別行の `- **日付**: ...` から補う。状態の「見出し語」は先頭の空白・丸括弧までの
- * 連続文字列として抜き出す——`採用` / `未決` / `提案` のように将来値が増えても、
- * この抜き出し方はハードコードした語彙リストを持たずに動く。
- *
- * ## `README.md` の生成部分と手書き部分の境界
- *
- * `<!-- ADR-INDEX:GENERATED:START -->` と `<!-- ADR-INDEX:GENERATED:END -->` という
- * HTML コメントのマーカーで囲む。マーカーの外（冒頭の説明文・「## 一覧」見出し）は
- * この生成器が一切触らない。マーカーが無い・2組以上ある場合は例外を投げる
- * （沈黙して間違った場所へ書き込むより、原因を名指しして落ちる方が安全）。
+ * 状態欄の見出し語は、ハードコードした語彙リストを持たず、先頭の空白・丸括弧の手前までを抜き出す。
  */
 
-/** ADR ファイル名の形（4桁の番号 + ハイフン区切りの slug + `.md`）。ADR 0128 と同じ形。 */
 export const ADR_FILENAME_RE = /^(\d{4})-([a-z0-9][a-z0-9-]*)\.md$/;
 
 /**
- * `docs/decisions/` の直下に置いてよい、ADR ではない `.md`（ADR 0540）。これと ADR のファイル名の形
- * （`ADR_FILENAME_RE`）のどちらでもない `.md` は、形の間違い（`adr-0538-x.md`・`538-x.md`・`0538_x.md`・
- * `ADR-0538-x.md` など）として落とす。`.md` 以外のファイルは対象外。ここに足すときは README の手引きも直すこと。
+ * ⚠ ここに足すときは README の手引きも直すこと。
  */
 export const ALLOWED_NON_ADR_MARKDOWN = ["README.md", "TEMPLATE.md"];
 
 /**
- * ファイル名の配列から、「`.md` なのに、ADR のファイル名の形でも、許す一覧（`ALLOWED_NON_ADR_MARKDOWN`）でもない」ものを返す。
- * 生成器（`buildAdrEntries`）と `adr-renumber.mjs` が同じ規則を使う（ADR 0540。2つの正規表現がずれていくのを防ぐ）。
- *
- * @param {string[]} filenames `docs/decisions/` 直下のファイル名（サブディレクトリの中は渡さない）
+ * @param {string[]} filenames
  * @returns {string[]}
  */
 export function findMalformedAdrFilenames(filenames) {
@@ -81,10 +26,7 @@ export function findMalformedAdrFilenames(filenames) {
   );
 }
 
-/**
- * 形の外れたファイル名があれば、並べた例外を投げる。書き込み・改名の前に呼ぶこと。
- * @param {string[]} filenames
- */
+/** @param {string[]} filenames */
 export function assertWellFormedAdrFilenames(filenames) {
   const malformed = findMalformedAdrFilenames(filenames);
   if (malformed.length > 0) {
@@ -94,29 +36,22 @@ export function assertWellFormedAdrFilenames(filenames) {
   }
 }
 
-/** ADR 本文1行目の見出し（`# ADR 0001: ORM は Drizzle`）。 */
 const TITLE_HEADING_RE = /^# ADR (\d{4}): (.+)\r?$/;
 
-/** `- **状態**: ...` / `- 状態: ...`（太字は任意）。 */
 const STATE_LINE_RE = /^- \**状態\**:\s*(.+?)\s*$/m;
 
-/** `- **日付**: ...` / `- 日付: ...`（太字は任意）。 */
 const DATE_LINE_RE = /^- \**日付\**:\s*(.+?)\s*$/m;
 
-/** 状態欄の先頭にある「見出し語」（空白・半角/全角丸括弧の手前まで）。 */
 const STATE_KEYWORD_RE = /^\**([^\s(（]+)/;
 
-/** 見出し語の直後に丸括弧で埋め込まれた `YYYY-MM` 形の日付。 */
 const INLINE_DATE_RE = /^\**[^\s(（]+\s*[(（](\d{4}-\d{2})/;
 
-/** `- **日付**: 2026-09-06` のような行から `YYYY-MM` だけを取る。 */
 const DATE_VALUE_RE = /^(\d{4}-\d{2})/;
 
 export const GENERATED_START_MARKER = "<!-- ADR-INDEX:GENERATED:START -->";
 export const GENERATED_END_MARKER = "<!-- ADR-INDEX:GENERATED:END -->";
 
 /**
- * ファイル名が ADR ファイルの形にマッチするか。
  * @param {string} filename
  * @returns {boolean}
  */
@@ -125,13 +60,8 @@ export function isAdrFilename(filename) {
 }
 
 /**
- * 状態欄のテキストから、表示用の1セルを組み立てる。
- * 「採用」は無装飾、それ以外（未決・提案など）は目立つよう太字にする
- * ——これは元データの再現ではなく、この生成器が採用した表示規約
- * （ADR 0137「決定」参照。過去の索引の装飾は手書きで一貫していなかった）。
- *
- * @param {string} stateText `- **状態**: ` を除いた本文
- * @param {string | undefined} dateLineText `- **日付**: ` を除いた本文（無ければ undefined）
+ * @param {string} stateText
+ * @param {string | undefined} dateLineText
  * @returns {string}
  */
 export function formatStateCell(stateText, dateLineText) {
@@ -151,9 +81,7 @@ export function formatStateCell(stateText, dateLineText) {
 }
 
 /**
- * 1つの ADR ファイルの内容から、索引の1行分のデータを取り出す。
- * 壊れている入力（見出しが無い・番号が食い違う・状態欄が無い）は、
- * 黙ってそれらしい値を返すのではなく例外を投げる。
+ * 壊れた入力は、黙ってそれらしい値を返さず例外を投げる。
  *
  * @param {string} filename
  * @param {string} content
@@ -197,21 +125,13 @@ export function parseAdrEntry(filename, content) {
 }
 
 /**
- * ADR ファイル名の配列から、索引の対象になるものだけを拾い、番号順に
- * `parseAdrEntry` した結果を返す。`README.md` や ADR らしくない名前
- * （テンプレート等）は黙って無視する——ADR 0128 の `parseAdrFilenames` と同じ判断。
- *
- * 同じ4桁番号を名乗るファイルが2本以上あれば例外を投げる（Issue #315）。
- * ファイル名が違う別ファイルは git 上では単純追加に見え、衝突するのは
- * 索引の1行だけ——番号の取り合いは「claim した時点」ではなく「着地した時点」
- * で確定するため、生成のたびにここで検査する。
+ * ADR らしくない名前(README・テンプレート等)は黙って無視する。
+ * 同じ4桁番号が2本以上あれば例外にする。番号の取り合いは着地した時点で確定するため、生成のたびに検査する。
  *
  * @param {{ filename: string, content: string }[]} files
  * @returns {ReturnType<typeof parseAdrEntry>[]}
  */
 export function buildAdrEntries(files) {
-  // ADR 0537・0540: 形の外れた `.md`（ドット入り・`adr-0538-x.md`・`538-x.md` など）は、黙って無視せず落とす。
-  // `README.md`・`TEMPLATE.md` は許す一覧（`ALLOWED_NON_ADR_MARKDOWN`）、`.md` 以外は対象外。
   assertWellFormedAdrFilenames(files.map((f) => f.filename));
   const entries = files
     .filter((f) => isAdrFilename(f.filename))
@@ -236,14 +156,10 @@ export function buildAdrEntries(files) {
 }
 
 /**
- * 索引テーブル（ヘッダ行込み）を組み立てる。
- * 列の桁揃え（padding）はしない——揃えると、1行足すたびに全行の空白量が
- * 変わって差分が肥大化し、それ自体が「1行の追加のはずが全行に触る」という
- * 別種の衝突面を作る（この repo の `format:check` は markdown を対象外にしており
- * 揃える強制も無い。ADR 0137「測ったこと」参照）。
+ * ⛔ 列の桁揃え(padding)をしない。揃えると1行足すたびに全行の空白量が変わり、衝突面が増える。
  *
  * @param {ReturnType<typeof parseAdrEntry>[]} entries
- * @returns {string} 改行区切りの表（末尾に改行は付けない）
+ * @returns {string}
  */
 export function buildIndexTable(entries) {
   const lines = ["| 番号 | 題 | 状態 |", "| --- | --- | --- |"];
@@ -254,7 +170,6 @@ export function buildIndexTable(entries) {
 }
 
 /**
- * マーカーの位置を探す。無い・2組以上あるときは例外を投げる。
  * @param {string} readmeText
  * @returns {{ startIndex: number, endIndex: number }}
  */
@@ -279,11 +194,8 @@ function locateMarkers(readmeText) {
 }
 
 /**
- * README のマーカー間の内容を、生成した表で置き換える。マーカー自体は残す。
- * マーカーの外側は一切変更しない。
- *
  * @param {string} readmeText
- * @param {string} tableMarkdown `buildIndexTable` の結果
+ * @param {string} tableMarkdown
  * @returns {string}
  */
 export function spliceGeneratedIndex(readmeText, tableMarkdown) {
@@ -294,9 +206,6 @@ export function spliceGeneratedIndex(readmeText, tableMarkdown) {
 }
 
 /**
- * README のマーカー間に**いま**入っている生の文字列を取り出す
- * （鮮度検査で「現物」と「生成した結果」を比べるときに使う）。
- *
  * @param {string} readmeText
  * @returns {string}
  */
@@ -306,9 +215,6 @@ export function extractGeneratedIndex(readmeText) {
 }
 
 /**
- * 生成した表テキストから、行頭の ADR 番号だけを拾う（鮮度検査が赤くなったときの
- * 診断メッセージ用。ヘッダ行・区切り行は `[` を含まないので自然に除外される）。
- *
  * @param {string} tableMarkdown
  * @returns {string[]}
  */

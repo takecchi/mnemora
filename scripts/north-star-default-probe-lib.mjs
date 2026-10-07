@@ -1,61 +1,20 @@
 /**
- * `scripts/north-star-default-probe.mjs`（段1）と `scripts/north-star-tarball-probe.mjs`
- * （段2、Issue #387 / ADR 0216 決定7）が**共有する**純関数の側。ファイル I/O・`Runtime` の
- * 構築・`process.exit` を一切持たない——`identifier-probe-summary-lib.mjs`/
- * `association-summary-lib.mjs` と同じ分担。実際に `Runtime` を組んで観測するロジックは
- * こちらではなく `./north-star-probe-runtime.mjs`（これも段1・段2で共有）に在る。
+ * 段1・段2が共有する純関数の側。ファイル I/O・`Runtime` の構築・`process.exit` を持たない。
  *
- * ## このファイルが持つ4つの役目
+ * ⛔ 判定しない。事実を文字列として運ぶだけで、「満たす/満たさない/半分」という語を出さない
+ * (充足判定は `docs/north-star-paths.md`。ADR 0216 決定8)。
  *
- * 1. **登録簿**（`NORTH_STAR_ITEM_REGISTRY`）—— 北極星「目指す姿」7項目それぞれの
- *    「類（甲/乙/丙）」と「出典」。**類の割り当ては [ADR 0216](../docs/decisions/0216-north-star-shipped-only-measurement.md)
- *    決定1の表をそのまま写した**（甲: 1・2・5・6 / 乙: 7 / 丙: 3・4）。この場で新しい
- *    割り当てを決めない——「正典と実装が食い違ったら、バグなのは実装のほう」
- *    （`AGENTS.md`）。
- * 2. **登録簿と正典の突き合わせ**（`buildRegistryReport`）—— `docs/north-star.md` の
- *    「## 目指す姿」箇条を実行時に読み、逐語一致で登録簿の行と対応付ける。**文面は
- *    ここに複製しない**（`AGENTS.md`「ここに北極星の要約を置かない」）——登録簿が
- *    持つのは「類」と「出典」だけであり、文面そのものは常に `docs/north-star.md` から
- *    読み直す。正典側に登録簿に無い項目があれば「未割り当て」、登録簿側の項目が正典に
- *    見つからなければ「文面が変わった可能性」として、どちらも推測で埋めずに一覧へ出す。
- * 3. **ADOPTER-SUPPLIED の集計**（`countAdopterSuppliedMarks`）—— ADR 0216 決定4-2
- *    「probe が『出荷物の外から持ち込んだもの』を、コード上の印で明示する規律」の実装。
- *    probe 本体（`north-star-probe-runtime.mjs`）のソースを渡すと、
- *    `// ADOPTER-SUPPLIED(itemN): 配線|データ|判定` の形式のコメントを数える。
- *    **判定はしない**——件数と種別を数えるだけ。段1・段2は同じ観測ロジックを使うので、
- *    どちらの CLI もこの1ファイルを数えれば足りる。
- * 4. **Markdown の組み立て**（`buildSummaryMarkdown`）—— 上3つと、実際に走らせた観測の
- *    結果（CLI 側が組み立てた `itemResults`）を受け取り、Job Summary 用の Markdown を返す。
- *    `stage`（見出しラベルと、その段固有の断り）を引数に取ることで、段1・段2が同じ
- *    組み立てロジックを共有しつつ、名乗る内容だけを変える。
+ * ⛔ 登録簿の類の割り当ては ADR 0216 決定1の表のまま。ここで新しく決めない(食い違うときバグなのは実装)。
  *
- * ⛔ **このファイルは1つも `判定` をしない。** 差が出た/出なかった/観測に失敗した、という
- * 事実だけを文字列として運ぶ。「満たす/満たさない/半分」という語はここにもCLI側にも出さない
- * ——7項目の充足判定は `docs/north-star-paths.md` が持つ（ADR 0216 決定8。当初は
- * `docs/roadmap.md` §7 が正だったが、#762 で削除した）。
+ * ⛔ 北極星の文面をここに複製しない。`docs/north-star.md` から実行時に読み直す。
+ * 正典に登録簿に無い項目は「未割り当て」、登録簿の項目が正典に無ければ「文面が変わった可能性」として出し、推測で埋めない。
  */
 
-// ---------------------------------------------------------------------------
-// 1. 登録簿 —— ADR 0216 決定1 の表をそのまま写す
-// ---------------------------------------------------------------------------
+/** @typedef {{ item: number, excerpt: string, class: "甲" | "乙" | "丙", source: string }} RegistryEntry */
 
 /**
- * @typedef {{ item: number, excerpt: string, class: "甲" | "乙" | "丙", source: string }} RegistryEntry
- */
-
-/**
- * 北極星「目指す姿」7項目の登録簿。
- *
- * `excerpt` は `docs/north-star.md`「## 目指す姿」の箇条から、太字部分（`**...**`）を
- * **逐語**で写したもの（`extractGoalStatements` が実行時に抽出する形と完全一致する必要が
- * ある——一致しないと「文面が変わった可能性」として出る。これは検出の対象であって
- * バグではない。ADR 0216 決定1「⚠ どの項目がどの類かは、`docs/north-star.md` の文面が
- * 決める。⛔ 実装が決めるのではない」への実装上の対応）。
- *
- * `class` は ADR 0216 決定1の表そのもの:
- * - 甲（既定で起きること）: 1・2・5・6
- * - 乙（使う側が渡せることが充足）: 7
- * - 丙（採用者が外の情報を渡すことを前提にする。機械に載せない）: 3・4
+ * `excerpt` は `docs/north-star.md` の太字部分の逐語。一致しなければ「文面が変わった可能性」として出る
+ * (検出の対象でありバグではない)。類は文面が決め、実装が決めない(ADR 0216 決定1)。
  *
  * @type {RegistryEntry[]}
  */
@@ -104,24 +63,10 @@ export const NORTH_STAR_ITEM_REGISTRY = [
   },
 ];
 
-// ---------------------------------------------------------------------------
-// 2. 正典（docs/north-star.md）からの抽出と、登録簿との突き合わせ
-// ---------------------------------------------------------------------------
-
 const GOAL_SECTION_HEADING = "## 目指す姿";
 
 /**
- * `docs/north-star.md` の全文から「## 目指す姿」節の箇条書きを抽出する。
- *
- * **文面はここに複製しない**——呼び出し側が `readFileSync` した内容をそのまま渡す
- * ことを前提にする（`AGENTS.md`「ここに北極星の要約を置かない」）。
- *
- * 箇条は `- **本文**...` の形（`docs/north-star.md` の実際の書式）を前提にし、
- * 最初の `**...**` の中身だけを取り出す（末尾の「——補足」部分は含めない——ADR 0216
- * 決定1の表が引いている逐語もこの部分までである）。
- *
- * 見出しが見つからない、または箇条が1つも取れない場合は `ok: false` を返す
- * （黙って空配列を「一致した」と誤読させないため）。
+ * ⛔ 見出しが見つからない・箇条が1つも取れないときは `ok: false`。黙って空配列を「一致した」と誤読させない。
  *
  * @param {string} northStarMarkdown
  * @returns {{ ok: true, statements: string[] } | { ok: false, error: string }}
@@ -172,14 +117,7 @@ export function extractGoalStatements(northStarMarkdown) {
  */
 
 /**
- * 登録簿（`registry`）と、正典から抽出した文面（`canonStatements`）を逐語で突き合わせる。
- *
- * - `rows`: 登録簿の各行 + その文面が正典に実在するか。
- * - `unassignedCanonStatements`: 正典にあるが、登録簿のどの行の `excerpt` とも一致しない
- *   文面。**推測で類を埋めない**——そのまま「未割り当て」として一覧に出すための材料。
- * - `registryEntriesMissingFromCanon`: 登録簿にあるが、いまの正典のどの箇条とも一致しない
- *   行。「文面が変わった可能性がある」ことの材料（類の割り当てはオーナー専権のまま動かさない
- *   ——ADR 0216 決定1）。
+ * ⛔ 推測で類を埋めない。類の割り当てはオーナー専権(ADR 0216 決定1)。
  *
  * @param {string[]} canonStatements
  * @param {RegistryEntry[]} registry
@@ -201,26 +139,15 @@ export function buildRegistryReport(canonStatements, registry) {
   return { rows, unassignedCanonStatements, registryEntriesMissingFromCanon };
 }
 
-// ---------------------------------------------------------------------------
-// 3. ADOPTER-SUPPLIED の集計（ADR 0216 決定4-2）
-// ---------------------------------------------------------------------------
-
-/** `// ADOPTER-SUPPLIED(itemN): 配線|データ|判定` の形式を数える正規表現。 */
 const ADOPTER_SUPPLIED_PATTERN = /ADOPTER-SUPPLIED\((item\d+)\):\s*(配線|データ|判定)/g;
 
-/**
- * @typedef {{ 配線: number, データ: number, 判定: number }} AdopterSuppliedCounts
- */
+/** @typedef {{ 配線: number, データ: number, 判定: number }} AdopterSuppliedCounts */
 
 /**
- * probe 本体のソーステキストから `// ADOPTER-SUPPLIED(itemN): 配線|データ|判定` の
- * 印を数える。**判定はしない**——項目ごとの件数と種別だけを返す（ADR 0216 決定4-2）。
- *
- * 印の付いていない実行（項目3・4はそもそも実行しない。ADR 0216 決定4）は、この集計には
- * 現れない——それ自体が「機械に載せていない」ことの表現である。
+ * 判定しない。印の付いていない実行(項目3・4)は集計に現れず、それ自体が「機械に載せていない」ことの表現。
  *
  * @param {string} sourceText
- * @returns {Map<string, AdopterSuppliedCounts>} item id（`"item1"` 等）→ 種別ごとの件数
+ * @returns {Map<string, AdopterSuppliedCounts>}
  */
 export function countAdopterSuppliedMarks(sourceText) {
   /** @type {Map<string, AdopterSuppliedCounts>} */
@@ -235,10 +162,6 @@ export function countAdopterSuppliedMarks(sourceText) {
   }
   return byItem;
 }
-
-// ---------------------------------------------------------------------------
-// 4. Markdown の組み立て
-// ---------------------------------------------------------------------------
 
 /**
  * @typedef {{
@@ -262,11 +185,8 @@ function classLabel(klass) {
 }
 
 /**
- * 登録簿セクションの Markdown（表 + 未割り当て/文面相違の警告）。
- *
  * @param {RegistryReport} registryReport
- * @param {string[] | null} canonError `extractGoalStatements` が `ok:false` を返した場合の
- *   理由。`null` なら正典は正常に読めている。
+ * @param {string[] | null} canonError
  */
 function buildRegistrySection(registryReport, canonError) {
   const lines = ["## 登録簿（7項目 × 類 × 出典）", ""];
@@ -317,12 +237,10 @@ function buildRegistrySection(registryReport, canonError) {
 }
 
 /**
- * 観測結果セクションの Markdown。
+ * 確認できた行(`foundInCanon`)だけ文面を出す。確認できていない項目に推測で文面を添えない。
  *
  * @param {ItemResult[]} itemResults
- * @param {RegistryReport} registryReport 見出しに文面を添えるための参照。**正典に実在が
- *   確認できた行（`foundInCanon`）だけ文面を出す**——確認できていない項目に推測で
- *   文面を添えない。
+ * @param {RegistryReport} registryReport
  */
 function buildObservationsSection(itemResults, registryReport) {
   const rowByItem = new Map(registryReport.rows.map((row) => [row.entry.item, row]));
@@ -344,11 +262,7 @@ function buildObservationsSection(itemResults, registryReport) {
   return lines.join("\n").trimEnd();
 }
 
-/**
- * ADOPTER-SUPPLIED 集計セクションの Markdown。
- *
- * @param {Map<string, AdopterSuppliedCounts>} tally
- */
+/** @param {Map<string, AdopterSuppliedCounts>} tally */
 function buildAdopterSuppliedSection(tally) {
   const lines = [
     "## ADOPTER-SUPPLIED の集計（ADR 0216 決定4-2）",
@@ -371,14 +285,6 @@ function buildAdopterSuppliedSection(tally) {
 }
 
 /**
- * `north-star-default-probe.mjs`（段1）と `north-star-tarball-probe.mjs`（段2）の出力全体
- * （Job Summary 向け Markdown）を組み立てる。**両段が同じ関数を呼ぶ**——判定しない・門に
- * しない・常に exit 0・`packages/postgres` を測らない、という共通の断りを複製しない。
- *
- * 段ごとに違うのは `stage`（見出しに出す段ラベルと、その段固有の測り方・限界を説明する
- * 断り）と、任意の `extraSections` / `extraCaveats`（段2が tarball install の経路や、
- * その段特有の「確かめていないこと」を足すために使う）だけである。
- *
  * @param {{
  *   stage: { label: string, scopeNote: string },
  *   registryReport: RegistryReport,
@@ -450,8 +356,7 @@ export function buildSummaryMarkdown({
 }
 
 /**
- * トップレベル（import 失敗を含む致命的なエラー）で握ったときの、最小限の Markdown。
- * **常に exit 0** で終えるための最後の砦——この関数自体は決して throw しない。
+ * ⛔ 常に exit 0 で終えるための最後の砦。この関数は決して throw しない。
  *
  * @param {unknown} error
  */

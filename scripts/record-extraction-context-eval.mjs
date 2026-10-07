@@ -1,18 +1,5 @@
 // Manual recording only. Requires OPENAI_API_KEY and a freshly built core/openai.
-//
-// これは packages/core/src/__tests__/fixtures/extraction-context-recorded.json
-// （見て調整した開発ケース）を録るスクリプトではない。あちらとは独立に、
-// packages/core/src/__tests__/fixtures/extraction-context-eval-cases.mjs に
-// commit 済みの評価ケース（Issue #689 本文の完了条件だけから実装より前に定義したもの）
-// を録音するためのスクリプトである。
-//
-// ⛔ このスクリプトは書き換えない ── 実行して結果を見てからケースや期待値を
-// 結果に合わせて直すこと（= extraction-context-eval-cases.mjs の書き換え）はしない。
-//
-// 実行回数はケース数に固定される（試し撃ちはしない）。呼ぶ前に全ケース分の
-// 保守的な費用見積りを合算し、上限を超えるなら1回も呼ばずに中断する。
-//
-// 使い方: node --env-file=.env scripts/record-extraction-context-eval.mjs <output.json>
+// ⛔ ケースや期待値は、実行して結果を見てから結果に合わせて直さない。
 import { createRequire } from "node:module";
 import { writeFileSync } from "node:fs";
 import { buildExtractionPrompt, ExtractionResultSchema } from "../packages/core/dist/index.js";
@@ -52,8 +39,6 @@ function buildObservation(c) {
 
 const format = translateForOpenAIStructuredOutput("extraction", ExtractionResultSchema);
 
-// 1) 全ケース分のプロンプトを先に組み立て、費用の保守的な上限を合算する。
-//    実 API はまだ1回も呼ばない。
 const planned = evalCases.map((c) => {
   const observation = buildObservation(c);
   const prompt = buildExtractionPrompt(observation);
@@ -77,7 +62,6 @@ if (totalReserve > MAX_USD) {
   );
 }
 
-// 2) 予算内であることを確認できたので、ここで初めて実 API を呼ぶ（ケースごとに1回、計画通り）。
 const rows = [];
 let usd = 0;
 for (const p of planned) {

@@ -1,37 +1,5 @@
 #!/usr/bin/env node
-// 公開済みの版で作った DB の fixture（プレーンテキストの SQL ダンプ）を作り直す道具。
-//
-// 何を作るか:
-//   `--from` に渡した作業木（例: `git worktree add ../mnemora-v1.0.1 v1.0.1` して
-//   `pnpm install --frozen-lockfile` と core/testkit/postgres の build を済ませたもの）の
-//   **その版のコード**（`@mnemora/postgres` の adapter と `@mnemora/core` の runtime）を通して、
-//   空の DB にデータを入れ、`pg_dump` でプレーンテキストの SQL にして `--out` へ書く。
-//   できた fixture は `packages/postgres/src/__tests__/upgrade-from-released.postgres.test.ts`
-//   が復元し、今の main の migration を当てる（ADR 0344）。
-//
-// 何を入れるか（すべて合成データ。外部 API は使わない）:
-//   - 埋め込みは `@mnemora/testkit` の `DeterministicEmbeddingProvider`（文字コードから作る
-//     決定的な擬似ベクトル）。本文に "ZERO" を含む記憶はゼロベクトル、"FAIL" を含む記憶は
-//     埋め込みが例外を投げる（tick の失敗経路を通して embedding_status='failed' にする）。
-//   - LLM は `DeterministicLLMProvider`。
-//   - 3つの埋め込み空間（うち1つは名前が 63 バイトを超え、テーブル名・索引名が切り詰められる）
-//     × 4テナント。
-//   - 記憶の状態: active / superseded / contested（対）/ archived / forgotten / purged、
-//     contested の片側を forget した孤児（Issue #825 の形）、後継が forgotten の superseded。
-//   - embedding_status: ready / pending（embed ジョブ未処理）/ failed / skipped。
-//   - outbox: 完了・未処理・dead（failed_at）。recalls と recall_usages を1件ずつ。
-//   - 利用者が同じスキーマに置いた `memory_embeddings_` で始まるビュー2本（うち1本は
-//     `embedding vector` 列を持つ。Issue #1038 で `0022` が止まった形）。
-//
-// 使い方:
-//   node scripts/generate-upgrade-fixture.mjs \
-//     --from ../mnemora-v1.0.1 --tag v1.0.1 \
-//     --database-url postgresql://user@127.0.0.1:PORT/empty_db \
-//     --out packages/postgres/src/__tests__/__fixtures__/upgrade-from-v1.0.1.sql
-//
-//   `--database-url` の DB は空で、拡張 `vector` / `btree_gin` / `pgcrypto` を作ってあること
-//   （CI の postgres ジョブと同じ3本）。`pg_dump` は PATH から引く（`PG_DUMP` で上書き可）。
-//   ⚠ 投入先の DB はこの道具が中身を作る。共有の DB を渡さないこと。
+// ⚠ 投入先の DB はこの道具が中身を作る。共有の DB を渡さないこと。
 import { spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
 import { writeFileSync } from "node:fs";
@@ -62,8 +30,7 @@ const testkit = await import(requireFrom.resolve("@mnemora/testkit"));
 const gitSha = spawnSync("git", ["-C", fromRoot, "rev-parse", "HEAD"], { encoding: "utf8" });
 const fromSha = gitSha.status === 0 ? gitSha.stdout.trim() : "（git rev-parse に失敗）";
 
-// ⚠ この3空間とテナントの対応は、fixture を読む歯（upgrade-from-released.postgres.test.ts）
-// の `SPACES` と一致していること。
+// ⚠ この3空間とテナントの対応は、fixture を読む歯の `SPACES` と一致させること。
 const SPACES = {
   small: { provider: "test", model: "fixture-model", dimensions: 3 },
   wide: { provider: "testkit", model: "deterministic", dimensions: 8 },
@@ -161,8 +128,6 @@ for (const [tenantId, spaceKey, n] of TENANTS) {
     });
   }
 }
-// 利用者が同じスキーマに置いたビュー（mnemora は作らない）。`0022` がこれに `CREATE INDEX`
-// を発行して止まった回帰（Issue #1038、PR #1043）を、この fixture でも踏めるようにする。
 await pool.query(
   `CREATE VIEW memory_embeddings_all_spaces AS
      SELECT tenant_id, memory_id, embedding::text AS embedding_text FROM ${pg.embeddingSpaceTableName(SPACES.small)}
@@ -184,8 +149,7 @@ if (dump.status !== 0) {
   process.exit(1);
 }
 
-// `pg_dump` 17.6 以降は psql 専用のメタコマンド（`\restrict <乱数の鍵>` / `\unrestrict`）を
-// 出す。歯は node-pg で SQL として流すので落とす（鍵は実行ごとに変わり、差分の雑音にもなる）。
+// `pg_dump` 17.6 以降の psql 専用メタコマンド（`\restrict` / `\unrestrict`）は、歯が node-pg で流すので落とす。
 const body = dump.stdout
   .split("\n")
   .filter((line) => !line.startsWith("\\"))

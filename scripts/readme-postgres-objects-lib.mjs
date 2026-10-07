@@ -1,70 +1,22 @@
 /**
- * `packages/postgres/README.md` の「この package が作るオブジェクト」節と、
- * `packages/postgres/migrations/*.sql` / `packages/postgres/src/*.ts` の現物を
- * 突き合わせるための純関数（Issue #168）。
+ * 全移行ファイルを結合し、ファイル名順・出現順に1回だけ走査して `CREATE` / `DROP` を順に適用した
+ * 「最終的に生き残っている集合」を導く。素朴に `CREATE INDEX` の出現回数を数えると、後の移行で
+ * 落とされたものを二重に数える。
  *
- * ## なぜ要るか
+ * ⚠ 関数の引数シグネチャは見ない。`CREATE OR REPLACE FUNCTION` で同名を別シグネチャに
+ * 置き換えても気づかない(ADR 0204)。
  *
- * `packages/postgres` を共有 DB（他のアプリと同居する Postgres）へ入れる採用者は、
- * mnemora がどんな名前のテーブル・索引・advisory lock キーを持ち込むかを、
- * 手を動かして`migrations/*.sql` を読まなくても確認できる必要がある。README に
- * 一覧を書くだけでは、**マイグレーションを足したのに README を直し忘れる**という
- * ずれが必ず起きる（AGENTS.md「正典と実装が食い違ったら」と同じ形の問題）。
- * この歯は、その一覧が現物と一致していることを機械的に強制する。
+ * 動的 DDL(`EXECUTE format('CREATE INDEX IF NOT EXISTS %I ...')`)の文字列リテラルの中の
+ * `CREATE INDEX` を静的な宣言と誤認すると、`IF NOT EXISTS` を呑み込まない側へバックトラックして
+ * `IF` という語が索引名として捕捉される。そのため各捕捉グループの前に SQL 予約語の否定先読み
+ * (`RESERVED_WORD_LOOKAHEAD`)を挟んでいる(ADR 0343)。
  *
- * ## 何を「最終的な集合」と呼ぶか
- *
- * `migrations/*.sql` はファイル名の昇順で1つずつ適用される
- * （`packages/postgres/src/migrate.ts` の `runMigrations`）。ある索引を
- * 後の移行で `DROP INDEX` してから別の索引を作り直す、ということが**将来**
- * 起きうる。⟹ 素朴に「`CREATE INDEX` の出現回数」を数えると、削除されたはずの
- * ものを二重に数えてしまう。**この歯は、全ファイルを結合したテキストを
- * ファイル名順・出現順に1回だけ走査し、`CREATE`/`DROP` を順番に適用した
- * 「最終的に生き残っている集合」を導く**（`deriveMigrationObjects`）。
- * 2026-09 時点の17本の移行には `DROP TABLE` / `DROP INDEX` は1つも無いが、
- * この関数はそれが増えても崩れないように書いてある。
- *
- * ## 関数も対象に含める（ADR 0204。ADR 0202 の「引き受けた負債1」を解消する）
- *
- * `CREATE FUNCTION` / `CREATE OR REPLACE FUNCTION`（`mnemora_lexical_normalize` 等、
- * `0008`/`0009` が作る）も、テーブル・索引と同じ作法で最終形を導く。関数名も
- * 理屈のうえでは共有 DB で衝突しうる——ADR 0202 は「この節・この歯は検査しない」を
- * 負債として引き受けたが、その負債は「検査しない」と書き直すのではなく、
- * 歯を広げて解消する（ADR 0204）。**引数シグネチャ（`(text)` 等）までは見ない**——
- * `CREATE OR REPLACE FUNCTION` で同名を別シグネチャに置き換えても、この歯は
- * 気づかない（ADR 0204「引き受けた負債」）。
- *
- * ## 動的 DDL（`DO` ブロック内の `EXECUTE format(...)`）に対する誤検出を防ぐ
- * （Issue #956 / ADR 0343）
- *
- * `0022_embedding_zero_norm_index.sql` は、対象の索引名を実行時に計算するため
- * `EXECUTE format('CREATE INDEX IF NOT EXISTS %I ON %I (...) WHERE ...', index_name,
- * target_table)` という形の**文字列リテラルの中に** `CREATE INDEX IF NOT EXISTS` を
- * 持つ。この歯は SQL を構文解析せず正規表現で走査するだけなので、**この文字列を
- * そのまま「静的な `CREATE INDEX <名前>`」と誤認しかけた**——`%I` は
- * `[a-zA-Z_][a-zA-Z0-9_]*` に一致しないため、`(?:IF\s+NOT\s+EXISTS\s+)?` を
- * 呑み込んだ状態では捕捉グループが失敗し、正規表現エンジンが「`IF NOT EXISTS` を
- * 呑み込まない」側へバックトラックした結果、**`IF` という語そのものを索引名として
- * 誤って捕捉していた**（【実測】この修正を入れる前は `README に無い索引: ["IF"]` で
- * 赤くなった）。⟹ 各捕捉グループの直前に、SQL 予約語
- * （`IF`/`NOT`/`EXISTS`/`CONCURRENTLY`/`OR`/`REPLACE`）を除外する否定先読み
- * （`RESERVED_WORD_LOOKAHEAD`）を挟んだ——バックトラックしてもこれらの語だけは
- * 名前として捕捉されず、この動的 DDL の出現全体が「一致無し」になる（＝最終集合に
- * 何も足さない）。**この除外は動的 DDL 専用の特別扱いではない**——実在するオブジェクト
- * が `IF`/`NOT`/`EXISTS` 等という名前になることは実務上あり得ない（`assertSafeIdentifier`
- * の対象にもならないほど非現実的）ため、既存の静的な migration の走査結果には
- * 影響しない。
- *
- * ## コメントの剥がし方
- *
- * `--` 行コメントに加えて、スラッシュ・アスタリスク形式のブロックコメントも
- * 剥がしてから走査する（`stripSqlLineComments` → `stripSqlBlockComments`）。
- * 2026-09 時点の migrations にブロックコメントは無いが、関数定義の直前に
- * ブロックコメントで理由が書かれることは将来ありうるため、対称に両方剥がす。
+ * `--` 行コメントもブロックコメントも、剥がしてから走査する。
  */
 
-/** SQL の `--` 行コメントを剥がす（`postgres-auth-parity-lib.mjs` 等と同じ、正規表現だけの簡易実装）。
- * この repo の migrations は `--` が文字列リテラルの中に現れないことを確認済み。
+/**
+ * 正規表現だけの簡易実装。この repo の migrations は `--` が文字列リテラルの中に現れない前提。
+ *
  * @param {string} sqlText
  * @returns {string}
  */
@@ -75,9 +27,9 @@ export function stripSqlLineComments(sqlText) {
     .join("\n");
 }
 
-/** SQL のスラッシュ・アスタリスク形式のブロックコメントを剥がす。
- * `stripSqlLineComments` と同じく正規表現だけの簡易実装——この repo の migrations は
- * ブロックコメントの区切りが文字列リテラルの中に現れないことを確認済み。
+/**
+ * 正規表現だけの簡易実装。この repo の migrations はブロックコメントの区切りが文字列リテラルの中に現れない前提。
+ *
  * @param {string} sqlText
  * @returns {string}
  */
@@ -85,8 +37,6 @@ export function stripSqlBlockComments(sqlText) {
   return sqlText.replace(/\/\*[\s\S]*?\*\//g, "");
 }
 
-// SQL 予約語をバックトラックで名前として誤って捕まえないための否定先読み
-// （上の「動的 DDL に対する誤検出を防ぐ」節参照）。
 const RESERVED_WORD_LOOKAHEAD = "(?!(?:IF|NOT|EXISTS|CONCURRENTLY|OR|REPLACE)\\b)";
 
 const STATEMENT_RE = new RegExp(
@@ -100,10 +50,7 @@ const STATEMENT_RE = new RegExp(
 );
 
 /**
- * 複数の移行ファイルのテキスト（コメント剥がし前でよい。この関数が剥がす）を、
- * **ファイル名順に結合したテキストとして与えること。** 呼び出し側が並べ替えを
- * 済ませてから渡す（`fs.readdirSync` の既定ソートはファイル名昇順と一致するため、
- * 呼び出し側はそのまま渡せる）。
+ * 呼び出し側がファイル名順に並べてから渡すこと。
  *
  * @param {string[]} migrationTextsInFileOrder
  * @returns {{ tables: string[], indexes: string[], functions: string[] }} 最終的に生き残っている名前の集合（各々ソート済み・重複無し）
@@ -145,10 +92,6 @@ export function deriveMigrationObjects(migrationTextsInFileOrder) {
 }
 
 /**
- * `packages/postgres/src/embedding-space-table.ts` の現物から、埋め込み空間ごとに
- * 増えるテーブル名・HNSW索引名・ゼロベクトル用部分索引名（Issue #956 / ADR 0343）の
- * 接頭辞を読む。
- *
  * @param {string} embeddingSpaceTableSourceText
  * @returns {{ tablePrefix: string, indexPrefix: string, zeroNormIndexPrefix: string }}
  */
@@ -173,10 +116,6 @@ export function deriveEmbeddingSpaceNaming(embeddingSpaceTableSourceText) {
 }
 
 /**
- * `packages/postgres/src/migrate.ts` と `packages/postgres/src/vector-space.ts` の現物から、
- * 既定スキーマ（未指定 or `public`）での advisory lock キーと、`--schema` 指定時に
- * 使うシード文字列の接頭辞を読む。
- *
  * @param {{ migrateSourceText: string, vectorSpaceSourceText: string }} sources
  * @returns {{
  *   migrationLockKey: string,
@@ -213,9 +152,6 @@ export function deriveAdvisoryLockKeys({ migrateSourceText, vectorSpaceSourceTex
 }
 
 /**
- * README 中の `### <headingLabel>...` 見出しから、次の `##`/`###` 見出しの直前までを
- * 切り出す（`ci-yml-time-term-wiring.test.mjs` の `extractJob` と同じ考え方）。
- *
  * @param {string} markdownText
  * @param {string} headingLabel 見出し文字列の先頭一致（例: "テーブル"。"テーブル（8）" にも一致する）
  * @returns {string | undefined}
@@ -240,8 +176,6 @@ export function extractMarkdownSection(markdownText, headingLabel) {
 }
 
 /**
- * 見出し行の `（N）`/`(N)` から件数を読む（例: "### 索引（20）" → 20）。
- *
  * @param {string} markdownText
  * @param {string} headingLabel
  * @returns {number | undefined}
@@ -259,9 +193,7 @@ export function extractHeadingCount(markdownText, headingLabel) {
 }
 
 /**
- * 節本文の「`- \`name\`" 形式の箇条書き」だけから識別子を拾う。節中の説明文にある
- * 他の識別子への言及（バッククォート付きでも）を巻き込まないよう、**行頭が
- * `- \`` である行だけ**を対象にする。
+ * 行頭が箇条書きの行だけを対象にする。節中の説明文にある他の識別子への言及を巻き込まないため。
  *
  * @param {string} sectionText
  * @returns {string[]} 出現順（重複はそのまま残す。呼び出し側で必要なら dedupe すること）
@@ -279,8 +211,6 @@ export function extractBulletedIdentifiers(sectionText) {
 }
 
 /**
- * README の「この package が作るオブジェクト」節全体を、比較しやすい形に解析する。
- *
  * @param {string} readmeText
  * @returns {{
  *   tables: string[],

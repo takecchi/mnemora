@@ -1,38 +1,11 @@
 #!/usr/bin/env node
 /**
- * `examples/chat` の `identifier-probes` ベンチ(`MNEMORA_IDENTIFIER_PROBE_JSON` が吐く
- * JSON)を人が読める Markdown へ変換し、CI の Job Summary(`$GITHUB_STEP_SUMMARY`)へ
- * 載せる CLI(Issue #109)。
+ * 🔴 基準値と相違しても exit 0。これは意図した設計で、バグではない。「門にしない」と「基準値と比べない」は別のこと(ADR 0088 §3、§2.1)。
+ * 非0になるのは入力そのものが壊れているときだけ(`--baseline` が読めない/壊れている場合も含む)。
  *
- * 組み立ては `./identifier-probe-summary-lib.mjs` の純関数に委ねる
- * (`retrieval-quality-summary.mjs`/`-lib.mjs` と同じ分担)。ここは
- *
- * 1. `--measured <path>`(必須)・`--baseline <path>`(任意)を読む
- * 2. ファイルを読んで JSON.parse する(壊れていたら理由を stderr に出して非0で終わる)
- * 3. 形を検査する(`validateMeasured`/`validateBaseline`。壊れていたら同様に非0)
- * 4. Markdown を stdout に出す
- *
- * だけを行う。
- *
- * 使い方:
- *   node scripts/identifier-probe-summary.mjs --measured <path> [--baseline <path>]
- *
- * 🔴 **基準値ファイルと相違しても exit 0 のままである。**これは意図した設計であり、
- * バグではない——**「⛔ 門にしない」と「⛔ 基準値と比べない」は別のことである**
- * (`./identifier-probe-summary-lib.mjs` の冒頭 docstring を読むこと。差分を Job
- * Summary に出すのは ADR 0088 §3、相違では落とさないのは同 ADR「決めたこと」4番・
- * §2.1——両方を同時にやっている)。
- * **このスクリプトは門ではない。**非0になるのは、入力そのものが壊れているとき
- * (measured の JSON が読めない・parse できない・`status` が未知・`"measured"` なのに
- * 必須項目が無い。`--baseline` を指定していて、それが読めない/壊れている場合も含む)
- * だけである。
- *
- * 🔴 **`status: "weights_unavailable"` でも exit 0 である。**それ自体は「正しく壊れた」
- * 結果であり、この要約スクリプトにとっての「入力が壊れている」ではない。
- * ⚠ そのとき **`--baseline` を渡していても比較は1つも出さない**
- * (`buildSummaryMarkdown`)——⛔ 「測れなかった」を「基準値と違う」に化けさせない。
- * ⚠ **`identifier-probes` を実行する CI ステップ自体は、重みが取得できなければ non-zero
- * で終わる**(仕様どおり)——それとこのスクリプトの exit code は別の話である。
+ * 🔴 `status: "weights_unavailable"` でも exit 0。そのとき `--baseline` を渡していても比較は1つも出さない。
+ * ⛔ 「測れなかった」を「基準値と違う」に化けさせない。
+ * ⚠ `identifier-probes` を実行する CI ステップ自体は、重みが取得できなければ non-zero で終わる(仕様どおり)。この exit code とは別の話。
  */
 import { readFileSync } from "node:fs";
 import {
@@ -62,9 +35,7 @@ if (!measuredPath) {
 }
 
 /**
- * ファイルを読んで JSON.parse する。**読めない/parse できない理由をそのまま返す**
- * ——「壊れている」と一括りにせず、次に来る人がどこを見ればいいか分かるようにする
- * (`retrieval-quality-summary.mjs` の `readJson` と同じ形)。
+ * 読めない/parse できない理由をそのまま返す。「壊れている」と一括りにしない。
  *
  * @param {string} path
  * @param {string} label
@@ -115,7 +86,5 @@ console.log(
     ...(baselineValidated ? { baseline: baselineValidated.value } : {}),
   }),
 );
-// **明示的に 0 を宣言する**——`--baseline` が相違を含んでいても、`status` が
-// `weights_unavailable` でも、ここまで来たら入力は壊れていない。門ではない、という
-// 設計の要をコード上で目に見える形にする(`retrieval-quality-summary.mjs` と同じ)。
+// 明示的に 0 を宣言する。門ではない、という設計の要をコード上で目に見える形にする。
 process.exit(0);

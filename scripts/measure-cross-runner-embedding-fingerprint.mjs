@@ -1,36 +1,12 @@
 #!/usr/bin/env node
 /**
- * `.github/workflows/embedding-cross-runner-reproducibility.yml` の各脚（matrix: runner ×
- * numThreads × rep）が、`examples/chat` の `embedding-fingerprint` サブコマンドが書いた
- * 生ベクトル JSON（`--raw`）と、この CLI 自身が集める `lscpu`（無ければ `/proc/cpuinfo`）・
- * matrix の値から、1脚分の測定 JSON（`--out`）を書き出す CLI（Issue #565）。
+ * ⛔ 門ではない。`status: "ok"` になる限り値の良し悪しは判定せず、非0で終わるのは `--raw` の中身が
+ * 測定結果として使えない(壊れている)ときだけ。
  *
- * `scripts/measure-embedding-output-fingerprint.mjs`（2ジョブ比較の既存の測る段）と
- * ほぼ同じ形だが、次の3点が違う:
- *
- * 1. **float32 として** sha256・ビットパターンを持つ（{@link
- *    ../cross-runner-embedding-fingerprint-lib.mjs} の `sha256HexOfFloat32Vectors` /
- *    `vectorsToFloat32Hex`）——`measure-embedding-output-fingerprint-lib.mjs` の
- *    `sha256HexOfVectors` は float64 表現である（別の値。混同しないこと）。
- * 2. **`--runner-label` / `--rep` を必須で受け取る**（`--runner-name` は任意）——matrix の脚を
- *    識別する軸そのものである。`numThreads` は引数では受け取らず、`--raw` の中身
- *    （`embedding-fingerprint.ts` が書いた、provider が実際に使った値）をそのまま測定 JSON へ
- *    転記する。
- *    （2026-10-03 訂正）この項は以前 `--num-threads`（matrix が指定する値）も必須で受け取り、
- *    `--raw` の `numThreads` と食い違えば `note` に残す、と書いていた。現物の CLI には
- *    `--num-threads` の引数も、食い違いを `note` に残す処理も無い。
- * 3. `--raw` が既に持つ `runtimeVersions` / `weightsDigest` / `numThreads` をそのまま
- *    測定 JSON へ転記する（embed() を呼んだ側でしか取れない情報であり、ここでは
- *    再取得しない）。
- *
- * 使い方:
- *   node scripts/measure-cross-runner-embedding-fingerprint.mjs \
- *     --raw <path> --out <path> \
- *     --runner-label <label> --runner-name <name> --rep <n>
- *
- * ⛔ **このスクリプトは門ではない。**`status: "ok"` になる限り、値の良し悪しは判定
- * しない——非0で終わるのは、`--raw` の中身が測定結果として使えない（壊れている）ときだけ
- * である。
+ * sha256 は float32 として持つ。`measure-embedding-output-fingerprint-lib.mjs` の `sha256HexOfVectors` は
+ * float64 表現で別の値なので、混同しない。
+ * `numThreads`・`runtimeVersions`・`weightsDigest` は、`embed()` を呼んだ側でしか取れない情報なので、
+ * 引数で受け取らず `--raw` の値をそのまま転記する(ここでは再取得しない)。
  */
 import { readFileSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
@@ -95,9 +71,6 @@ if (raw.status !== "ok" && raw.status !== "weights_unavailable") {
 }
 
 /**
- * `lscpu` を試し、無ければ `/proc/cpuinfo` を試す（`measure-embedding-output-fingerprint.mjs`
- * の `collectCpuInfo` と同じ形）。
- *
  * @returns {Record<string, unknown>}
  */
 function collectCpuInfo() {

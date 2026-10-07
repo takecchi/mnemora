@@ -1,44 +1,15 @@
 /**
- * 文書（`*.md`）の中で**印を付けた** TypeScript のコード片を抜き出し、今の公開 API
- * （各パッケージの `exports` が指す `dist/*.d.ts`）に対してまとめて1回型検査する（ADR 0345）。
- *
- * ## 印（opt-in）
- *
- * フェンスの info string を `ts check`（または `typescript check`）にした片だけを見る。
- * GitHub の描画は info string の最初の語（`ts`）で言語を決めるので、描画は変わらない。
- * **印の無い片は1つも見ない。**わざと省略している片（`// ...省略`・シグネチャの断片・
- * 記法としての動詞の一覧）は、印を付けないだけで検査の外に出る。
- * ⟹ **偽陽性が出うる母集団は「印を付けた片」に閉じる**（ADR 0345 決定2）。
- *
- * ## 前提の変数（`runtime`・`ctx` など）
- *
- * 文書の片は、前の段落で組み立てた `runtime` や `ctx` を前提に書かれていることが多い。
- * それを補う宣言は **{@link DOC_SNIPPET_GLOBALS} の1か所だけ**に置く。片の側に書き足さない。
- * 片が自分で同じ名前を宣言・import していれば、片の側が勝つ（片はモジュールとして検査し、
- * 補う宣言は大域に置くため）。
- *
- * ## どこから解決するか
- *
- * 片はディスクに書かず、仮想ファイルとして Program に渡す。置き場所（＝モジュール解決の起点）は
- * {@link hostDirFor} が決める——`packages/<name>/` の下の文書はそのパッケージ、
- * それ以外（ルートの README・`docs/`）は `examples/chat`（`@mnemora/anthropic` 以外の
- * 公開パッケージすべてに依存する、利用者の立場の package）。
- * ⚠ **`dist` が無いと解決できない**——`pnpm run build` の後に走らせること（CI では Build の直後）。
- *
- * ## 保証しないこと
- *
- * - 型検査だけである。**実行はしない。**型が通っても、振る舞いが文書の説明どおりとは限らない。
- * - 印の付いていない片は見ない（上のとおり、それが設計である）。
+ * ⛔ 印の無い片は1つも見ない。偽陽性が出うる母集団を「印を付けた片」に閉じるため。
+ * ⛔ 片の前提の変数は {@link DOC_SNIPPET_GLOBALS} の1か所だけに置き、片の側に書き足さない。
+ * ⚠ `dist` が無いと解決できない。`pnpm run build` の後に走らせること。
  */
+
 import { posix as path } from "node:path";
 import ts from "typescript";
 
-/** 印を付けた開きフェンス（info string が `ts check` / `typescript check`）。 */
 const OPEN_FENCE_RE = /^\s*(`{3,}|~{3,})\s*(ts|typescript)\s+check\s*$/;
 
 /**
- * 1つの Markdown から、印を付けた片を抜き出す。
- *
  * @param {string} markdown
  * @returns {{ line: number; code: string }[]} `line` は片の1行目（フェンスの次の行）の1始まりの行番号。
  */
@@ -73,11 +44,7 @@ export function extractCheckedSnippets(markdown) {
 }
 
 /**
- * 片の前提になっている変数の宣言。**ここが唯一の置き場所である**（ADR 0345 決定3）。
- *
- * - 大域の宣言（script）として置くので、片が同じ名前を自分で宣言・import すれば片の側が勝つ。
- * - 型は `import("…")` で引く。解決の起点は `examples/chat`（{@link GLOBALS_HOST_DIR}）。
- * - ⛔ `any` で補わないこと。補った変数の上で片が何をしても通ってしまい、検査が噛まなくなる。
+ * ⛔ `any` で補わないこと。補った変数の上で片が何をしても通ってしまい、検査が噛まなくなる。
  */
 export const DOC_SNIPPET_GLOBALS = `// 文書のコード片が前提にしている変数（scripts/check-doc-snippets-lib.mjs、ADR 0345）。
 declare const runtime: import("@mnemora/core").Runtime;
@@ -93,12 +60,9 @@ declare const omission: import("@mnemora/core").FilteredOmission;
 declare const MyTenantSettingsStore: new () => import("@mnemora/core").TenantSettingsStore;
 `;
 
-/** 大域の宣言の置き場所（repo からの相対）。 */
 export const GLOBALS_HOST_DIR = "examples/chat";
 
 /**
- * 文書の片をどこから解決するか（repo からの相対のディレクトリ）。
- *
  * @param {string} mdPath repo からの相対パス（`/` 区切り）
  */
 export function hostDirFor(mdPath) {
@@ -107,15 +71,12 @@ export function hostDirFor(mdPath) {
   return GLOBALS_HOST_DIR;
 }
 
-/** 片1つぶんの仮想ファイル名（repo からの相対）。`.mts` にして常に ESM として読ませる。 */
 export function virtualFileFor(mdPath, line) {
   const name = `${mdPath.replace(/[^A-Za-z0-9]+/g, "_")}__L${line}.mts`;
   return path.join(hostDirFor(mdPath), "__doc_snippet__", name);
 }
 
 /**
- * `tsconfig.base.json` の compilerOptions を、検査用に読み替える。
- *
  * @param {string} repoRoot
  */
 export function loadCompilerOptions(repoRoot) {
@@ -144,8 +105,6 @@ export function loadCompilerOptions(repoRoot) {
 }
 
 /**
- * 片をまとめて1つの Program で型検査する。
- *
  * @param {{
  *   repoRoot: string;
  *   snippets: { file: string; line: number; code: string }[];
@@ -153,7 +112,6 @@ export function loadCompilerOptions(repoRoot) {
  *   compilerOptions?: import("typescript").CompilerOptions;
  * }} args
  * @returns {{ file: string; line: number; diagnostics: { line: number; code: number; message: string }[] }[]}
- *   `diagnostics[].line` は **Markdown の中の行番号**に読み替えてある。
  */
 export function checkSnippets({
   repoRoot,
@@ -168,7 +126,6 @@ export function checkSnippets({
   virtual.set(globalsPath, globalsSource);
   const entries = snippets.map((s) => {
     const fileName = path.join(repoRoot, virtualFileFor(s.file, s.line));
-    // `export {}` で必ずモジュールにする（片の宣言が大域の宣言と衝突しないように）。
     virtual.set(fileName, `${s.code}\nexport {};\n`);
     return { ...s, fileName };
   });

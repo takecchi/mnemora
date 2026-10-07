@@ -1,54 +1,19 @@
 /**
- * `scripts/openai-arm-summary.mjs`(CI の Job Summary に載せる Markdown を組み立てる CLI)
- * の純関数の側。ファイル I/O・`process.argv`・`process.exit` を一切持たない
- * ——`scripts/identifier-probe-summary-lib.mjs` と同じ分担・同じ理由(Issue #109 後半)。
+ * ⛔ 門にしない。判定(margin基準、ADR 0333)は Job Summary に記録するだけで、`openai-arm-summary.mjs` の exit code には反映しない。
+ * 旧判定(ADR 0316、`decideShadowVerdict`/`buildShadowVerdictSection`)は移行の追跡用に margin基準の節の下へ残す。関数名は既存の歯が import しているので変えない。
+ * 閾値(`MARGIN_VERDICT_OPTIONS`)は実測前に固定したもので、実測を見てから動かさない。
  *
- * `identifier-probes`/`numeral-token-probes` サブコマンドが**追加で**書き出す OpenAI
- * 実埋め込み(`recorded` provider 再生)の JSON(`examples/chat/src/openai-arm-json.ts`
- * の `OpenAiArmRunJson`。`groups` 配列)を Markdown へ変換する。
+ * ⚠ この `.mjs` は `tsx` を通さず TS 側の定数を import できないので、次の2組は二重管理。値を変えるときは両方直すこと。
+ * - `MRR_DROP_THRESHOLD` と `openai-arm-verdict.ts` の `DEFAULT_MRR_DROP_THRESHOLD`
+ * - `MARGIN_VERDICT_OPTIONS` と `verdict-candidate-margin.ts` の `DEFAULT_MARGIN_DROP_OPTIONS`
+ * 片方だけ変えてもどの歯も赤くならない(検出できていない負債)。
  *
- * `identifier-probe-summary-lib.mjs` と違い、**群の集合を固定 union にしない**
- * ——`identifier-probes` ジョブは4群、`numeral-token-probes` ジョブは2群を渡すため、
- * `--title` で見出しを変え、群は `groups` 配列をそのまま読む(名前は基準値ファイルの
- * `group` と突き合わせる)。
- *
- * ## ⛔ 門にしない。ただし判定を出す(Issue #109 後半 決めたこと3。ADR 0333 2026-09-30 追記)
- *
- * **このジョブの判定は margin基準(ADR 0333 §2、`decideMarginShadowVerdict`/
- * `buildMarginShadowVerdictSection`)である。**baseline margin(gold−distractor の
- * 類似度差)の標本標準偏差の `stdDevMultiplier` 倍以上縮んだ probe が
- * `minShrunkProbes` 件以上あれば red。閾値は実測前に固定した `MARGIN_VERDICT_OPTIONS`
- * (`stdDevMultiplier=3`・`minShrunkProbes=2`)——識別子2群の実測を見てから動かしていない。
- *
- * **旧判定(ADR 0316、`decideShadowVerdict`/`buildShadowVerdictSection`)は移行の
- * 追跡用にそのまま残している。**`examples/chat/src/openai-arm-verdict.ts` の
- * `decideEmbeddingDriftVerdict` と同じ規則(測定前に固定した閾値: hit@1 が基準値未満、
- * または MRR が基準値から `MRR_DROP_THRESHOLD` 以上落ちたら red)。実測(ADR 0333 §2.3)
- * では、識別子2群について旧判定だけが red になる巡がある——margin基準へ判定を
- * 差し替えた後も、読み手がその移行を Job Summary の上で追えるよう、旧判定の節を
- * margin基準の節の下に残す(Markdown 上の並び順は `buildSummaryMarkdown` 参照)。
- *
- * ⚠ **この `.mjs` は `tsx` を通さないため、TS 側の定数を import できない**
- * (`identifier-probe-summary-lib.mjs` の `WEIGHTS_UNAVAILABLE_PHRASE` や
- * `retrieval-quality-shadow-verdict.ts` の `SHADOW_MRR_THRESHOLD` と同じ制約)。
- * **二重管理であることを認めて書いておく**——値を変えるときは両方
- * (この `MRR_DROP_THRESHOLD` と `openai-arm-verdict.ts` の `DEFAULT_MRR_DROP_THRESHOLD`、
- * または `MARGIN_VERDICT_OPTIONS` と `verdict-candidate-margin.ts` の
- * `DEFAULT_MARGIN_DROP_OPTIONS`)を直すこと。歯
- * (`scripts/__tests__/openai-arm-summary-lib.test.mjs`・
- * `scripts/__tests__/openai-arm-margin-verdict-crosscheck.test.mjs` と
- * `examples/chat/src/__tests__/openai-arm-verdict.test.ts`)は別々に両方の値を
- * 検査しているので、片方だけ変えれば数字が食い違う(ただし片方だけ変えても
- * どちらの歯も「赤くならない」——これは検出できていない負債であり、下の
- * ADR に明記する)。
- *
- * **⛔ どちらの判定も CI を落とさない。**`decideRetrievalQualityShadowVerdict`
- * (ADR 0276)と同じ形——判定を出力に記録するだけで、`openai-arm-summary.mjs` の
- * exit code には一切反映しない。
+ * 群の集合を固定 union にしない。`groups` 配列をそのまま読む。
  */
 
-/** `examples/chat/src/openai-arm-verdict.ts` の `DEFAULT_MRR_DROP_THRESHOLD` と同じ値
- *  (二重管理。上の docstring 参照)。 */
+/**
+ * 二重管理(冒頭参照)。
+ */
 export const MRR_DROP_THRESHOLD = 0.01;
 
 const REQUIRED_GROUP_STRING_FIELDS = ["group", "label", "llmMode", "embeddingMode", "haystackKind"];
@@ -91,8 +56,6 @@ function findGroupFieldProblems(group, groupName) {
 }
 
 /**
- * `groups` 配列(実測または基準値)の形を検査する。名前(`group`)の重複は許さない。
- *
  * @param {unknown} groups
  * @param {string} label
  * @returns {string[]}
@@ -120,9 +83,7 @@ function findGroupsArrayProblems(groups, label) {
 }
 
 /**
- * `MNEMORA_IDENTIFIER_PROBE_OPENAI_JSON`/`MNEMORA_NUMERAL_TOKEN_OPENAI_JSON` が吐いた
- * JSON(パース済み)の形を検査する。**この群は `weights_unavailable` を持たない**
- * (`recorded` provider はモデル重み取得に依存しない)——`status` は常に `"measured"`。
+ * この群は `weights_unavailable` を持たない(`recorded` provider はモデル重み取得に依存しない)。`status` は常に `"measured"`。
  *
  * @param {unknown} data
  * @returns {{ ok: true, value: Record<string, unknown> } | { ok: false, error: string }}
@@ -143,8 +104,6 @@ export function validateMeasured(data) {
 }
 
 /**
- * 基準値ファイル(`*-baseline.openai.json`、パース済み)の形を検査する。
- *
  * @param {unknown} data
  * @returns {{ ok: true, value: { groups: Record<string, unknown>[] } } | { ok: false, error: string }}
  */
@@ -221,12 +180,7 @@ export function diffGroup(measuredGroup, baselineGroup) {
 }
 
 /**
- * 群ごとの「旧判定」(ADR 0316。⛔ 門ではない・⛔ 2026-09-30 以降はこのジョブの判定として
- * 使っていない——上の docstring 参照)。`examples/chat/src/openai-arm-verdict.ts` の
- * `decideEmbeddingDriftVerdict` と同じ規則を、この `.mjs` の中だけで再実装したもの
- * (二重管理。上の docstring 参照)。**関数名は変えていない**——
- * `scripts/__tests__/openai-arm-summary-lib.test.mjs` など既存の歯が名指しで import
- * しているため。
+ * 旧判定。⛔ 関数名は変えない(既存の歯が名指しで import している)。`decideEmbeddingDriftVerdict` の手複製で、二重管理。
  *
  * @param {Record<string, any>} measuredGroup
  * @param {Record<string, any> | undefined} baselineGroup
@@ -297,47 +251,20 @@ function buildDiffSection(measuredGroups, baselineGroups) {
 }
 
 /**
- * ## 判定節 — margin基準(ADR 0333 §2・§4.1・§4.3「A」、2026-09-30 追記で判定に採用)
+ * ⛔ 門ではない。`buildSummaryMarkdown` の exit code は変えない。
  *
- * **クローン miku の判断であり、オーナーの決定ではない**(ADR 0333 冒頭の注記と同じ立場)。
- * ADR 0333 が候補案1(margin基準、`stdDevMultiplier=3`・`minShrunkProbes=2`、
- * 識別子2群の実測を見る前に固定した閾値)を「次の候補として推す」とし、2026-09-30 の
- * 追記でこの Job Summary の**判定**として採った——**この節が、このジョブの判定である。**
+ * ⚠ 正本は `examples/chat/src/verdict-candidate-margin.ts`。TS を import できないので手複製で、値を変えるときは両方直す。
+ * `openai-arm-margin-verdict-crosscheck.test.mjs` が、同じ入力で両者の出力が一致することを検査する。
  *
- * ⛔ **ただし門ではない。**`buildSummaryMarkdown` の exit code は変えていない
- * (`openai-arm-summary.mjs` は元々 parse/validate 失敗時にしか非0にしない——判定を
- * 差し替えても、その経路は増えていない)。旧判定(ADR 0316、`decideShadowVerdict`/
- * `buildShadowVerdictSection`)はこの節の下に、移行の追跡用として残す
- * (上のファイル docstring 参照)。
+ * ⚠ `probeId` をキーにして突き合わせる。JSON から読んだ `probeMargins` は順序が保証されない。
  *
- * ⭐ **正本は `examples/chat/src/verdict-candidate-margin.ts`
- * (`DEFAULT_MARGIN_DROP_OPTIONS`・`decideMarginDropVerdict`)である。**
- * この `.mjs` は TS を import できないため、ここは**手複製**——上の `MRR_DROP_THRESHOLD`
- * と同じ事情(二重管理。値を変えるときは両方直すこと)。
- * 歯 `scripts/__tests__/openai-arm-margin-verdict-crosscheck.test.mjs` が、同じ入力を
- * TS 側 `decideMarginDropVerdict` とこの `.mjs` 側の両方に通し、同じ出力になることを
- * 検査する——ADR 0316 側の手複製(`decideShadowVerdict`)には無い歯である。
- *
- * ⚠ **`probeId` で突き合わせる。**TS側 `decideMarginDropVerdict` は呼び出し側が
- * 既に揃えた同順の配列(`(number|null)[]`)を受け取る前提だが、ここは JSON から読んだ
- * `probeMargins`(`OpenAiArmProbeMarginJson[]`、`examples/chat/src/openai-arm-json.ts`)を
- * 扱うため、**`probeId` をキーにして対応する値だけを比べる**——順序が保証されない
- * 入力に対しても正しく突き合わせるための、この `.mjs` 側だけの追加のロバスト性である
- * (突き合わせテストは、TS側へ渡す配列をこの `.mjs` と同じ `probeId` 交差で組み立ててから
- * 比較する——「同じ入力」を確保するため)。
- *
- * ⛔ **`per-probe margin が無い`・`probeId が1件も突き合わない`・
- * `baseline margin の標本標準偏差が定義できない`(count<2 または stdDev===0)ときは
- * red にしない。**「比較できない」を「悪化した」と同じ顔にしない
- * (`decideMarginDropVerdict` 本体と同じ規律。ADR 0008)。
+ * ⛔ per-probe margin が無い・`probeId` が1件も突き合わない・baseline margin の標本標準偏差が定義できない(count<2 または stdDev===0)ときは red にしない。
+ * 「比較できない」を「悪化した」と同じ顔にしない(ADR 0008)。
  */
 export const MARGIN_VERDICT_OPTIONS = { stdDevMultiplier: 3, minShrunkProbes: 2 };
 
 /**
- * `examples/chat/src/identifier-arm.ts` の `computeMarginStats` の手複製
- * (上の docstring 参照。正本は TS 側)。**export しているのは突き合わせテスト用**
- * (`scripts/__tests__/openai-arm-margin-verdict-crosscheck.test.mjs` が TS側の
- * `computeMarginStats` と同じ入力で同じ出力になることを検査する)。
+ * 正本は TS 側の `computeMarginStats`。export しているのは突き合わせテスト用。
  *
  * @param {readonly (number | null | undefined)[]} margins
  */
@@ -357,8 +284,6 @@ export function computeMarginStatsShadow(margins) {
 }
 
 /**
- * 1群ぶんの margin基準の判定(このジョブの判定。上の docstring 参照)。
- *
  * @param {Record<string, any>} measuredGroup
  * @param {Record<string, any> | undefined} baselineGroup
  * @param {{ stdDevMultiplier: number, minShrunkProbes: number }} options
@@ -447,8 +372,6 @@ export function decideMarginShadowVerdict(
 }
 
 /**
- * margin基準の判定節そのもの(このジョブの判定。上の docstring 参照)。
- *
  * @param {Record<string, any>[]} measuredGroups
  * @param {Record<string, any>[]} baselineGroups
  * @param {{ stdDevMultiplier: number, minShrunkProbes: number }} options
@@ -499,8 +422,7 @@ export function buildMarginShadowVerdictSection(
 }
 
 /**
- * 旧判定の節そのもの(ADR 0316。⛔ 2026-09-30 以降はこのジョブの判定として使っていない
- * ——移行の追跡用に残している。上の docstring 参照)。
+ * 旧判定の節。⛔ このジョブの判定としては使っていない(移行の追跡用に残している)。
  */
 function buildShadowVerdictSection(measuredGroups, baselineGroups) {
   const baselineByGroup = new Map(baselineGroups.map((g) => [g.group, g]));
@@ -530,9 +452,7 @@ function buildShadowVerdictSection(measuredGroups, baselineGroups) {
   return lines.join("\n");
 }
 
-/**
- * @param {{ title: string, measured: Record<string, any>, baseline?: { groups: Record<string, unknown>[] } }} input
- */
+/** @param {{ title: string, measured: Record<string, any>, baseline?: { groups: Record<string, unknown>[] } }} input */
 export function buildSummaryMarkdown({ title, measured, baseline }) {
   const lines = [`# ${title}(Issue #109 後半——OpenAI 実埋め込み、recorded provider 再生)`];
   const measuredGroups = /** @type {Record<string, any>[]} */ (measured.groups);
@@ -548,8 +468,7 @@ export function buildSummaryMarkdown({ title, measured, baseline }) {
   );
   if (baseline) {
     lines.push(buildDiffSection(measuredGroups, baseline.groups), "");
-    // 判定(margin基準、ADR 0333)を先に、旧判定(ADR 0316、移行の追跡用)をその下に置く
-    // ——ADR 0333 2026-09-30 追記。
+    // 判定(margin基準)を先に、旧判定をその下に置く。
     lines.push(buildMarginShadowVerdictSection(measuredGroups, baseline.groups), "");
     lines.push(buildShadowVerdictSection(measuredGroups, baseline.groups), "");
   }

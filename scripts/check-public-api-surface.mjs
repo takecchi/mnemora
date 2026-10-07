@@ -1,39 +1,14 @@
 #!/usr/bin/env node
 /**
- * 公開 API（publish 対象パッケージの `.d.ts`）の破壊的変更を検出する歯（Issue #342 / ADR 0178）。
+ * ⛔ 「変わった」ことだけを検出する。「壊れているか」(semver 的に安全か)は判定しない(ADR 0178)。
+ * union のメンバー並び替えのような意味的に無変化の変更も赤くする。
+ * ⛔ `bin` エントリは対象外。`exports.*.types` だけを起点にする(ADR 0178)。
+ * ⛔ 型として書かれていない破壊(実行時の意味変更)は拾わない。
  *
- * **なぜこれが要るか**
+ * `--write` を打つ前に、差分が破壊的変更かどうかを判断し、根拠 ADR にその破壊性を明記すること。
+ * この歯の狙いは破壊性の申告を人間に強制することで、`--write` はその申告の後に打つもの。
  *
- * Issue #342: `@mnemora/core` の `Runtime.getRecall`（ADR 0161）と `@mnemora/testkit` の
- * `TenantSettingsStoreConformanceOptions.supportsDecayClock`（ADR 0165）が、どちらも
- * 破壊的変更（既存の自前実装がコンパイルできなくなる）でありながら、根拠 ADR に
- * 破壊性の記載が無いまま `main` に着地した。ADR 0156 は「公開 API の破壊的変更も、
- * ADR を書けば実装してよい」という委譲であり、**ADR に書くことを免除してはいない**。
- * ところが CI にはこれを検出する歯が無く、v1.0.0 リリース準備の人手の棚卸しで
- * 初めて見つかった。
- *
- * **この歯がすること・しないこと**
- *
- * - 各 publish 対象パッケージ（`./publish-targets.mjs` の `PUBLISH_TARGETS`）の
- *   ビルド後の公開型シグネチャ（`exports.*.types` から辿れる `.d.ts` だけ、コメント抜き）を
- *   `scripts/__snapshots__/public-api/<パッケージdir名>.d.ts` と突き合わせる。
- * - 一致しなければ非0で終わり、unified diff を出す。
- * - ⛔ **「変わった」ことだけを検出する。「壊れているか」（semver 的に安全かどうか）は
- *   判定しない**——それは意図的な設計である（ADR 0178「引き受けた負債」）。
- *   union のメンバー並び替えのような意味的に無変化の変更も赤くする。
- * - ⛔ **`bin` エントリ（`@mnemora/postgres` の `mnemora-postgres-migrate`）は対象外。**
- *   `exports.*.types` だけを起点にする（ADR 0178「決定」）。
- * - ⛔ **型として書かれていない破壊（実行時の意味変更）は一切拾わない。**
- *
- * **`--write`**: snapshot を実際の内容で上書きする（`format`/`format:check` と同じ対）。
- * これを打つ前に、**差分が破壊的変更かどうかを判断し、根拠 ADR にその破壊性を明記すること**
- * ——この歯の狙いは「破壊性の申告を人間に強制する」ことであり、`--write` はその申告の後に
- * 打つものである。
- *
- * **既定（check モード）**: 差分があれば unified diff を出して exit 1。
- *
- * 対象パッケージのリストをここへ複製しない理由は `scripts/check-publish-pack.mjs` 冒頭と
- * 同じ（ADR 0066 が「2箇所に写しがある」問題を消した経緯そのもの）。
+ * 対象パッケージのリストをここへ複製しない(ADR 0066)。
  */
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -46,20 +21,13 @@ import { buildPublicApiSnapshotText } from "./public-api-surface-lib.mjs";
 const repoRoot = fileURLToPath(new URL("..", import.meta.url));
 
 /**
- * `scripts/check-cjs-transpile-parse.mjs` の `CJS_PARSE_CHECK_PACKAGES_ROOT` と同じ理由・
- * 同じ形の差し替え口。CI の `build` ジョブで `pnpm run test`（root vitest）が走る「Test」段は
- * 「Build」段より**前**にあり、実物の `packages/<name>/dist` はまだ存在しないことがある
- * ——だから `scripts/__tests__/` はこの歯を実物の dist に対しては走らせない。この env var は
- * 歯自身のテスト（`scripts/__tests__/check-public-api-surface.test.mjs`）が、
- * `./publish-targets.mjs` の `PUBLISH_TARGETS`（パッケージ名・dir 名）はそのまま使いつつ、
- * 中身は一時ディレクトリのフィクスチャへ差し替えて CLI をエンドツーエンドで走らせるための口。
- * 通常の実行（開発者の手元・CI）では未設定のままでよい。
+ * CI の「Test」段は「Build」段より前にあり、実物の `dist` がまだ無いことがある。
+ * そのためテストは実物に対して走らせず、この env var で一時ディレクトリのフィクスチャへ差し替える。
  */
 const packagesRoot = process.env.MNEMORA_API_CHECK_PACKAGES_ROOT
   ? resolve(process.env.MNEMORA_API_CHECK_PACKAGES_ROOT)
   : join(repoRoot, "packages");
 
-/** 上と同じ理由。snapshot の書き先も、テストでは作業ツリーの外へ差し替える。 */
 const snapshotDir = process.env.MNEMORA_API_CHECK_SNAPSHOT_DIR
   ? resolve(process.env.MNEMORA_API_CHECK_SNAPSHOT_DIR)
   : join(repoRoot, "scripts", "__snapshots__", "public-api");

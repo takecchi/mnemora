@@ -1,28 +1,7 @@
 #!/usr/bin/env node
 /**
- * `examples/chat` の `recall-footprint-calibration-samples` ベンチ
- * (`MNEMORA_RECALL_FOOTPRINT_CALIBRATION_SAMPLES_JSON` が吐く JSON)を人が読める
- * Markdown へ変換し、CI の Job Summary(`$GITHUB_STEP_SUMMARY`)へ載せる CLI
- * (Issue #340 フォローアップ、ADR 0314)。
- *
- * 組み立ては `./recall-footprint-calibration-samples-summary-lib.mjs` の純関数に
- * 委ねる(`compare-summary.mjs`/`consolidation-cost-summary.mjs` と同じ分担)。ここは
- *
- * 1. `--measured <path>`(必須)・`--baseline <path>`(任意。`examples/chat/recall-footprint-calibration-samples-baseline.json` が在り、`ci.yml` はそれを渡している)を読む
- * 2. ファイルを読んで JSON.parse する(壊れていたら理由を stderr に出して非0で終わる)
- * 3. 形を検査する(`validateMeasured`/`validateBaseline`。壊れていたら同様に非0)
- * 4. Markdown を stdout に出す
- *
- * だけを行う。
- *
- * 使い方:
- *   node scripts/recall-footprint-calibration-samples-summary.mjs --measured <path> [--baseline <path>]
- *
- * 🔴 **⛔ 門ではない。**`compare`(ADR 0133)と違い、この bench はまだ CI で複数回
- * 一致することを実測していない(ADR 0314 §2)。基準値ファイルと相違しても exit 0 の
- * ままである。非0になるのは、入力そのものが壊れているとき
- * (measured の JSON が読めない・parse できない・rows が欠ける・必須項目が無い。
- * `--baseline` を指定していて、それが読めない/壊れている場合も含む)だけである。
+ * ⛔ 門ではない。この bench はまだ CI で複数回一致することを実測していない(ADR 0314 §2)。
+ * 基準値と相違しても exit 0。非0になるのは入力そのものが壊れているときだけ(`--baseline` が読めない/壊れている場合も含む)。
  */
 import { readFileSync } from "node:fs";
 import {
@@ -101,6 +80,5 @@ const markdown = buildSummaryMarkdown({
 });
 
 console.log(markdown);
-// 明示的に0を宣言する——`--baseline` が相違を含んでいても、ここまで来たら入力は
-// 壊れていない。門ではない、という設計の要をコード上で目に見える形にする。
+// 明示的に 0 を宣言する。門ではない、という設計の要をコード上で目に見える形にする。
 process.exit(0);

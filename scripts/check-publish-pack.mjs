@@ -1,45 +1,13 @@
 #!/usr/bin/env node
 /**
- * publish 対象パッケージ（`./publish-targets.mjs` の `PUBLISH_TARGETS`。件数・名前は
- * そちらが唯一の定義——ここには写さない）を実際に `pnpm pack` し、
- * **tarball の中身**を検査する門。
- *
- * ⚠ `PUBLISH_TARGETS` のうち `NEVER_PUBLISHED_TARGETS`（`publish-pack-checks.mjs`）に
- * 載っているもの（git 上の version が `0.0.0` のままでよいもの）は、version 検査（下の検査2）
- * だけ対象外にする（ADR 0070。publish 済みでも載っていることがある——名前と意味のずれを含め、
- * 詳細は `NEVER_PUBLISHED_TARGETS` の doc コメント）。
- * （2026-10-03 訂正）`NEVER_PUBLISHED_TARGETS` は、いまは空である（仕組みだけを残してある）。
- *
- * **なぜ tarball の中身を見るか（作業ツリーの package.json を見るだけでは足りない理由）**
- *
- * 実測して確認した2つの落とし穴:
- *
- * 1. `dist/` が無い状態で `pnpm pack` を打っても、**exit code 0・エラー出力なし**で
- *    「`package/package.json` 1ファイルだけ」の tarball が出来る。`files: ["dist"]` の
- *    指す先が空でも、pack は誰も文句を言わない。`prepack` を足したことでこの穴は塞いだが、
- *    「塞いだこと」自体を作業ツリーの package.json を読むだけでは確認できない
- *    （`prepack` が実際にビルドを再生成するかは、走らせてみないと分からない）。
- * 2. `workspace:*` は `npm pack` ではそのまま tarball に残り、素の consumer が
- *    `npm install` すると `npm error code EUNSUPPORTEDPROTOCOL` で落ちる。`pnpm pack` は
- *    実版へ置換して出す。**だからこの repo の梱包の道具は pnpm である**——
- *    この門も `npm pack` ではなく `pnpm pack` だけを使う。
- *
- * **⚠ ADR 0060 は「publish の道具も pnpm に統一する」と書いたが、ADR 0066 がそこを狭めた。**
- * 梱包（`pack`）は pnpm、**アップロード（`publish`）は npm** である
- * ——npm の Trusted Publishing (OIDC) と provenance は npm CLI の側にあり、
- * `pnpm publish` には `--provenance` フラグが無い。だから `.github/workflows/publish.yml` は
- * `pnpm pack` の出した tarball を `npm publish <tarball>` へ渡す。
- * **この門が測っているのは、その受け渡しの手前——tarball の中身までである。**
- *
- * **対象は固定リストである（動的に発見しない）。** `scripts/run-db-tests.mjs` は
- * `test:db` script の有無で対象を発見しているが、ここでは同じ手が使えない——
- * publish 対象と非対象（ルートの `mnemora` / `@mnemora/example-chat`）を分ける
- * 機械的な目印が今のところ無い。**ADR 0066 で publish 対象の `private: true` が外れ、
- * 非対象2つには残った**ため「`private` の有無」が目印に見えるが、それは採らない
- * ——publish 対象でないものが `private` を持たない形（版を持たない内部パッケージ等）は
- * 普通に在りうるので、目印としては弱い。対象は上位で決定済みなので固定リストで持つ。
- * **新しい publish 対象パッケージが増えたら、このリストにも手で足す必要がある**
- * ——見落としを機械的には検知できない。
+ * ⛔ 作業ツリーの package.json を見るだけにせず、tarball の中身を見る。`dist/` が無くても `pnpm pack` は
+ * exit 0・エラー出力なしで `package/package.json` だけの tarball を出し、`workspace:*` は `npm pack` では
+ * そのまま残る（`pnpm pack` は実版へ置換する）。梱包は pnpm で、この門も `npm pack` を使わない。
+ * ⚠ アップロード（`publish`）は npm（Trusted Publishing と provenance は npm CLI 側にある）。
+ * この門が測るのは、その手前の tarball の中身まで。
+ * ⛔ 対象は `./publish-targets.mjs` の固定リストで、動的に発見しない。publish 対象と非対象を分ける
+ * 機械的な目印が無い（`private` の有無は目印として弱い）。新しい publish 対象が増えたら手で足す。
+ * 見落としは機械的には検知できない。
  */
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync } from "node:fs";
@@ -65,24 +33,8 @@ import {
 const repoRoot = fileURLToPath(new URL("..", import.meta.url));
 const BANNER = "─".repeat(72);
 
-/**
- * publish 対象は `./publish-targets.mjs` が持つ（ADR 0066 で1箇所へ集めた）。
- * それ以前はこのファイルと歯の2箇所に写しが在り、`.github/workflows/publish.yml` を足すと
- * 3箇所目が生まれるところだった。**この門と workflow が同じリストを見ていることが、
- * 「門を通ったものだけが publish される」の前提である。**
- */
+/** 判定関数の本体は `./publish-pack-checks.mjs` に置く。`pnpm pack` を走らせずに合成フィクスチャで直接呼べるようにするため。 */
 
-/**
- * 判定関数（`findWorkspaceProtocolViolations` / `findMissingEntryPoints` /
- * `findMissingReadme` / `findVersionViolations` / `findVersionSkewViolations` /
- * `findPublishAccessViolations` / `findOrphanedSourceMaps` / `findLicenseViolations` /
- * `findPrivateViolations`）の本体は `./publish-pack-checks.mjs` にある。
- * ここに実装を持たないのは、`scripts/__tests__/check-publish-pack.test.mjs` が
- * `pnpm pack` を一切走らせずに合成フィクスチャへ直接それらを呼べるようにするため
- * （`publish-pack-checks.mjs` 冒頭のコメント参照）。
- */
-
-/** `pnpm pack` を実行し、生成された tarball のパスを返す。 */
 function packOne(target, destDir) {
   const pkgDir = join(repoRoot, target.dir);
   const result = spawnSync("pnpm", ["pack", "--pack-destination", destDir], {
@@ -103,7 +55,6 @@ function packOne(target, destDir) {
   return join(destDir, tarballs[0]);
 }
 
-/** tarball を展開し、`package/` ディレクトリの絶対パスを返す。 */
 function extractTarball(tarballPath, destDir) {
   const result = spawnSync("tar", ["xzf", tarballPath, "-C", destDir], { encoding: "utf8" });
   if (result.status !== 0) {
@@ -136,20 +87,7 @@ console.log(
   ].join("\n"),
 );
 
-/**
- * ⚠ この門が見ていない範囲（ADR 0255「名乗れないものを道具に名乗らせない」への
- * 反例として ADR 0255 自身が名指しし、成文化した規律に射程通りに違反したまま
- * 引き受けていた負債。ADR 0259 決定A/B/C/D。Issue #580）。
- *
- * **対象は固定リストであり、この門はそのリストの中しか見ていない**——上の冒頭の
- * doc コメント「対象は固定リストである（動的に発見しない）」が認めている取りこぼしを、
- * 実行時の出力（成功・失敗どちらの分岐）にも焼く。マーカー行
- * `⚠ この門が見ていない範囲` は、かつて `scripts/check-pr-adr-reference.mjs`（削除済み）と
- * 逐語で揃えていた（grep 可能にするため。ADR 0259「決定C」）。
- *
- * 「いま見た${N}パッケージ」は `PUBLISH_TARGETS` から動的に作る——数を直書きしない
- * （ADR 0223 決定9（ADR 0234 で着地）・AGENTS.md「⚠ 数を、道具と生成物に焼き込まない」）。
- */
+/** ⛔ 「いま見た${N}パッケージ」は `PUBLISH_TARGETS` から動的に作る（数を直書きしない）。 */
 const SCOPE_CAVEAT_MARKER = "⚠ この門が見ていない範囲:";
 
 /** @param {{ name: string; dir: string }[]} targets */
@@ -204,17 +142,11 @@ try {
       continue;
     }
 
-    // 1. workspace: プロトコル
     const workspaceViolations = findWorkspaceProtocolViolations(manifest);
     for (const v of workspaceViolations) {
       violations.push(`[${target.name}] workspace: プロトコルが残っています: ${v}`);
     }
 
-    // 2. version
-    // ⚠ NEVER_PUBLISHED_TARGETS に載っているパッケージ（git 上の version が 0.0.0 のままで
-    // よいもの）は、この検査をそのパッケージにだけ適用しない（publish-pack-checks.mjs の
-    // NEVER_PUBLISHED_TARGETS の doc コメント参照。名前と意味はずれている）。version 揃い検査の
-    // 対象数からも外す（下の targetCount 参照）。
     if (NEVER_PUBLISHED_TARGETS.has(target.name)) {
       console.log(
         `  [${target.name}] version 検査を対象外にしました（git 上の version は 0.0.0 のままでよい。` +
@@ -230,43 +162,36 @@ try {
       }
     }
 
-    // 3. main / types / bin / exports の実在
     const missingEntryPoints = findMissingEntryPoints(manifest, packageDir);
     for (const m of missingEntryPoints) {
       violations.push(`[${target.name}] tarball 内に実在しないエントリポイント: ${m}`);
     }
 
-    // 4. README.md
     const missingReadme = findMissingReadme(packageDir);
     for (const r of missingReadme) {
       violations.push(`[${target.name}] ${r}`);
     }
 
-    // 5. publishConfig.access
     const publishAccessViolations = findPublishAccessViolations(manifest);
     for (const p of publishAccessViolations) {
       violations.push(`[${target.name}] ${p}`);
     }
 
-    // 6. 宙に浮いた source map
     const orphanedMaps = findOrphanedSourceMaps(packageDir);
     for (const o of orphanedMaps) {
       violations.push(`[${target.name}] 宙に浮いた source map: ${o}`);
     }
 
-    // 7. license（ADR 0061）
     const licenseViolations = findLicenseViolations(manifest, packageDir);
     for (const l of licenseViolations) {
       violations.push(`[${target.name}] ${l}`);
     }
 
-    // 8. private（ADR 0066）
     const privateViolations = findPrivateViolations(manifest);
     for (const p of privateViolations) {
       violations.push(`[${target.name}] ${p}`);
     }
 
-    // 9. 完全固定の実行時依存（Issue #166 / ADR 0112）
     const exactPinnedViolations = findExactPinnedDependencyViolations(
       manifest,
       EXACT_PINNED_DEPENDENCY_EXEMPTIONS[target.name] ?? [],
@@ -276,8 +201,7 @@ try {
     }
   }
 
-  // publish 対象すべてで同じ版であること（version 自体が有効だったものだけを比較する）。
-  // NEVER_PUBLISHED_TARGETS は対象数からも外す――揃っているかどうかを問う対象ではない。
+  // NEVER_PUBLISHED_TARGETS は対象数からも外す（揃っているかを問う対象ではない）。
   const publishedTargetCount = PUBLISH_TARGETS.filter(
     (t) => !NEVER_PUBLISHED_TARGETS.has(t.name),
   ).length;

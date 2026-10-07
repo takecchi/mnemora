@@ -1,77 +1,15 @@
 #!/usr/bin/env node
 /**
- * ルートの `test` 門の、DB を要求する段。
+ * ⛔ `test:db` を1本ずつ `pnpm --filter <name> run test:db` で直列に呼ぶ。`pnpm --recursive --if-present run test:db` の一発呼びに戻さない。
+ * 一発呼びで直列になっていたのは、依存順(`--sort`)がたまたま直列にしていただけで、依存の無い `test:db` パッケージが増えると並行に走る。
+ * `resetTestDatabase()` は同じ `DATABASE_URL` の同じテーブルに `TRUNCATE ... RESTART IDENTITY CASCADE` を撃ち、`tenant_id` の分離は `TRUNCATE` に効かない。
+ * 並行すると非決定的に赤くなる(実測)。
+ * `--workspace-concurrency=1` ではなく明示のループにした理由: 排他がこの門のコード自身に載る。pnpm の `--bail` は起動済みの兄弟プロセスを殺さない。どのパッケージで落ちたかをこの段自身が名指しできる。
  *
- * **なぜこの段が要るか**
+ * ⛔ 専用データベースは採らなかった(ADR 0016)。危険の実体は同一プロセス群が同一 DB を共有することで、この段の排他で足りる。
  *
- * `packages/postgres` と `examples/chat` の検査は本物の Postgres + pgvector を要求する
- * （擬似物へ黙ってフォールバックしない）。そのためスクリプト名は `test` ではなく
- * `test:db` に分けてあり、`pnpm -r --if-present run test` の対象から外れる——
- * **DB を持たない環境でもルートの門が通るように、意図してそうしてある**（PR #3）。
- *
- * その意図は保つ。壊れていたのは別のところで、**「DB テストが通った」と
- * 「DB テストを走らせていない」が、どちらも同じ緑だった**ことである。
- * 落ちたことすら手元では見えなかった。
- *
- * この段はその区別だけを回復する:
- *
- * | 状態 | 終了コード | 出力 |
- * |---|---|---|
- * | `DATABASE_URL` 未設定 | 0 | **「実行していない」と明示する**（緑だが、通ったのとは区別が付く） |
- * | `DATABASE_URL` 設定済み・DB テストが通った | 0 | 実行したことを明示する |
- * | `DATABASE_URL` 設定済み・DB テストが落ちた | **非 0** | pnpm の出力そのまま |
- *
- * `test:db` 自体の意味は変えていない。`DATABASE_URL` 無しで直接呼べば、これまで通り
- * 即エラーになる（`packages/postgres/src/__tests__/test-db.ts` の `requireDatabaseUrl`）。
- *
- * **なぜ `test:db` を1本ずつ `pnpm --filter <name> run test:db` で順に呼ぶか
- * （`pnpm --recursive --if-present run test:db` の一発呼びに戻さないこと）**
- *
- * 以前はここで `pnpm --recursive --if-present run test:db` を一度呼ぶだけだった。
- * それで `packages/postgres` → `examples/chat` の順に**直列に**走っていたのは事実だが、
- * それは「この段が排他を持っていたから」ではなく、**`examples/chat` が
- * `@mnemora/postgres` に `workspace:*` で依存しており、pnpm の既定（`--sort`、
- * 依存パッケージを先に実行する）がその2つをたまたま直列にしていただけ**である
- * （`--workspace-concurrency` の既定値は 4 で、依存関係の無いパッケージ同士は
- * 並行に走る。実測して確認した）。
- *
- * つまり、依存関係を持たない `test:db` パッケージが3つ目として増えた瞬間、
- * それは既存の2つと**並行に**走り出す。`resetTestDatabase()`
- * （`packages/postgres/src/__tests__/test-db.ts` /
- * `examples/chat/src/__tests__/test-db.ts`）は同じ `DATABASE_URL` の同じ7テーブル
- * （`memories` / `observations` / `memory_events` / `recalls` / `recall_usages` /
- * `outbox` / `tenant_settings`。埋め込み空間ごとのテーブルはパッケージごとに別だが、
- * この7つはテナント横断・スイート横断で完全に共有される）に対して
- * `TRUNCATE ... RESTART IDENTITY CASCADE` を撃つ。`tenant_id` によるテナント分離は
- * クエリの `WHERE` 句にしか無く、`TRUNCATE` には一切効かない。
- * 実測（一時的に `@mnemora/postgres` へ依存しない3つ目のパッケージを足し、
- * 同じ7テーブルへ200ms間隔で `TRUNCATE` を撃たせた）:
- *
- * - 並行に走らせた10試行すべてで `packages/postgres` の `test:db` が赤くなった
- *   （外部キー違反・「作ったはずの行が無い」というアサーション失敗・
- *   統計情報の激変によるクエリプラン変化など、壊れ方は試行ごとに違った——
- *   非決定的である）
- * - 同じ手順から並行だけを外した対照（5試行）はすべて緑だった
- *
- * **落ちたときの原因が「並行アクセス」であることは実測で切り分けたが、
- * どの行がどの瞬間に消えたかは再現するたび違う**——だから、この段は
- * 「依存グラフがたまたま守ってくれること」に頼らず、**この段自身のコードで
- * 一度に1パッケージしか `test:db` を起動しない**ことを約束する。
- * `--workspace-concurrency=1` を pnpm に渡すのではなく明示のループにしたのは、
- * (1) 排他が pnpm のフラグの意味ではなくこの門のコード自身に載ること、
- * (2) pnpm の `--bail`（既定で有効）は最初の失敗で**新しいパッケージの起動を
- * 止めるだけで、既に起動済みの兄弟プロセスを殺さない**ことを実測で確認しており
- * （失敗後もハンマー役のプロセスが生き残って DB を触り続けた）、
- * 一度に1本しか起動しなければこの穴がそもそも構造的に生じないこと、
- * (3) どのパッケージで落ちたかをこの段自身が名指しで言えること、の3点のため。
- *
- * **専用データベースは採らなかった**（ADR 0016）。CI の3ジョブ
- * （`postgres` / `example-chat` / `root-gate-db-stage`）はいずれも
- * `mnemora_ci` という同じ DB 名の独立した service container を持っており、
- * ジョブをまたいだ競合はそもそも起きない。危険の実体は
- * 「同一プロセス群が同一 DB を共有すること」であり、パッケージごとに DB を
- * 分ける変更は移行・CI 双方に広く手を入れる割に、この段だけの排他より
- * 過剰である。
+ * ⛔ `DATABASE_URL` 未設定は exit 0 だが「実行していない」と明示する。「通った」と「走らせていない」を同じ緑にしない。
+ * DB を持たない環境でもルートの門が通るよう、スクリプト名は `test` ではなく `test:db` に分けてある。
  */
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
@@ -84,18 +22,8 @@ const repoRoot = fileURLToPath(new URL("..", import.meta.url));
 const BANNER = "─".repeat(72);
 
 /**
- * `test:db` を持つワークスペースパッケージを、**依存関係を先に**という順序で列挙する。
- *
- * 名前を直書きせず pnpm に問い合わせるのは、**あとから `test:db` を足した
- * パッケージが黙って門から漏れるのを防ぐため**。この段の目的が
- * 「走っていないものが見えること」である以上、一覧そのものがずれてはいけない。
- *
- * 順序は、対象パッケージの `package.json` の `dependencies` / `devDependencies` に
- * 対象パッケージ同士の依存が無いか自前で見て、位相ソートする（`examples/chat` が
- * `@mnemora/postgres` に依存する、という既存の順序を保つため）。依存関係の無い
- * 組同士の順序は名前順に固定するだけで、どちらが先でも安全でなければならない
- * ——安全でないなら、それはこのスクリプトではなく各パッケージの `test:db` 側の
- * 独立性が壊れている。
+ * 名前を直書きせず pnpm に問い合わせる。あとから `test:db` を足したパッケージが黙って門から漏れるのを防ぐため。
+ * 依存の無い組同士の順序は名前順に固定する。どちらが先でも安全でなければならず、安全でないなら各パッケージの `test:db` 側の独立性が壊れている。
  */
 function findDbTestPackages() {
   const listed = spawnSync("pnpm", ["list", "--recursive", "--depth", "-1", "--json"], {
@@ -147,11 +75,8 @@ function findDbTestPackages() {
 
 const allPackages = findDbTestPackages();
 
-// `MNEMORA_DB_TESTS_SKIP`（カンマ区切りのパッケージ名）に挙げたパッケージは、DB 在りでも走らせない。
-// 使うのは CI の `root-gate-db-stage` ジョブだけ——`@mnemora/postgres` の `test:db` は、同じ集合を
-// `postgres` ジョブ（UTF8・SQL_ASCII の2つ、どちらも required）が走らせているので、この段で3回目を
-// 走らせない（ADR 0015 の 2026-09-28 追記）。黙って外さない: 外したものは名前を挙げて出し、知らない
-// 名前（綴りの誤り・改名の取り残し）が混ざっていたら赤にする。未設定なら今までどおり全部走らせる。
+// `MNEMORA_DB_TESTS_SKIP`(カンマ区切りのパッケージ名)に挙げたパッケージは、DB 在りでも走らせない。使うのは CI の `root-gate-db-stage` だけ(ADR 0015 の 2026-09-28 追記)。
+// 黙って外さない: 外したものは名前を挙げて出し、知らない名前(綴りの誤り・改名の取り残し)が混ざっていたら赤にする。
 const skipRequested = (process.env.MNEMORA_DB_TESTS_SKIP ?? "")
   .split(",")
   .map((name) => name.trim())
@@ -166,13 +91,12 @@ if (unknownSkips.length > 0) {
 const skipped = allPackages.filter((name) => skipRequested.includes(name));
 const packages = allPackages.filter((name) => !skipRequested.includes(name));
 if (allPackages.length > 0 && packages.length === 0) {
-  // 全部外すと何も走らせずに「通りました」を出してしまう——この段が塞いだ取り違えそのもの（ADR 0015）。
+  // 全部外すと何も走らせずに「通りました」を出してしまう(ADR 0015)。
   console.error(`MNEMORA_DB_TESTS_SKIP が ${DB_SCRIPT} を持つパッケージを全部外しています`);
   process.exit(2);
 }
 
 if (allPackages.length === 0) {
-  // `test:db` を持つパッケージが1つも無い。黙って通す（隠すものが無い）。
   process.exit(0);
 }
 
@@ -204,8 +128,7 @@ if (!process.env.DATABASE_URL) {
   process.exit(0);
 }
 
-// 接続先が何であるかを必ず1行出す。**歯は1本も弱めない**——出すだけである。
-// 理由と、取れなかったときも黙らない理由は scripts/db-server-description.mjs の冒頭を見ること。
+// ⛔ 歯は1本も弱めない。接続先が何であるかを必ず1行出すだけ。
 const serverLines = formatServerLines(
   describeDatabaseServer(process.env.DATABASE_URL, `${repoRoot}packages/postgres`),
 );
@@ -227,13 +150,8 @@ console.log(
   ].join("\n"),
 );
 
-// 一発の `pnpm --recursive --if-present run test:db` には戻さない。1パッケージずつ
-// `pnpm --filter <name> run test:db` を直列に呼び、常に「今どれが走っているか」を
-// この段自身が把握した状態にする（理由は冒頭のコメントを参照）。
-// このスクリプトに渡した引数は、各パッケージの `test:db`（`vitest run`）へそのまま渡す。ルートの門
-// （`run-root-test-gate.mjs`）は何も渡さないので、CI・手元の `pnpm test` の振る舞いは変わらない。
-// 渡すのは `scripts/__tests__/run-db-tests.test.mjs` の歯だけ（「落ちるとき赤くなる」は DB テストのファイル1本の名指し、
-// `MNEMORA_DB_TESTS_SKIP` の歯は `--bail=1`）——届かない DB へ全ファイルを走らせて全部落とすと、DB テストが増えるほど時間が伸びるため。
+// 一発の `pnpm --recursive ...` には戻さない(冒頭参照)。
+// このスクリプトの引数は各 `test:db` へそのまま渡す。ルートの門は何も渡さないので、CI・手元の振る舞いは変わらない。
 const forwardedArgs = process.argv.slice(2);
 
 for (const name of packages) {

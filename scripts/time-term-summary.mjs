@@ -1,34 +1,7 @@
 #!/usr/bin/env node
 /**
- * `examples/chat` の `time-term` ベンチ(`MNEMORA_TIME_TERM_JSON` が吐く JSON)を
- * 人が読める Markdown へ変換し、CI の Job Summary(`$GITHUB_STEP_SUMMARY`)へ載せる CLI
- * (Issue #217)。
- *
- * 組み立ては `./time-term-summary-lib.mjs` の純関数に委ねる
- * (`retrieval-quality-summary.mjs`/`identifier-probe-summary.mjs` と同じ分担)。ここは
- *
- * 1. `--measured <path>`(必須)・`--baseline <path>`(任意)を読む
- * 2. ファイルを読んで JSON.parse する(壊れていたら理由を stderr に出して非0で終わる)
- * 3. 形を検査する(`validateMeasured`/`validateBaseline`。壊れていたら同様に非0)
- * 4. Markdown を stdout に出す
- *
- * だけを行う。
- *
- * 使い方:
- *   node scripts/time-term-summary.mjs --measured <path> [--baseline <path>]
- *
- * 🔴 **基準値ファイルと相違しても exit 0 のままである。**これは意図した設計であり、
- * バグではない——`./time-term-summary-lib.mjs` の冒頭 docstring を読むこと(ADR 0088 §2)。
- * **このスクリプトは門ではない。**非0になるのは、入力そのものが壊れているとき
- * (measured の JSON が読めない・parse できない・probes が欠ける・必須項目が無い。
- * `--baseline` を指定していて、それが読めない/壊れている場合も含む)だけである。
- *
- * ⚠ **`--baseline` は本 PR の時点でコミット済みの基準値ファイルを持たない。**
- * `examples/chat/time-term-baseline.json` はまだ存在しない——値を捏造しないため、
- * 最初の CI 実行の artifact を後続 PR で基準値にする。それまでは `--baseline` を
- * 渡さずに呼ぶ(このスクリプトはそれでも動く)。
- * （2026-10-03 訂正）`examples/chat/time-term-baseline.json` は、いまは在る。`ci.yml` の
- * `time-term` ジョブはそれを `--baseline` に渡している。
+ * ⛔ 基準値と相違しても exit 0 のまま。門ではない(ADR 0088 §2)。
+ * 非0にするのは入力が壊れているときだけ。`--baseline` は任意。
  */
 import { readFileSync } from "node:fs";
 import {
@@ -56,8 +29,7 @@ if (!measuredPath) {
 }
 
 /**
- * ファイルを読んで JSON.parse する。**読めない/parse できない理由をそのまま返す**
- * ——「壊れている」と一括りにせず、次に来る人がどこを見ればいいか分かるようにする。
+ * 読めない・parse できない理由をそのまま返す。「壊れている」と一括りにしない。
  *
  * @param {string} path
  * @param {string} label
@@ -108,6 +80,5 @@ console.log(
     ...(baselineValidated ? { baseline: baselineValidated.value } : {}),
   }),
 );
-// **明示的に 0 を宣言する**——`--baseline` が相違を含んでいても、ここまで来たら
-// 入力は壊れていない。門ではない、という設計の要をコード上で目に見える形にする。
+// 門ではない: ここまで来たら入力は壊れていないので、相違があっても 0 を明示する。
 process.exit(0);

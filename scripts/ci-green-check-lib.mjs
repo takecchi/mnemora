@@ -1,24 +1,8 @@
 /**
- * `scripts/ci-green-check.mjs`（CI が緑かどうかを判定する CLI）の純関数の側。
- * ファイル I/O・`gh` の起動・`process.argv`・`process.exit` を一切持たない
- * ——`scripts/generate-adr-index-lib.mjs` と同じ分担・同じ理由。
- * （2026-10-03 訂正）この行は以前 `scripts/adr-index-completeness-lib.mjs` を指していた。
- * そのファイルは ADR 0137 で索引を機械生成にしたとき消えている。
- *
- * ここでの「check run」は GitHub の Checks API
- * （`GET /repos/{owner}/{repo}/commits/{ref}/check-runs` の `check_runs[]`）の要素で、
- * 各要素は「1つの workflow run の中の1つの job」に対応する（Issue #228）。
- * **「run」（`GET /repos/{owner}/{repo}/actions/runs/{run_id}`）の `conclusion` はここでは
- * 一切扱わない**——run 全体の conclusion と、その中の1 job の conclusion は別物であり
- * （Issue #228 観測2、run `34909106996` は run 全体が `failure` でも `archive-sweep-cost`
- * ジョブは `success` だった）、両者を混同しないことがこのファイルの前提そのものである。
+ * ⛔ 「run」(`actions/runs/{run_id}`)の `conclusion` は扱わない。run 全体の conclusion と、その中の1 job の conclusion は別物で、混同しないことがこのファイルの前提。
  */
 
-/**
- * check run の配列から、判定に要る形だけを取り出して要約する。
- *
- * @param {{ name: string, status: string, conclusion: string | null }[]} checkRuns
- */
+/** @param {{ name: string, status: string, conclusion: string | null }[]} checkRuns */
 export function summarizeCheckRuns(checkRuns) {
   const total = checkRuns.length;
   const pending = checkRuns.filter((r) => r.status !== "completed").map((r) => r.name);
@@ -31,14 +15,8 @@ export function summarizeCheckRuns(checkRuns) {
 }
 
 /**
- * 期待する集合（branch protection の required status checks）に対して、
- * check-runs が何を満たしていないかを返す。
- *
- * ⚠ **同じ名前の check-run が複数在りうる**（再実行など）。その場合は厳しい側に倒す
- * ——同名の中に1件でも `completed` でないものが在れば `pending` に、全件 `completed`
- * でも1件でも `conclusion !== "success"` があれば `nonSuccess` に入れる。つまり
- * 「同名の全部が completed かつ success」でなければ、その名前は満たされたとみなさない
- * （「たまたま最後の1件だけ見て success だった」という取り違えを避けるため）。
+ * ⚠ 同名の check-run が複数在りうる(再実行など)ので、厳しい側に倒す。
+ * 1件でも未完なら `pending`、全件完了でも1件でも success でなければ `nonSuccess`。最後の1件だけ見て success と取り違えない。
  *
  * @param {{name:string,status:string,conclusion:string|null}[]} checkRuns
  * @param {string[]} requiredContexts
@@ -68,7 +46,7 @@ export function summarizeRequiredContexts(checkRuns, requiredContexts) {
     }
     const failed = runs.filter((r) => r.conclusion !== "success");
     if (failed.length > 0) {
-      // 同名が複数在り、その中の失敗した実行を名指しする（最後の1件だけを見ない）。
+      // 同名が複数在るときは、失敗した実行を名指しする(最後の1件だけを見ない)。
       for (const r of failed) nonSuccess.push({ name: r.name, conclusion: r.conclusion });
     }
   }
@@ -77,25 +55,10 @@ export function summarizeRequiredContexts(checkRuns, requiredContexts) {
 }
 
 /**
- * `total === 0` の *理由* を、`mergeable_state`（REST API の PR フィールド。小文字の
- * enum: `"dirty"` / `"unknown"` / `"blocked"` / `"clean"` 等）に応じて切り分ける
- * （Issue #615）。
- *
- * ⛔ **これは緑の判定に使う情報ではない。**`verdict()` の他の分岐（`green`/`red` になる
- * 条件）は一切参照しない——ここで変わるのは「0件である理由」の説明文だけであり、
- * `status` は `total === 0` である限り常に `pending` のままである。
- *
- * - `"dirty"`: base と衝突しており、GitHub が merge ref を作れないため run 自体が
- *   作られない。**待っても来ない**——だから「まだ登録されていない可能性がある」という
- *   「待て」と読める文言を使わず、衝突を名指しする（Issue #615 実測: 起票者が
- *   `d03a4a0`/`3d551ab` の2件で `mergeable_state=dirty` のまま計42分ポーリングし、
- *   check-runs は0件のまま変わらなかった）。
- * - `"unknown"`（GitHub がまだ mergeability を計算中）: 🔴 **`"dirty"` と同じ扱いに
- *   しない。**`unknown` のときに run が作られるかどうかは確かめていない
- *   （Issue #615 が「確かめていないこと」として明記）——安全側に、従来どおり
- *   「まだ登録されていない可能性がある」に留める。
- * - それ以外の値・未取得（`null`/`undefined`）: 従来どおりの理由（劣化を黙ってやらない
- *   ——取得できなかったときは何も変えず、これまでの理由をそのまま返す）。
+ * ⛔ 緑の判定には使わない。`status` は `total === 0` の間ずっと `pending` で、変わるのは理由の文言だけ。
+ * `"dirty"` は merge ref が作れず run が作られない(待っても来ない)。「まだ登録されていない可能性」という待てと読める文言を使わず、衝突を名指しする。
+ * 🔴 `"unknown"` を `"dirty"` と同じ扱いにしない。そのとき run が作られるかは確かめていないので、従来の理由に留める。
+ * 取得できなかった(`null`/`undefined`)ときも、従来の理由をそのまま返す。
  *
  * @param {string | null | undefined} mergeableState
  * @returns {string}
@@ -112,31 +75,17 @@ function describeEmptyCheckRunsReason(mergeableState) {
 }
 
 /**
- * 「CI が緑か」を1つの判定に落とす。
+ * ⛔ `total === 0` は `pending`。0件を「対象が無いから緑」と読まない。理由の文言だけを `mergeableState` で切り分け、判定は変えない。
+ * `skipped`/`neutral`/`cancelled`/`timed_out`/`action_required` は success ではないので `red` 側に入る。
+ * 下限は required status checks に縛る(ADR 0215)。`needs:` を持つ job は依存元が終わるまで check-run 自体が無いため、
+ * 登録済みが全部 success でも `green` にしてはいけない窓がある。
  *
- * - `total === 0` は `pending` として扱う（まだ check-runs が1件も登録されていない可能性が
- *   あり、Issue #228 観測1 が示す通り「登録されていない ⟹ まだ緑ではない」——0件を
- *   「対象が無いから緑」と読まない）。**理由の文言だけは `mergeableState` で切り分ける**
- *   （`describeEmptyCheckRunsReason` を参照。Issue #615）——⛔ **判定（`pending` である
- *   こと自体）は変えない。**
- * - **`skipped`/`neutral`/`cancelled`/`timed_out`/`action_required` はどれも `success` では
- *   ないので `red` 側に入る**（issue が名指しした「`skipped` は緑ではない」の一般化）。
- * - **下限は branch protection の required status checks に縛る（ADR 0215）。**
- *   `total` が本来の本数より少ない状態でも、登録済みが全部 success なら旧実装は `green`
- *   を返してしまっていた——`postgres-regime-coverage` のように `needs:` を持つ job は
- *   依存元が終わるまで check-run 自体が存在しないため、push 直後の窓では「まだ登録
- *   されていない一部を除いて全部 success」という状態が実際に起きる（直近 main 30本中
- *   7本で観測）。`requiredContexts` を渡すことで、その集合が揃っているかを独立に
- *   検査し、揃っていなければ `green` を返さない。
+ * ⚠ `requiredContexts` は省略できない。省略可能にすると「取得できなかったから従来どおり」で下限が静かに無効化される。
+ * 取得不能は明示的に `null` を渡す。
  *
  * @param {{ name: string, status: string, conclusion: string | null }[]} checkRuns
- * @param {string[] | null | undefined} requiredContexts branch protection の
- *   required status checks の名前集合。**省略できない**——省略可能にすると
- *   「取得できなかったから従来どおり」で下限が静かに無効化されるため、呼び出し側は
- *   常に明示的に `null`（取得不能）または実際の配列を渡す。
- * @param {string | null | undefined} mergeableState PR の REST `mergeable_state`
- *   （省略可。**`total === 0` のときの理由の文言だけに使う**——`green`/`red` の判定条件には
- *   一切混ぜない。詳細は `describeEmptyCheckRunsReason` を参照。Issue #615）
+ * @param {string[] | null | undefined} requiredContexts
+ * @param {string | null | undefined} mergeableState
  * @returns {{ status: "pending" | "red" | "green", reason: string, summary: ReturnType<typeof summarizeCheckRuns>, required: { contexts: string[] | null, missing: string[], pending: string[], nonSuccess: {name:string,conclusion:string|null}[] } }}
  */
 export function verdict(checkRuns, requiredContexts, mergeableState) {
@@ -214,12 +163,7 @@ export function verdict(checkRuns, requiredContexts, mergeableState) {
 }
 
 /**
- * 2回のポーリングで拾った check run の名前集合を比べる。
- *
- * Issue #228 観測1（同じ sha の check-runs が時間とともに増える）への対策として、
- * 「今回の集合が前回と同じか」を機械的に見る。**これは「もう増えない」ことの証明では
- * ない**——`stable: true` は「少なくともこの2回の間には増減が無かった」だけを意味する
- * （ADR 本文「確かめていないこと」参照）。
+ * ⚠ `stable: true` は「この2回の間に増減が無かった」だけで、「もう増えない」ことの証明ではない。
  *
  * @param {{ name: string }[]} prevCheckRuns
  * @param {{ name: string }[]} currCheckRuns
@@ -233,19 +177,11 @@ export function compareCheckRunNameSets(prevCheckRuns, currCheckRuns) {
 }
 
 /**
- * 「CI が緑」は sha に紐づく事実であって、PR に紐づく事実ではない（Issue #294）。
- * 緑と判定した直後に1コミットでも push すると、その確認は無効になる。
- *
- * この関数は、green と判定された sha を**そのまま貼れるマージコマンド**にする。
- * `gh pr merge --match-head-commit <sha>` は、実行時の PR head が渡した sha と
- * 一致しないと失敗する（`gh pr merge --help` で存在を確認済み。挙動そのものは
- * この関数の呼び出し側であるCLIの docstring・ADR の「確かめたこと」を参照）。
- * ⟹ **「緑を見た sha」と「実際にマージされる sha」が一致することを、
- * 道具（`gh`）自身に強制させる**——「引き直せ」という文書の指示だけに頼らない。
+ * ⚠ 「緑を見た sha」と「実際にマージされる sha」の一致を、文書の指示ではなく `gh pr merge --match-head-commit` に強制させる。
  *
  * @param {string|number} prNumber
- * @param {string} sha フルの40桁 sha（省略しない。`--match-head-commit` にはフルを渡す）
- * @returns {string} 判定した sha を明示した上で、そのまま実行できる `gh pr merge` コマンドを含む文字列
+ * @param {string} sha
+ * @returns {string}
  */
 export function formatMatchHeadCommitHint(prNumber, sha) {
   const shortSha = sha.slice(0, 7);

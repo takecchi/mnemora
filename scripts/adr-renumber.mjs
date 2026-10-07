@@ -1,81 +1,18 @@
 #!/usr/bin/env node
 /**
- * ADR の番号採番を「マージ直前」に確定させる CLI（Issue #295、ADR 0179）。
- * 純関数側は `scripts/adr-renumber-lib.mjs`。
+ * ⚠ 既存の ADR は1本もリネームしない。動かすのは、このブランチが `origin/main` に対して新しく追加した
+ * `docs/decisions/*.md` のうち、番号が `origin/main` 側で既に使われているものだけ。
  *
- * ## 前提となる設計
+ * `--next` は助けにしかならない。他の PR が同時に同じ番号を選べば衝突しうるので、
+ * 確定させるのは引数無しの既定動作のほう。
  *
- * `main` へのマージは直列化されている（マージする側が1本ずつ直列に行う運用。
- * ADR 0137「決定」2番が同じ前提を明示している）。したがって、**マージ直前・
- * PR ブランチ上で、そのときの `main` を取り込んだ状態で番号を確定させれば、
- * その時点で他の ADR が同時に着地することは構造的に無い**——衝突しようがない
- * タイミングまで採番を遅らせる、という設計である（ADR 0179）。
+ * ⛔ この道具自身は `gh` を呼ばない。付け替え後の PR タイトル・本文の直しは、警告で促すだけ。
+ * 付け替えが起きなかったときは何も出さない(毎回出ると読み飛ばされる)。
  *
- * ADR を足す PR は、squash merge する**前**に PR ブランチ上で
- * `generate-adr-index.mjs` を実行して索引を commit する儀式を既に持っている
- * （ADR 0137 と、同 ADR 末尾の 2026-09-30 の追記）。
- * このツールは、その儀式に「索引の再生成より前」の一手として挿し込まれる:
- *
- * ```
- * git fetch origin main && git merge origin/main
- * node scripts/adr-renumber.mjs
- * node scripts/generate-adr-index.mjs
- * git add -A && git commit -m "..."
- * git push
- * node scripts/ci-green-check.mjs --pr <N>
- * gh pr merge <N> --squash
- * ```
- *
- * ⚠ **既存の ADR は1本もリネームしない。** 動かすのは「このブランチが
- * `origin/main` に対して新しく追加した `docs/decisions/*.md`」だけであり、
- * かつ、その番号が `origin/main` 側で既に使われている場合だけである。
- *
- * ## 使い方
- *
- * ```
- * node scripts/adr-renumber.mjs           # 衝突を検出し、あれば付け替えて全参照を書き換える
- * node scripts/adr-renumber.mjs --check   # 書き込まず、衝突の有無だけ判定する（0=無し/1=有り）
- * node scripts/adr-renumber.mjs --next    # 楽観的な最初の1本のために、まだ誰も
- *                                         # 取っていなさそうな次の番号を印字する
- * ```
- *
- * `--next` は `origin/main` に加えて、他のリモートブランチ（`refs/remotes/origin/*`）と
- * open な PR（`gh pr list` + `gh pr view --json files`）が主張している番号も見る。
- * **助けにしかならない**——`--next` が返した番号でも、他の PR が同時に同じ番号を
- * 選べば衝突しうる。確定させるのは、マージ直前に実行するこのツールの既定動作
- * （引数無し）のほうである。
- *
- * ## 付け替えたときの警告（Issue #405。本文についても対象を広げた経緯は
- * [ADR 0211](../docs/decisions/0211-check-pr-adr-reference-catches-abandoned-numbers-in-title-and-body.md) を見ること）
- *
- * 引数無しの既定動作が**実際に番号を付け替えたとき**（衝突が1件以上あったとき）
- * だけ、標準エラーへ警告を出す——「PR タイトルと PR 本文——squash commit の
- * タイトルと本文の両方——は機械が直せない。`gh pr edit <番号> --title ... --body ...`
- * で直すこと」という趣旨。⛔ **この道具自身は `gh` を呼ばない**——出力で促すだけ
- * である。付け替えが起きなかったとき（衝突なし・追加された ADR が無い）は何も
- * 出さない（毎回出ると読み飛ばされるため）。
- *
- * 本文の直し忘れをかつて CI で検査していた `scripts/check-pr-adr-reference.mjs` は
- * オーナーの判断で削除した ⟹ いまは機械では捕捉できない——この警告はその手前（付け替え直後・push 前）で人に
- * 気づかせるための、独立した一手である。
- *
- * ## 🔴 付け替えられずに残った参照の検出（Issue #615 のあと、PR #614/#618 の事故を受けて）
- *
- * `rewriteReferencesInText` は「`ADR ` に直接続く旧番号」しか書き換えない
- * ——`ADR 0270 / 0271` のような略記の連なりでは、2番目以降（`0271`）に
- * `ADR ` が直接続いていないため、対象の oldNumber であっても書き換わらない
- * （`adr-renumber-lib.mjs` の `findUnrewrittenAdrReferences` docstring 参照）。
- * **これは想像ではなく、PR #614（`74c5295`）が実際に踏み、PR #618（`bf6e9e7`）で
- * 人が事後に直した事故である。**
- *
- * `performRenumber()` は、書き換えの走査と同じループの中で
- * `findUnrewrittenAdrReferences` を全ての追加行に当て、残った旧番号があれば
- * `file:line` と該当行を名指しして標準エラーへ出し、**`process.exitCode = 1`
- * で終わる**。⛔ **この道具はそれを書き換えない**——射程を広げて「連なりの
- * 2番目以降」まで機械的に書き換えると、無関係な4桁数字を巻き込む危険が増える
- * （`AGENTS.md`「⚠ 偽陽性率に上限を置けない検査は門にしない」と同じ形の判断。
- * 詳細は `findUnrewrittenAdrReferences` docstring の「採らなかった案」）。
- * ⟹ **確定と書き込みは人に残す。**
+ * 🔴 `rewriteReferencesInText` は `ADR ` に直接続く旧番号しか書き換えない。`ADR 0270 / 0271` の
+ * ような連なりの2番目以降は届かないので、`performRenumber()` は残った旧番号を `file:line` つきで
+ * 標準エラーへ出し、`process.exitCode = 1` で終わる。
+ * ⛔ 書き換えはしない。射程を広げると無関係な4桁数字を巻き込む。確定と書き込みは人に残す。
  */
 import { readFileSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
@@ -109,7 +46,6 @@ function run(cmd, args, options = {}) {
   return result.stdout;
 }
 
-/** 失敗しても例外を投げず null を返す版。存在確認・ベストエフォートの操作に使う。 */
 function tryRun(cmd, args, options = {}) {
   try {
     return run(cmd, args, options);
@@ -125,7 +61,7 @@ function adrNumbersFromRef(ref, { strict = false } = {}) {
     .split("\n")
     .map((line) => line.trim())
     .filter((line) => line.length > 0);
-  // ADR 0540: 形の外れた名前は、黙って数えずに落とす（`origin/main` の分。他のブランチの分は、その枝の持ち主の責任なので strict にしない）。
+  // `origin/main` の分だけ strict。他のブランチの分は、その枝の持ち主の責任。
   if (strict) assertWellFormedAdrFilenames(directChildNames(paths));
   return paths
     .map((path) => basename(path))
@@ -133,7 +69,6 @@ function adrNumbersFromRef(ref, { strict = false } = {}) {
     .map((filename) => parseAdrFilename(filename).number);
 }
 
-/** `docs/decisions/` の直下（サブディレクトリの中を除く）のファイル名だけを取り出す。 */
 function directChildNames(paths) {
   return paths
     .filter((p) => p.startsWith(decisionsPrefix) && !p.slice(decisionsPrefix.length).includes("/"))
@@ -150,12 +85,8 @@ function parseArgs(argv) {
 }
 
 function loadAddedAdrFiles() {
-  // 二点 diff（working tree 対 origin/main）を使う——三点 diff
-  // （origin/main...HEAD）は「コミット済み」の差分しか見ないが、この CLI
-  // 自身が行う `git mv`（後続の呼び出しで行う）はコミット前の作業木の変更
-  // であり、二点 diff でなければ拾えない。`git merge origin/main` 済みの
-  // ブランチでは、merge-base(origin/main, HEAD) は origin/main そのものに
-  // なるため、二点 diff は三点 diff の「コミット済み分」を完全に含む。
+  // 二点 diff(working tree 対 origin/main)を使う。三点 diff は commit 済みの差分しか見ず、
+  // この CLI 自身が行う `git mv` はコミット前の作業木の変更なので拾えない。
   const diffOut = run("git", [
     "diff",
     "--diff-filter=A",
@@ -168,7 +99,6 @@ function loadAddedAdrFiles() {
     .split("\n")
     .map((line) => line.trim())
     .filter((line) => line.length > 0 && line.startsWith(decisionsPrefix));
-  // ADR 0540: 書き換えや改名の前に、形の外れた名前で落とす（ADR 0537 の生成器と同じ規則）。
   assertWellFormedAdrFilenames(directChildNames(addedPaths));
   return addedPaths
     .map((path) => basename(path))
@@ -327,25 +257,15 @@ function performRenumber() {
     slug: c.slug,
   }));
 
-  // ⚠ 書き換えの対象は「origin/main に対してこのブランチが変更した行」だけに
-  // 絞る。`origin/main` から継承した行（このブランチが触っていない行）は、
-  // たとえ衝突した番号への正当な言及が同居していても一切変更しない——
-  // このリポジトリで実際に `git grep -n "ADR <番号>\b"` を打つと、衝突した
-  // 番号（定義上 origin/main で既に使われている番号）への正当な言及が
-  // repo 全体に多数見つかる（`adr-renumber-lib.mjs` の docstring 参照）。
-  // それらを巻き込まないために、`git mv` 後の現在の diff（working tree
-  // 対 origin/main）を見て、追加された行だけを対象にする。
+  // ⚠ 書き換えは「origin/main に対してこのブランチが変更した行」だけ。継承した行には、
+  // 衝突した番号への正当な言及が多数あるので、巻き込まない。
   const changedFiles = run("git", ["diff", "--name-only", "origin/main"])
     .split("\n")
     .map((l) => l.trim())
     .filter((l) => l.length > 0);
 
   let touchedFiles = 0;
-  // 🔴 `rewriteReferencesInText` が構造的に届かない位置（`ADR NNNN / MMMM` の
-  // ような略記の連なりの2番目以降）に残った旧番号を、付け替えと同じ走査の中で
-  // 集める（`findUnrewrittenAdrReferences` の docstring・Issue #615 参照）。
-  // ⛔ ここでは書き換えない——検出して人に渡すだけ（AGENTS.md「⚠ 機械には
-  // 『検出』まで」）。
+  // 🔴 ⛔ `rewriteReferencesInText` が届かない位置の旧番号は、検出して人に渡すだけで書き換えない。
   const unrewrittenHits = [];
   for (const relPath of changedFiles) {
     const absPath = join(repoRoot, relPath);
@@ -367,10 +287,7 @@ function performRenumber() {
       const idx = lineNo - 1;
       if (idx < 0 || idx >= lines.length) continue;
       const { text: newLine, changes } = rewriteReferencesInText(lines[idx], renames);
-      // 書き換えの成否に関わらず、この行に「rewriteReferencesInText が届かない
-      // 位置の旧番号」が残っていないかを見る——PR #614 の事故は、まさに
-      // changes.length === 0（この行では何も書き換わらなかった）のまま
-      // `0271` が残ったケースだった。
+      // 書き換えの成否に関わらず見る。何も書き換わらなかった行にも旧番号が残りうる。
       for (const hit of findUnrewrittenAdrReferences(newLine, renames)) {
         unrewrittenHits.push({ file: relPath, lineNo, lineText: newLine, ...hit });
       }
@@ -393,8 +310,6 @@ function performRenumber() {
     `完了。${conflicts.length} 本の ADR を付け替え、${touchedFiles} ファイルの参照を書き換えました。`,
   );
 
-  // 付け替えが実際に起きたときだけ警告する（Issue #405）——PR タイトル・本文と
-  // squash commit のタイトル・本文は、ここまでの `git mv` / 行の書き換えでは直らない。
   const warning = renumberedReferenceWarning(conflicts);
   if (warning) {
     console.error(warning);

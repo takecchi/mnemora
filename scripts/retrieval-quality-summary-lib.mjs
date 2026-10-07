@@ -1,41 +1,16 @@
 /**
- * `scripts/retrieval-quality-summary.mjs`(CI の Job Summary に載せる Markdown を組み立てる
- * CLI)の**純関数の側**。ファイル I/O・`process.argv`・`process.exit` を一切持たない
- * ——`scripts/publish-dry-run.mjs`(判定)と `scripts/decide-publish-dry-run.mjs`
- * (CLI)の分担と同じ形にしてある。理由も同じ: 純関数だけを直接 import して検査できると、
- * 「本物のスクリプトを子プロセスで起動する歯」(`retrieval-quality-summary.test.mjs`)と
- * 「組み立てのロジックだけを見る歯」(`retrieval-quality-summary-lib.test.mjs`)を
- * 分けて置ける。
+ * 純関数の側。ファイル I/O・`process.argv`・`process.exit` を持たない。
  *
- * ## なぜこのファイルが要るか
+ * ⛔ 基準値との相違で non-zero を返さない(門にしない)。decay/freshness が実行間で揺れ、
+ * 相違自体は異常ではない(ADR 0088 §2)。non-zero にするのは入力が壊れているときだけ。
  *
- * `examples/chat` の `retrieval` ベンチ(`MNEMORA_RETRIEVAL_JSON`)が吐く JSON は、
- * 3 arm の MRR/`hit@1`/`hit@10` を持つが、**それを人が読む形(CI の Job Summary)へ
- * 変換する道具がここまで無かった**——ADR 0022 が名指しした「CI に想起の質の回帰を
- * 検知する歯が無い」という負債の、器の側。
+ * ⛔ 数値は許容誤差なしで比べる。「2回一致した」は決定的である証明ではない
+ * (decay/freshness は時刻依存で、similarity が押し切っているだけ)。
+ * 許容誤差が要るなら、先に揺れの実測を取ってから閾値を入れること。
  *
- * ## 採らなかった案
- *
- * - **YAML/JSON パーサ以外の依存を足す**(表組みライブラリ等)。却下——
- *   `docs/autonomy.md` は依存追加をオーナー専権と定めている。Markdown のテーブルは
- *   文字列の連結で足りる。
- * - **基準値との相違で non-zero を返す**。却下(呼び出し契約で明示されている)——
- *   このスクリプトは「門」ではない。**bench の値は decay/freshness/tenantId が
- *   実行間で揺れることが分かっている**(ADR 0088 §2)ため、相違そのものは
- *   異常ではない。異常なのは**入力が壊れていること**(JSON が読めない・arm が欠ける・
- *   必須項目が無い)だけであり、それだけを non-zero にする。
- * - **数値の一致を許容誤差付きで比較する**。今回は採らない——`mrrOverall` 等は
- *   `goldRank`(整数)から導かれる有理数であり、**観測した範囲では2回の実行で完全に
- *   一致した**(ADR 0088 §2 の実測)。許容誤差を入れると、コードが変わって本当に値が
- *   動いたときに小さすぎる変化を「一致」として握り潰す恐れがある。
- *   **⚠ ただし「2回一致した」は「決定的である」の証明ではない。**`decay`/`freshness` は
- *   時刻に依存して実行ごとに揺れており(ADR 0088 §2 で `total` の6桁目が動くことを実測)、
- *   `similarity` が約 10^6 倍の変域で押し切っているために順位が動かないだけである。
- *   **⟹ だからこのスクリプトは相違を報告するだけで、門にはしない。**
- *   **もし将来 誤差が必要になったら、その根拠(揺れの実測)を先に取ってから閾値を入れること。**
+ * ⛔ 表組みなどの依存を足さない(依存追加はオーナー専権。`docs/autonomy.md`)。
  */
 
-/** 1 arm が持つべき必須項目と、その型検査。 */
 const REQUIRED_ARM_STRING_FIELDS = ["armLabel", "llmMode", "embeddingMode"];
 const REQUIRED_ARM_NUMBER_FIELDS = [
   "mrrOverall",
@@ -47,10 +22,8 @@ const REQUIRED_ARM_NUMBER_FIELDS = [
 ];
 
 /**
- * 1 arm のオブジェクトが必須項目をすべて正しい型で持っているかを検査する。
- *
  * @param {unknown} arm
- * @returns {string[]} 欠けている/型が違う項目の説明。空なら問題無し。
+ * @returns {string[]}
  */
 function findArmFieldProblems(arm) {
   if (typeof arm !== "object" || arm === null) {
@@ -71,11 +44,7 @@ function findArmFieldProblems(arm) {
 }
 
 /**
- * `MNEMORA_RETRIEVAL_JSON` が吐いた JSON(パース済み)の形を検査する。
- *
- * **壊れている、と判定する条件はここに限定する**(呼び出し契約: 基準値との相違では
- * 落とさない。ここで拾うのは「読めても、中身が retrieval-quality の実測結果として
- * 使えない」場合だけ)。
+ * ⛔ 「壊れている」とする条件はここに限る。基準値との相違では落とさない。
  *
  * @param {unknown} data
  * @returns {{ ok: true, value: { arms: Record<string, unknown>[] } } | { ok: false, error: string }}
@@ -102,9 +71,6 @@ export function validateMeasured(data) {
 }
 
 /**
- * 基準値ファイル(パース済み)の形を検査する。実測と同じ `arms` の形を要求する
- * (基準値ファイルの `_readme`/`provenance` 等の付帯情報は見ない——見る理由が無い)。
- *
  * @param {unknown} data
  * @returns {{ ok: true, value: { arms: Record<string, unknown>[] } } | { ok: false, error: string }}
  */
@@ -129,12 +95,10 @@ export function validateBaseline(data) {
   return { ok: true, value: /** @type {{ arms: Record<string, unknown>[] }} */ (data) };
 }
 
-/** `4/7` の形。 */
 function formatFraction(count, total) {
   return `${count}/${total}`;
 }
 
-/** MRR を既存のベンチの表示(`toFixed(3)`)に揃える。 */
 function formatMrr(value) {
   return value.toFixed(3);
 }
@@ -151,11 +115,7 @@ const DIFF_FIELDS = [
 ];
 
 /**
- * 実測の arm 1件と、対応する基準値の arm(無ければ `undefined`)を比べる。
- *
- * **`armLabel` の完全一致で対応付ける。**arm の数や順番が変わっても、ラベルさえ
- * 変わらなければ正しく比較できる(ADR 0068 §2「arm を跨いで拾える形」の逆——
- * ここでは意図して同じ arm 同士だけを突き合わせる)。
+ * ⛔ `armLabel` の完全一致で対応付ける。別ラベルの arm 同士は突き合わせない。
  *
  * @param {Record<string, unknown>} measuredArm
  * @param {Record<string, unknown> | undefined} baselineArm
@@ -175,11 +135,7 @@ export function diffArm(measuredArm, baselineArm) {
   return { armLabel, matches: fieldDiffs.length === 0, missingBaseline: false, fieldDiffs };
 }
 
-/**
- * arm ごとの表(ADR 0068 ② の形: arm・モード・MRR・`hit@1`・`hit@10` を同一行に置く)。
- *
- * @param {Record<string, unknown>[]} arms
- */
+/** @param {Record<string, unknown>[]} arms */
 function buildArmTable(arms) {
   const header =
     "| arm | llmMode | embeddingMode | MRR(全体) | MRR(lexicalControl) | MRR(非語彙) | hit@1 | hit@10 |";
@@ -199,9 +155,6 @@ function buildArmTable(arms) {
 }
 
 /**
- * 基準値との差分節。**一致なら1行、違うときだけ展開する**(呼び出し契約 / PR 本文)
- * ——常に同じ量を出す観測口は読まれない、という判断をここで実装する。
- *
  * @param {Record<string, unknown>[]} measuredArms
  * @param {Record<string, unknown>[]} baselineArms
  */
@@ -248,14 +201,11 @@ function buildDiffSection(measuredArms, baselineArms) {
 }
 
 /**
- * ADR への参照は**相対パスのリンクにしない**——このセクションの出力先は
- * `$GITHUB_STEP_SUMMARY`（GitHub Actions の run ページ）であり、そこはリポジトリの
- * ファイルツリーの上に立っていない。相対リンクを置くと、クリックしても解決しない
- * 死んだリンクになる。絶対 URL（`main` ブランチ）にしておけば、少なくとも踏める。
+ * ADR への参照を相対パスのリンクにしない。出力先は `$GITHUB_STEP_SUMMARY` で、
+ * リポジトリのファイルツリーの上に立っておらず、相対リンクは死ぬ。絶対 URL(`main`)にする。
  */
 const REPO_BLOB_BASE = "https://github.com/takecchi/mnemora/blob/main/docs/decisions";
 
-/** 3つの必須の読み方の注意書き(PR 本文で指定された内容そのもの)。 */
 function buildCautionSection() {
   return [
     "## 読み方の注意",
@@ -275,24 +225,11 @@ function buildCautionSection() {
 }
 
 /**
- * ⭐ 向きを反転させた警告(ADR 0108)。
- *
- * 他の節はすべて「いま赤く、直ったら緑」の形(基準値との相違・入力の破損)だが、
- * これは逆向きである——**「いま静かで、ベンチの構成が黙って変わったら騒ぐ」。**
- * 測っているのは欠陥ではなく、**ベンチの構成そのもの**である: `examples/chat` の
- * retrieval ベンチは `recall()` に `channels` を渡しておらず、既定
- * `DEFAULT_RECALL_CHANNELS`(`["ann"]`)だけで recall している——`LexicalStore` を
- * 配線していない限り、`score.lexicalMatch` 欄は返ってきた行のどれにも現れない。
- *
- * ⛔ **このジョブは門ではない。**この関数も exit code には触れない
- * (`buildSummaryMarkdown` が呼ぶ側であり、こちら自身は文字列を返すだけ)。
- * `lexicalMatchRows`/`recalledRows` は `RetrievalQualityArmJson` の**省略可能欄**
- * (`examples/chat/src/retrieval-json.ts`)なので、古い実測 JSON(この PR 以前に
- * 書かれたもの)にはそもそも欄が無い——そのときは何も警告しない(測れないことを
- * 「0 だった」と偽らない)。
+ * ⛔ 門ではない(exit code に触れない)。省略可能欄が無い古い実測 JSON では何も警告しない
+ * (測れないことを「0 だった」と偽らない)。
  *
  * @param {Record<string, unknown>[]} arms
- * @returns {string | null} 警告すべき arm が無ければ(欄自体が無い run を含む)null。
+ * @returns {string | null}
  */
 export function buildLexicalChannelWarningSection(arms) {
   const measurable = arms.filter((arm) => typeof arm.lexicalMatchRows === "number");
@@ -330,35 +267,11 @@ export function buildLexicalChannelWarningSection(arms) {
 }
 
 /**
- * ⭐ 非門の節(ADR 0109)。`buildLexicalChannelWarningSection`(ADR 0108・上)と
- * **同じ向き**である。
- *
- * **向きの判定(このコメントに明記する理由: マネージャーから「自分で考えて明記せよ」と
- * 指示された)**: 「向きを反転させた」は、この repo の他のほとんどの節
- * (基準値との相違・入力の破損 = **いま赤く、直ったら緑**)に対する反転であって、
- * `buildLexicalChannelWarningSection` 自体に対する反転ではない。
- * `buildLexicalChannelWarningSection` が測るのは
- * 「**いま(語彙チャンネルは)静かで(lexicalMatchRows===0=チャンネルが一度も
- * 発火していない)、ベンチの構成が黙って変わったら騒ぐ(発火するようになる)**」
- * という極性である。この節が測る「候補間で値が1通りしか無い項」も、同じ極性を持つ
- * ——**いま(その項は)静かで(`maxDistinctPerProbe === 1` = 候補間で値が動いていない)、
- * ベンチの前提が黙って変わったら騒ぐ(何通りかの値を取るようになる)。**
- * 違いは「何が静かか」だけである——`buildLexicalChannelWarningSection` は
- * **チャンネルの不在**(欄そのものが1行も現れない)を測り、この節は
- * **値の定数性**(欄は現れるが候補間で動かない)を測る。⟹ **「いま騒いでいて、
- * 直ったら静かになる」の逆向きではない**——採らなかった。理由は、両方とも
- * 「この構成のままでは重みを触っても順位が動かない」という**現状の限界**を示す
- * 警告であり、限界が解消されたときに警告が消える(=直ったら静かになるのではなく、
- * 今の"静かな項"が"騒ぎ出したら"警告が消える)という同じ因果の向きを持つため。
- *
- * ⛔ **このジョブは門ではない。**この関数も exit code には触れない。
- * `termDistinct`/`decayFreshnessEqualRows`/`decayFreshnessDifferentRows` は
- * `RetrievalQualityArmJson` の**省略可能欄**なので、古い実測 JSON(この変更以前に
- * 書かれたもの)にはそもそも欄が無い——そのときは何も言わない(測れないことを
- * 「0だった」と偽らない。`buildLexicalChannelWarningSection` と同じ規律)。
+ * ⛔ 門ではない(exit code に触れない)。省略可能欄が無い古い実測 JSON では何も言わない
+ * (測れないことを「0 だった」と偽らない)。
  *
  * @param {Record<string, unknown>[]} arms
- * @returns {string | null} 報告すべき項が1つも無ければ(欄自体が無い run を含む)null。
+ * @returns {string | null}
  */
 export function buildConstantTermSection(arms) {
   const measurable = arms.filter((arm) => Array.isArray(arm.termDistinct));
@@ -418,9 +331,6 @@ export function buildConstantTermSection(arms) {
 }
 
 /**
- * Markdown を組み立てる(このスクリプトの主機能)。**stdout に出すのは呼び出し側の役目**
- * ——ここは文字列を返すだけ。
- *
  * @param {{ measured: { arms: Record<string, unknown>[] }, baseline?: { arms: Record<string, unknown>[] } }} input
  * @returns {string}
  */

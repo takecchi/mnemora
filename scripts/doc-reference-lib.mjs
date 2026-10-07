@@ -3,51 +3,29 @@ import { lineNumberAt } from "./adr-citation-lib.mjs";
 import { matchMarkdownLinkAt } from "./markdown-link-lib.mjs";
 
 /**
- * 生きた文書の中の参照が、指す先に届くかを検査する純関数の側（PR #1118 の続き。
- * `scripts/adr-citation-lib.mjs` と同じ分担——ファイル I/O を持たない。呼び出す側
- * `scripts/__tests__/doc-reference.test.mjs` がファイルを読み、存在の問い合わせを `env` で渡す）。
+ * ⛔ 門にしないもの: アンカーの存在(GitHub の見出しスラグの規則を正確に写せる保証が無い)・Issue / PR 番号・`file:line`・
+ * ADR 本文・文書を名指ししない裸の `§N`。一覧を出すだけの警告も置かない(読まれずに腐る)。
  *
- * ## 検査する3つの形（門）
- *
- * 1. **相対リンク** `[表示](相対パス)`: 指す先のファイル（またはディレクトリ）が在ること。
- *    `http:` などのスキームで始まるもの・`#` だけのもの（同じ文書の中のアンカー）は見ない。
- *    `#アンカー` と `?…` は落としてからパスだけを見る——**アンカーの存在は見ない**
- *    （GitHub の見出しスラグの規則を正確に写せる保証が無いため。PR #1118）。
- * 2. **`ADR NNNN`**: `docs/decisions/NNNN-*.md` が在ること。
- * 3. **`<file>.md §N`**（`docs/recall.md §7`・`[recall.md](./recall.md) §7` の形）: 指す先の
- *    文書に、番号 N の見出し（`## 7.`・`### 7.2` など）が在ること。指す先のファイルが
- *    解決できない場合は、この形では見ない（リンクなら 1. が拾う）。
- *
- * ## 見ないもの（門にしない。PR #1118 の判断）
- * アンカー・Issue / PR 番号・`file:line`・ADR 本文（`docs/decisions/`）・文書を名指ししない
- * 裸の `§N`。一覧を出すだけの警告も置かない（読まれずに腐るため）。
- *
- * ## 生きた文書の範囲（呼び出す側が決める）
- * `docs/**`（`docs/decisions/` を除く）・各 `README.md`・`AGENTS.md`・`packages/*\/src` の TS の
- * **コメントの中だけ**。TS はコメントの外（正規表現・文字列）に `[…](…)` の形が現れうるので、
- * `commentTextOf` でコメント以外を空白に潰してから渡す。markdown はコードブロック
- * （```` ``` ```` / `~~~`）の中を空白に潰してから渡す（`maskMarkdownCodeFences`）。
- * どちらも改行は残すので、行番号は元の文書と一致する。
+ * ⚠ TS はコメントの外(正規表現・文字列)にも `[…](…)` の形が現れうるので、`commentTextOf` でコメント以外を空白に潰してから渡す。
+ * markdown はコードブロックの中を潰す(`maskMarkdownCodeFences`)。どちらも改行は残し、行番号を元の文書と一致させる。
  */
 
 /**
  * @typedef {object} ReferenceEnv
- * @property {(repoRelativePath: string) => boolean} exists  ファイルかディレクトリが在るか
- * @property {(adrNumber: string) => boolean} adrExists  `docs/decisions/NNNN-*.md` が在るか
+ * @property {(repoRelativePath: string) => boolean} exists
+ * @property {(adrNumber: string) => boolean} adrExists
  * @property {(repoRelativePath: string) => Set<string> | null} headingNumbers
- *   その文書の見出しの番号の集合（`## 7.` → `"7"`、`### 7.2` → `"7.2"`）。文書が無ければ `null`
  */
 
 /**
  * @typedef {object} BrokenReference
  * @property {"link" | "adr" | "section"} kind
- * @property {string} file   検査した文書（repo 直下からの相対パス）
- * @property {number} line   1始まりの行番号
- * @property {string} ref    文書に書かれている参照そのもの
- * @property {string} reason なぜ落ちたか
+ * @property {string} file
+ * @property {number} line
+ * @property {string} ref
+ * @property {string} reason
  */
 
-/** repo 直下からの相対パスを、`/` 区切り・`..` を解いた形にする（repo の外へ出たら `null`）。 */
 export function resolveRepoPath(fromFile, relative) {
   const base = fromFile.split("/").slice(0, -1);
   const parts = [...base, ...relative.split("/")];
@@ -64,11 +42,6 @@ export function resolveRepoPath(fromFile, relative) {
   return out.join("/");
 }
 
-/**
- * TS のソースから、コメントの中だけを残す（コメント以外は、改行を残して空白に潰す）。
- * 正規表現・文字列・テンプレートの中の `//`・`[…](…)` をコメントと取り違えないよう、
- * TypeScript のパーサで字句の境目を取り、各字句の前後のコメントの範囲を集める。
- */
 export function commentTextOf(tsText) {
   const sf = ts.createSourceFile("x.ts", tsText, ts.ScriptTarget.Latest, false, ts.ScriptKind.TS);
   const ranges = new Map();
@@ -89,7 +62,6 @@ export function commentTextOf(tsText) {
   return out.join("");
 }
 
-/** markdown のコードブロックの中を、改行を残して空白に潰す。 */
 export function maskMarkdownCodeFences(text) {
   const lines = text.split("\n");
   let fence = null;
@@ -109,10 +81,6 @@ export function maskMarkdownCodeFences(text) {
     .join("\n");
 }
 
-/**
- * 見出しの番号の集合を取る（コードブロックの中は見ない）。`## 7. 題` / `### 7.2 題` /
- * `## §7 題` の形。
- */
 export function headingNumbersOf(markdown) {
   const nums = new Set();
   for (const line of maskMarkdownCodeFences(markdown).split("\n")) {
@@ -123,10 +91,7 @@ export function headingNumbersOf(markdown) {
 }
 
 /**
- * `file` の本文 `text`（呼び出す側で、見ない部分を空白に潰したもの）の中の、壊れた参照を
- * 全部返す。
- *
- * @param {string} file  repo 直下からの相対パス
+ * @param {string} file
  * @param {string} text
  * @param {ReferenceEnv} env
  * @returns {BrokenReference[]}
@@ -135,7 +100,6 @@ export function findBrokenReferences(file, text, env) {
   /** @type {BrokenReference[]} */
   const broken = [];
 
-  // 1. 相対リンク
   for (let i = text.indexOf("["); i >= 0; i = text.indexOf("[", i + 1)) {
     const link = matchMarkdownLinkAt(text, i);
     if (!link) continue;
@@ -163,7 +127,6 @@ export function findBrokenReferences(file, text, env) {
     }
   }
 
-  // 2. ADR NNNN
   for (const m of text.matchAll(/ADR[\s-]?(\d{4})(?!\d)/g)) {
     if (!env.adrExists(m[1])) {
       broken.push({
@@ -176,7 +139,6 @@ export function findBrokenReferences(file, text, env) {
     }
   }
 
-  // 3. <file>.md §N
   for (const m of text.matchAll(/([\w./-]+\.md)\)?`?(?:\s*の)?\s*§\s*(\d+(?:\.\d+)*)/g)) {
     const target =
       [resolveRepoPath(file, m[1]), resolveRepoPath("", m[1])].find(
@@ -197,7 +159,6 @@ export function findBrokenReferences(file, text, env) {
   return broken;
 }
 
-/** 赤になったときに出す、1件1行の報告と、直し方。 */
 export function formatBrokenReferences(broken) {
   if (broken.length === 0) return "";
   const lines = broken.map((b) => `- ${b.file}:${b.line} [${b.kind}] ${b.ref} — ${b.reason}`);
