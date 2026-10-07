@@ -14,11 +14,6 @@ import {
   recordedRenderer,
 } from "../answer-trials-render.js";
 
-/**
- * `answer-trials-render.ts` の単体試験。**DB 不要・鍵不要**——実カセットを読んで
- * `recordedRenderer` が原文と完全一致することを確かめる（Issue #705 完了条件）。
- */
-
 describe("レジストリ", () => {
   it("RENDER_NAMES は recorded・digest-only・order-legend の3つ（ADR 0309、採らなかった order-sorted/digest-order-legend は外す）", () => {
     expect(RENDER_NAMES).toEqual(["recorded", "digest-only", "order-legend"]);
@@ -112,35 +107,14 @@ describe("変異試験(c): recordedRenderer の一致検査を外すと通って
   });
 });
 
-// ---------------------------------------------------------------------------
-// orderLegendRenderer と、本番の buildMnemoraPrompt（mnemora-path.ts）の一致検査
-// （ADR 0309、マネージャー依頼「同じ材料から組んだ RecallResult を渡した
-// buildMnemoraPrompt の出力と一致することを検査するテストを足す」への回答）。
-// ---------------------------------------------------------------------------
-
-/** `answer-bench.ts`/`answer-trials-material.ts` と同じ形。同上の理由で複製する。 */
 function questionSuffix(question: string): string {
   return `\n\n質問: ${question}`;
 }
 
-/** `recordedOrder`（1始まりの順位）を、単調増加する `Date` へ機械的に写す基準時刻。 */
 const RECORDED_AT_BASE_MS = Date.parse("2026-01-01T00:00:00.000Z");
 
-/**
- * {@link MaterialMemoryLine} から `RecalledMemory` を再構成する（parity 検査専用）。
- *
- * 🔴 **組める範囲の限界**: `contradiction`（矛盾候補）は再構成できない——
- * `renderRecalledMemoryLine`（`mnemora-path.ts`）は相手の `memoryId` ではなく
- * 相手の digest 本文を埋め込むため（ADR 0295 決定6）、パースし戻した文字列からは
- * 相手の `memoryId` が分からない。dev 6件のカセットにはそもそも矛盾候補を持つ行が
- * 1件も無い（【実測】`grep -c '矛盾候補' examples/chat/cassettes/answer.json` は
- * `0`、dev・eval 全12ケース通して）ため、この検査ではその行に当たったら
- * 例外にして気づけるようにするだけで、実際には dev 6件のどれも例外に落ちない。
- *
- * `score`（`ScoreBreakdown`）は描画に一切使われない（`renderRecalledMemoryLine` は
- * `m.score` を読まない）ため、固定のダミー値で埋める。`retrievedVia` も同様に
- * 描画へ影響しない（矛盾候補が無い限り）ため `"ann"` で固定する。
- */
+// contradiction は再構成しない。renderRecalledMemoryLine は相手の digest 本文を埋め込むので、相手の memoryId を戻せない（ADR 0295）。
+// score と retrievedVia は描画に使われないので、固定のダミー値で埋める。
 function materialLineToRecalledMemory(line: MaterialMemoryLine, index: number): RecalledMemory {
   if (line.contradiction !== undefined) {
     throw new Error(
