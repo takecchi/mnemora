@@ -1386,7 +1386,7 @@ export class InMemoryMemoryStore implements MemoryStore {
       }
       seen.add(id);
       const memory = this.memories.get(id);
-      if (memory && memory.tenantId === ctx.tenantId) {
+      if (memory) {
         results.push(snapshot(memory));
       }
     }
