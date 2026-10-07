@@ -318,7 +318,7 @@ describe("recall() — omitted.kind = 'over_limit'（docs/recall.md §2 段2）"
 });
 
 describe("recall() — omitted.kind = 'ann_truncated'（docs/recall.md §3、ADR 0069）", () => {
-  // この describe の契約: ann_truncated は「k' に達し、かつ損失が起こりえたとき」だけ付く（窓が埋まっただけでは損したかを言えない、ADR 0069）。1本目は以前の歯と同じ状況を作って鳴らないことを固定する。
+  // この describe の契約: ann_truncated は「k' に達し、かつ損失が起こりえたとき」だけ付く（窓が埋まっただけでは損したかを言えない、ADR 0069）。
   it("k' に達しても、窓の外が top-k へ入れないと証明できたら鳴らない（ADR 0069）", async () => {
     const { runtime, stores } = buildRuntime();
     await createEmbeddedMemory(stores, [1, 0]);
@@ -1945,7 +1945,7 @@ describe("recall() — usage.budgetExceeded（Issue #108「案3」）", () => {
     expect(result.usage.budgetExceeded).toBe(true);
   });
 
-  /** 上と同じ入力で、出力検証（既定 report）を通しても `share` が 1.1・`budgetExceeded` が true のまま・`ok === true` であること。`share > 1` は合法な値なので、`.max(1)` を戻す変異が緑のまま入り込むのを防ぐ。 */
+  /** 上と同じ入力で、出力検証（既定 report）を通しても `share` が 1.1・`budgetExceeded` が true のまま・`ok === true` であること。`share > 1` は合法な値なので、`.max(1)` を戻す実装が緑のまま入り込むのを防ぐ。 */
   it("T3: ADR 0097 の share>1（非CJK20字の digest 2件・maxMemoryTokens:10）は出力検証でも弾かれない", async () => {
     const digestA = "01234567890123456789";
     const digestB = "abcdefghijklmnopqrst";
@@ -2015,7 +2015,7 @@ describe("recall() — usage.budgetExceeded（Issue #108「案3」）", () => {
     },
   );
 
-  // `promptBudgetTokens` 単独でも同じ再現が起きる: 他の歯は `promptBudgetTokens` を使わず、`promptTokensExceeded` の項を判定から落とす変異を検出できない。
+  // `promptBudgetTokens` 単独でも同じ再現が起きる: 他の歯は `promptBudgetTokens` を使わず、`promptTokensExceeded` の項を判定から落とす実装を検出できない。
   it("promptBudgetTokens 単独でも、maxMemoryTokens と同じ再現で budgetExceeded が true になる", async () => {
     const digestA = "01234567890123456789";
     const digestB = "abcdefghijklmnopqrst";
@@ -2032,7 +2032,7 @@ describe("recall() — usage.budgetExceeded（Issue #108「案3」）", () => {
     expect(result.usage.budgetExceeded).toBe(true);
   });
 
-  // 境界値（ちょうど予算どおり）では false のまま: `>` を `>=` に変える変異は、測定値が予算を上回る歯では同じ true になり見抜けない。単一の memory を使う（結合の "\n" が挟まらず境界を厳密に作れる）。
+  // 境界値（ちょうど予算どおり）では false のまま: `>` を `>=` に変える実装は、測定値が予算を上回る歯では同じ true になり見抜けない。単一の memory を使う（結合の "\n" が挟まらず境界を厳密に作れる）。
   it("トークン予算にちょうど収まる境界値では budgetExceeded は false のまま（`>` と `>=` を区別する歯）", async () => {
     const digest = "01234567890123456789"; // 20 chars, non-CJK ⟹ ceil(20/4) = 5 トークン
     expect(heuristicTokenCounter.count(digest).tokens).toBe(5);
@@ -2217,7 +2217,7 @@ describe("recall() — 出力検証（Issue #131、ADR 0098）", () => {
   });
 });
 
-// 今日の `eligible = aggregate.totalInScope - notIndexedTotal` は `excludeProvenanceKinds` で除外した kind の行も数える。`aggregateScope` が任意の欄 `excludedProvenanceIndexedCount` を返し、core がそれで eligible と下限を引き直す。欄を返さない adapter では挙動を変えない（下の「対照」が固定する）。
+// `eligible = aggregate.totalInScope - notIndexedTotal` は `excludeProvenanceKinds` で除外した kind の行も数える。`aggregateScope` が任意の欄 `excludedProvenanceIndexedCount` を返し、core がそれで eligible と下限を引き直す。欄を返さない adapter では挙動を変えない（下の「対照」が固定する）。
 describe("recall() — ann_unreached × excludeProvenanceKinds（ADR 0390）", () => {
   /** 索引は近傍 `reach` 件しか見ず、除外は後置フィルタで落とす VectorStore: 除外行が候補枠を占拠して、除外しない候補を取りこぼす近似索引の形。 */
   class ReachLimitedPostFilterVectorStore implements VectorStore {

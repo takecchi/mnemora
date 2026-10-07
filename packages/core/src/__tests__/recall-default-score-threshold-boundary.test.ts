@@ -6,8 +6,7 @@ import { createRuntime } from "../runtime.js";
 import { assertAffinityMeasured, createFakeRuntimeStores } from "./runtime-fakes.js";
 
 /**
- * 段2の既定の `scoreThreshold` が 0.1 であることを、境目の両側すれすれの `total` で縛る。
- * 離れた値だけを置くと、0.1 から外れた既定でも同じ集合が返り、値の違いが見えない。
+ * 段2の既定の `scoreThreshold`（0.1）を、境目の両側すれすれの `total` で縛る。離れた値だけを置くと、0.1 から外れた既定でも同じ集合が返り、値の違いが見えない。
  */
 
 const NOW = new Date("2026-06-01T00:00:00.000Z");

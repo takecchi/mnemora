@@ -292,7 +292,6 @@ describe("recall() — 連想枠（association、既定 on。ADR 0337）", () =>
   it("既に返る集合（withinLimit）と重複しない", async () => {
     const { runtime, stores } = buildRuntime();
     const anchor = await createEmbeddedMemory(stores, [1, 0], { digest: "M1" });
-    // M2 はクエリにも当たり（withinLimit に入る）、かつアンカーの近傍でもある。
     const alsoMain = await createEmbeddedMemory(stores, [0.99, 0.1411], { digest: "M2" });
 
     const result = await runtime.recall(ctx, {

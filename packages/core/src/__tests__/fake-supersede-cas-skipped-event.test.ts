@@ -8,7 +8,6 @@ import { createFakeRuntimeStores } from "./runtime-fakes.js";
  * `supersedeWithNewMemories`: CAS に弾かれた対象は例外にせず `conflicted` に積む（`MemoryStore.supersedeWithNewMemories` の TSDoc）。
  * その対象のイベントは書かれないので、書けない値（`kind`・`at`・`actor` の NUL・`meta` の BigInt・`sizeBeforeBytes`）でも確かめない
  * （Postgres は弾かれた対象のイベントを見ない）。CAS を通る対象は、状態を書き換える前に投げる。
- * testkit の fixture 側の同じ歯は `packages/testkit/src/__tests__/in-memory-fixtures-supersede-cas-skipped-event.test.ts`。
  */
 
 const ctx: Ctx = { tenantId: "tenant-1" };

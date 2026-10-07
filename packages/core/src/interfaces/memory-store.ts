@@ -494,7 +494,7 @@ export interface MemoryStore {
    * ジョブの `payload` は `{ observationId: <作成された Observation の id> }` に固定される。
    * 冪等な再送（`externalId` が既存行と衝突）の場合は `created: false` を返し、ジョブは一切作らない（`jobs` は空配列）。
    *
-   * ⭐ **`opts` は省略可能な第4引数であり、この変更は非破壊である**（[Issue #1237](https://github.com/takecchi/mnemora/issues/1237)）。
+   * ⭐ **`opts` は省略可能な第4引数である。**
    * **`opts.now` を渡すと、積む outbox 行の `availableAt`/`createdAt` にその値を使う。省略時は実装が壁時計（`new Date()`）を使う。**
    *
    * ⭐ **`opts.claimedBy` も省略可能で、非破壊である**（[ADR 0407](../../../../docs/decisions/0407-sync-observe-extract-job-lease.md)）。
@@ -523,8 +523,7 @@ export interface MemoryStore {
    * 区別しない。`null`・`undefined` は「参照しない」。冪等の衝突で既存の行を返す呼び出しにも検査は当たる。
    *
    * ⚠ **孤立サロゲート（`\uD800` 単体など、対をなさない UTF-16 サロゲートコードユニット）を含む文字列を渡したときの
-   * 挙動は、adapter によって、Postgres では欄の列の型によっても異なる**（Issue #816・#1075。現状の記録であり、
-   * この非対称を無くす変更は対象外）。
+   * 挙動は、adapter によって、Postgres では欄の列の型によっても異なる**（現状の記録）。
    * - ⭐ `subjectId`（識別子）は、孤立サロゲートも NUL も書く前に断る（ADR 0423。`createObservation` の節と同じ）。
    *   以下は `subjectId` 以外の欄の話である。
    * - `PostgresMemoryStore`、`text` 列の欄（`content`/`tags`/`digest`）: 例外を投げず、`pg` ドライバが
@@ -581,8 +580,7 @@ export interface MemoryStore {
    * `createMemory` と同じく、読み戻すと `MemorySchema` を通らない `input` は、何も書かずに拒む。冪等の既存の行が在っても拒む
    * （範囲と例外は `createMemory` の doc 参照）。
    *
-   * ⭐ **`opts` は省略可能な第4引数であり、この変更は非破壊である**（[Issue #1237](https://github.com/takecchi/mnemora/issues/1237)、
-   * `createObservationWithOutbox` の同じ欄と同じ）。**`opts.now` を渡すと、積む outbox 行の `availableAt`/`createdAt` に
+   * ⭐ **`opts` は省略可能な第4引数である**（`createObservationWithOutbox` の同じ欄と同じ）。**`opts.now` を渡すと、積む outbox 行の `availableAt`/`createdAt` に
    * その値を使う。省略時は実装が壁時計を使う。**
    *
    * ⭐ **`opts.abortIfForgotten`**（ADR 0375 決定7）: 非空の配列を渡すと、**書き込みの直前に、その id の現在の `status` を見直し、
@@ -629,7 +627,7 @@ export interface MemoryStore {
    * `extractor_version IS NULL` の行を返す。`observationId` が adapter の期待する形式でない場合は
    * 「存在しない」と同じ空配列を返す（例外を投げない）。
    *
-   * ⚠ **`extractorVersion` は絞り込み条件であり、指定した版と違う Memory はこの口には一切現れない**（Issue #873）。
+   * ⚠ **`extractorVersion` は絞り込み条件であり、指定した版と違う Memory はこの口には一切現れない**。
    * **版を問わず同じ Observation 由来の Memory が要る場合は
    * {@link MemoryStore.listBySourceObservationAllVersions} を使うこと**（ADR 0380）。
    *
@@ -762,18 +760,18 @@ export interface MemoryStore {
    * **減衰の起点を巻き戻さない**（[ADR 0048](../../../../docs/decisions/0048-reinforce-does-not-move-decay-origin-backwards.md)/
    * [ADR 0049](../../../../docs/decisions/0049-reinforce-monotonicity-in-pseudo-implementations.md)）。規則は1つである:
    * - **`at` が現在の起点（`lastReinforcedAt ?? recordedAt`）より狭義に新しいときだけ書く。**
-   *   未強化の記憶では、作成時刻（`recordedAt`）が起点である（[Issue #1093](https://github.com/takecchi/mnemora/issues/1093)）。
+   *   未強化の記憶では、作成時刻（`recordedAt`）が起点である。
    * - **起点と等しい `at`・古い `at` は no-op である**——例外にしない。何も書かず（`updatedAt` も動かさず）、
    *   更新されなかった現在の行をそのまま返す。書いたかどうかは戻り値の `lastReinforcedAt` を見ないと分からない。
    * - ⚠ **この比較は壁時計の `at` だけで行い、活動時計側の3列も同じ条件で守る**。⟹ **等しい `at` の2回目は、
    *   `opts.nowSeq` が1回目より進んでいても `decayBaseSeq`/`decayFloorSeq` を動かさない。**
    *   等しい `at` を書く側へ倒す・活動時計側だけ seq で比べる変更は、適合テストの契約を変える破壊的変更になる。
    *
-   * ⚠ **[Issue #840](https://github.com/takecchi/mnemora/issues/840): このメソッドは `status` を見ずに書く。**
+   * ⚠ **このメソッドは `status` を見ずに書く。**
    * 対象 Memory がどの `status` であっても、上の単調性・活動時計の規則だけを適用して書き込む——
    * `status` に応じた no-op・拒否は無い。`runtime.observe({ kind: 'memory_usage' })` は、`recordUsage` が返した
    * `insertedMemoryIds` を `status` を確かめずに渡すので、古い id の使用報告は `archived`/`superseded`/`forgotten` にも届きうる。
-   * 届いたときの帰結（[ADR 0303](../../../../docs/decisions/0303-superseded-contested-decay-floor-owner.md) 追記節）:
+   * 届いたときの帰結（[ADR 0303](../../../../docs/decisions/0303-superseded-contested-decay-floor-owner.md)）:
    * - **`contested`**: 正規の経路であり、害ではない（ADR 0303 決定2）。
    * - **`archived`/`superseded`**: 復帰（`restoreArchived`/`restoreSuperseded`）が復帰の直後に `reinforce` を呼ぶため、
    *   時計が前にしか進まない通常の順序では単調性ガードにより上書きされ、効き目は残らない。**`reinforce` 自身が
@@ -787,7 +785,7 @@ export interface MemoryStore {
    *   負債3、[ADR 0501](../../../../docs/decisions/0501-doc-debts-usage-env-analyze-per-process-reinforce-purged.md)、
    *   [ADR 0519](../../../../docs/decisions/0519-inmemory-reinforce-purged-matches-postgres.md)。`Runtime.observe` 経由は InMemory では確かめていない）。
    *
-   * `reinforce` の対象は `active`/`contested` に**絞らない**（Issue #840）。`runtime.observe` に渡す `usedMemoryIds` の
+   * `reinforce` の対象は `active`/`contested` に**絞らない**。`runtime.observe` に渡す `usedMemoryIds` の
    * 出どころを正しく保つのは呼び出し側の責務である。
    */
   reinforce(ctx: Ctx, id: MemoryId, at: Date, opts?: ReinforceOptions): Promise<Memory>;
@@ -806,7 +804,6 @@ export interface MemoryStore {
   supportsAddOwnSubjectSeq?(): boolean;
   /**
    * `reinforce` を `ids` の各要素について呼んだのと同じ結果になる、任意（省略可能）の一括版
-   * （[Issue #874](https://github.com/takecchi/mnemora/issues/874)、ADR 0303 追記節）。
    *
    * 🔴 **任意メソッドである。**必須にすると第三者の adapter を壊す。この口を実装しない adapter に対しては、
    * `handleMemoryUsage` が1件ずつ `reinforce` を呼ぶループにフォールバックする。
@@ -824,7 +821,7 @@ export interface MemoryStore {
    * - [ADR 0165](../../../../docs/decisions/0165-decay-activity-clock.md) 決めたこと16:
    *   `opts.nowSeq` を渡すと、活動時計側の起点・床も同じ強化イベントとして進める——**`halfLifeRecalls` を持つ行に限る**。
    *   この判定は**行ごと**に行う（持たない行は活動時計側の3列に一切触れない）。
-   * - **`status` を見ない**（[Issue #840](https://github.com/takecchi/mnemora/issues/840)）。`reinforce` と同じ。
+   * - **`status` を見ない**。`reinforce` と同じ。
    * - **`memory_events` は書かない。**
    *
    * `ids` に存在しない id・adapter の期待する形式でない id が含まれる場合は、`reinforce` 単体と同じ
@@ -849,7 +846,7 @@ export interface MemoryStore {
   ): Promise<{ insertedMemoryIds: MemoryId[] }>;
   /**
    * `recordUsage` と、それが返した `insertedMemoryIds` への強化（`reinforceMany(ctx, insertedMemoryIds, at, opts)` と同じ結果）を
-   * **1トランザクションで**行う、任意（省略可能）の口（[Issue #961](https://github.com/takecchi/mnemora/issues/961)）。
+   * **1トランザクションで**行う、任意（省略可能）の口。
    * 戻り値は `recordUsage` と同じ——実際に挿入が起きた id だけを返し、強化もその id にだけ掛ける（再送では空配列になり、強化もしない）。
    *
    * 契約: 強化の規律は `reinforceMany` の doc のとおり。**例外を投げたときは、使用の記録も強化も1件も残さない。**
@@ -857,7 +854,7 @@ export interface MemoryStore {
    *
    * 🔴 **任意メソッドである**（`reinforceMany?` と同じ）。この口を持たない adapter では `handleMemoryUsage` が
    * `recordUsage` → 強化の2段で行い、**その間で落ちると、同じ `externalId` の再送でも強化が二度と呼ばれず恒久に失われる窓が残る**
-   * （ADR 0009 の追記）。
+   * （ADR 0009）。
    */
   recordUsageAndReinforce?(
     ctx: Ctx,
@@ -941,7 +938,7 @@ export interface MemoryStore {
    * 対象が `opts.limit` より多いときは **`updatedAt` の古い順、同着は `id` の昇順**で選ぶ。積み直した行は `updatedAt` が動くので、
    * 繰り返し呼ぶと対象が一巡する（同じ行だけを取り続けて他が飢えることがない）。
    *
-   * ⭐ **`writeOpts` は省略可能な第3引数である**（[Issue #1237](https://github.com/takecchi/mnemora/issues/1237)）。
+   * ⭐ **`writeOpts` は省略可能な第3引数である。**
    * **`writeOpts.now` を渡すと、積み直す embed ジョブの `availableAt`/`createdAt` にその値を使う。省略時は実装が壁時計を使う。**
    * 時刻を第2引数 `opts`（{@link RequeueEmbedJobsOptions}）に足さないのは、`opts` が `Runtime.reembed` の公開の入力と同じ型だから。
    */
@@ -996,8 +993,7 @@ export interface MemoryStore {
    * `news[i].input` にも `createMemory` と同じ検査が掛かる——読み戻すと `MemorySchema` を通らない要素が1件でもあれば、
    * どちらの書き込みも行わずに拒む（先の要素・outbox・ラベル・イベントも残さない。範囲と例外は `createMemory` の doc）。
    *
-   * ⭐ **`opts` は省略可能な第4引数である**（[Issue #1237](https://github.com/takecchi/mnemora/issues/1237)、
-   * `createMemoryWithOutbox` の同じ欄と同じ）。**`opts.now` を渡すと、`news` に積む outbox 行の `availableAt`/`createdAt` に
+   * ⭐ **`opts` は省略可能な第4引数である**（`createMemoryWithOutbox` の同じ欄と同じ）。**`opts.now` を渡すと、`news` に積む outbox 行の `availableAt`/`createdAt` に
    * その値を使う。省略時は実装が壁時計を使う。**
    *
    * ⭐ **`opts.abortIfForgotten`**（ADR 0375 決定7）: `createMemoryWithOutbox` の同じ欄と**同じ意味論**。非空の配列を渡すと、
@@ -1133,15 +1129,14 @@ export interface MemoryStore {
    * - 積む `events_purged` イベントの `meta` は `{ purgedCount, oldestPurgedAt, newestPurgedAt, olderThan }` の4欄のみ
    *   （docs/memory-model.md §9「件数と期間のみ」）。
    *
-   * ⚠ **（[Issue #821](https://github.com/takecchi/mnemora/issues/821)）上記の `WHERE`（`kind <> 'events_purged'`）は
+   * ⚠ **上記の `WHERE`（`kind <> 'events_purged'`）は
    * `kind = 'superseded'` の行を除外しない——保持期間を過ぎればそれらも削除の対象になる。**ただし `superseded` 行は
    * `MemoryStore.previewRestoreSupersededBy?` が `supersededReason` を読む唯一の情報源でもあるため、保持期間を過ぎたテナントでは
    * `previewRestoreSupersededBy?`/`groupSupersededCandidatesByOperation` が由来を「分からない」としてまとめる
-   * （[ADR 0115](../../../../docs/decisions/0115-event-retention-purge.md) の追記）。
+   * （[ADR 0115](../../../../docs/decisions/0115-event-retention-purge.md)）。
    *
    * ⚠ **`purgeExpiredEventsForTenant`（`packages/core/src/event-retention-purge.ts`）は、このメソッドを直接呼ばない**
-   * （[Issue #1232](https://github.com/takecchi/mnemora/issues/1232)、
-   * [ADR 0354](../../../../docs/decisions/0354-atomic-event-retention-purge.md)）。保持期間を読んでから `olderThan` を渡す呼び方は、
+   * （[ADR 0354](../../../../docs/decisions/0354-atomic-event-retention-purge.md)）。保持期間を読んでから `olderThan` を渡す呼び方は、
    * 読みと削除の間に保持期間が変わる race を防げない。それを閉じるのが {@link MemoryStore.purgeExpiredEventsByRetention} であり、
    * このメソッドは、その実装が内部で呼ぶ下請け（`olderThan`/`limit`/`dryRun` を受け取って消すだけ）である。
    */
@@ -1172,8 +1167,7 @@ export interface MemoryStore {
   ): Promise<PurgeExpiredRecallsResult>;
   /**
    * 保持期間を読むことと、実際に削除することを、**1つの原子的な操作にする**口
-   * （[ADR 0354](../../../../docs/decisions/0354-atomic-event-retention-purge.md)、
-   * [Issue #1232](https://github.com/takecchi/mnemora/issues/1232)）。
+   * （[ADR 0354](../../../../docs/decisions/0354-atomic-event-retention-purge.md)）。
    *
    * 🔴 **任意メソッドである。**理由は {@link MemoryStore.purgeExpiredEvents} と同じ。
    * この口を実装しない adapter では、`purgeExpiredEventsForTenant` は `{ kind: "store_unsupported" }` を返す——
@@ -1391,7 +1385,7 @@ export interface MemoryStore {
   ): Promise<{ first: Memory; second: Memory; events: [MemoryEvent, MemoryEvent] }>;
   /**
    * 対向を `forget()` した後の対の**生存側1件だけ**を `active` に戻す口
-   * （[Issue #825](https://github.com/takecchi/mnemora/issues/825)、ADR 0150 追記）。`resolveContestedPair` の CAS
+   * （ADR 0150）。`resolveContestedPair` の CAS
    * （両側とも `contested` かつ相互参照が成立）は、対向を `forget()` した後の対では満たせないため、別の口にした
    * （**`resolveContestedPair` の CAS 自体は変えない**）。
    *
@@ -1506,7 +1500,7 @@ export interface MemoryStore {
   /**
    * 「同じ tenant・同じ `subjectId`・同じ claim key（`claimKey.subject`/`claimKey.predicate`）・有効期間が重なる・`contentHash` が違う、
    * 他の `active` Memory」を**列と索引だけで**（LLM を一度も呼ばずに）見つける読み取り専用の口
-   * （Issue #372、ADR 0320 決定7・決定8。`idx_memories_claim_key` を使う）。`status`/`contentHash`/有効期間の重なりはこの口が絞る
+   * （ADR 0320 決定7・決定8。`idx_memories_claim_key` を使う）。`status`/`contentHash`/有効期間の重なりはこの口が絞る
    * （ADR 0320 決定8）。
    *
    * 🔴 **任意メソッドである。**必須にすると第三者の adapter を壊す。**フォールバック経路は無い**——この口が無い adapter に対しては、
@@ -1545,7 +1539,7 @@ export interface MemoryStore {
   ): Promise<Memory[]>;
   /**
    * `findActiveByClaimKey?` と**同じ絞り込み**を、`status = 'contested'` の行に対して行う読み取り専用の口
-   * （Issue #933、ADR 0378）。同じ鍵に3件目が届いたとき、1件目・2件目は既に `contested` で `findActiveByClaimKey?` の一致から消えているため、
+   * （ADR 0378）。同じ鍵に3件目が届いたとき、1件目・2件目は既に `contested` で `findActiveByClaimKey?` の一致から消えているため、
    * 「もう `active` ではないが、同じ鍵で争われている」相手を見つけるために要る。
    *
    * 🔴 **任意メソッドである。**必須にすると第三者の adapter を壊す。**フォールバック経路は無い**——この口が無い adapter に対しては、
@@ -1599,7 +1593,7 @@ export interface MemoryStore {
    * - **同着は、predicate のコードポイント順の昇順**で並べる。同着の順が実装ごとに変わると、`limit` で切った先頭の集合と語彙ヒントの
    *   優先順位が変わり、同じ入力に別のプロンプトが出る。DB の照合順序にも、書いた順にも、UTF-16 コード単位順（JS の `<`。
    *   BMP の U+E000〜U+FFFF と補助面の文字で、コードポイント順と食い違う）にも依らない。`PostgresMemoryStore` は `COLLATE "C"`、
-   *   `packages/testkit` の in-memory 実装は UTF-8 のバイト列の比較で、これに揃える（Issue #1412）。
+   *   `packages/testkit` の in-memory 実装は UTF-8 のバイト列の比較で、これに揃える。
    * - **`query.limit` を超えない件数を返す。**`limit` は呼び出し側が決め、この口自身は既定値を持たない。
    * - **`claim_key_subject` の値は返り値に出ない。**この口が集めるのは predicate の語彙だけである。
    * - **LLM を一度も呼ばない。**
@@ -1639,15 +1633,14 @@ export interface MemoryStore {
    * - `event.actor` を省略した場合は `{ type: 'system' }`。
    * - 対象が0件なら `{ restored: [] }` を返す（**例外にしない**）。`supersededById` に実在しない・形式不正な id を渡した場合も同じ
    *   （範囲に何件あるか分からない問い合わせであり、0件は正常な結果。`archiveDecayed?` と同じ）。
-   *   ⚠ **（[Issue #1229](https://github.com/takecchi/mnemora/issues/1229)）`event.at` が Invalid Date のときも、対象が0件なら
+   *   ⚠ **`event.at` が Invalid Date のときも、対象が0件なら
    *   `{ restored: [] }` を返す（例外にしない）。**2実装で同じ。対象が在るときは、どちらも例外で、1件も戻さない
    *   （`@mnemora/postgres` は `invalid input syntax for type timestamp with time zone` が drizzle の `Failed query` に包まれ、`cause` に入る）。
    * - 返す `restored` の順序は adapter に委ねる。
    * - 🔴 **この口が在ることは原子性の証拠ではない**（`markContestedPair`/`supersedeWithNewMemories` と同じ）。
    *
-   * ⭐ **`filter?.onlyMemoryIds`**（[Issue #515](https://github.com/takecchi/mnemora/issues/515)、
-   * [ADR 0258](../../../../docs/decisions/0258-restore-superseded-operation-scope.md)）: 指定すると、上記の対象の3条件に加えて
-   * **`id` がこの配列に含まれること**を条件に足す（積集合）。**省略時は従来どおり。**空配列を渡すと対象0件（例外にしない）。
+   * ⭐ **`filter?.onlyMemoryIds`**（[ADR 0258](../../../../docs/decisions/0258-restore-superseded-operation-scope.md)）: 指定すると、上記の対象の3条件に加えて
+   * **`id` がこの配列に含まれること**を条件に足す（積集合）。**省略時は絞らない。**空配列を渡すと対象0件（例外にしない）。
    * adapter が `filter`（またはその中の `onlyMemoryIds`）を実装するかは、適合フラグ `MemoryStoreConformanceOptions.supportsOnlyMemoryIdsFilter?`
    * （`@mnemora/testkit`）で検査する。**未指定なら「検査していない」と名乗る**（このフラグは任意）。
    */
@@ -1659,7 +1652,7 @@ export interface MemoryStore {
   ): Promise<{ restored: Memory[] }>;
   /**
    * `restoreSupersededBy?` を実際に呼ぶ**前**に、その群に何が入っているかを見るための読み取り専用の口
-   * （[Issue #515](https://github.com/takecchi/mnemora/issues/515)、ADR 0237。`Runtime.restoreSuperseded` の `opts.dryRun` から呼ばれる）。
+   * （ADR 0237。`Runtime.restoreSuperseded` の `opts.dryRun` から呼ばれる）。
    *
    * 🔴 **`restoreSupersededBy?` の既存の振る舞いは変えない。**この口は別に足す任意メソッドである（[ADR 0100](../../../../docs/decisions/0100-supersede-with-new-memories.md) 決定1）。
    *
@@ -1674,10 +1667,10 @@ export interface MemoryStore {
    * （`reextract` は `"reextract_superseded"`、`consolidate` は `"consolidated"`、`resolveContested` は `"contested_resolved"`）が
    * 自由文として積んだ値をそのまま読むだけで、この口は解釈も変換もしない。一致する `memory_events` 行が無い場合は `null`。
    *
-   * ⚠ **（[Issue #821](https://github.com/takecchi/mnemora/issues/821)）「一致する行が無い」は、`MemoryStore.purgeExpiredEvents?`
+   * ⚠ **「一致する行が無い」は、`MemoryStore.purgeExpiredEvents?`
    * （[ADR 0115](../../../../docs/decisions/0115-event-retention-purge.md)）が保持期間に従ってその `kind: 'superseded'` 行を既に削除した場合にも
    * 起きる。**どの理由も `supersededReason: null` という同じ値になり、呼び出し側からは区別できない
-   * （[ADR 0258](../../../../docs/decisions/0258-restore-superseded-operation-scope.md) の追記）。
+   * （[ADR 0258](../../../../docs/decisions/0258-restore-superseded-operation-scope.md)）。
    *
    * - 対象が0件なら `{ candidates: [] }`（例外にしない）。
    * - 返す順序は adapter に委ねる。
@@ -1699,7 +1692,7 @@ export interface MemoryStore {
    *
    * 契約:
    * - `name` の**コードポイント順**（Postgres の `COLLATE "C"` と同じ、バイト順）の昇順で返す。並び順の保証はこの1点のみ
-   *   （ロケール依存の自然順は実装や実行環境によってずれるため、契約から外した。Issue #881）。
+   *   （ロケール依存の自然順は実装や実行環境によってずれるため、契約に含めない）。
    * - `status` は `'registered'` か `'proposed'` のいずれか。
    * - `proposedCount` は「この名前を `tags` に含む Memory が新規作成された回数」の近似値である——**厳密な『いまこの名前を持つ生きた Memory の数』
    *   ではない**（対象の Memory が後から `forgotten`/`archived`/`superseded` になっても減らない。ADR 0318。`purge` だけは、
@@ -1729,7 +1722,7 @@ export interface MemoryStore {
    * ⚠ **状態は `proposed` → `registered` の一方向だけである**。`registered` を `proposed` へ戻す口も、ラベルを却下・削除する口も無い。
    * `name` の形は検査しない——`""`・空白だけの名前もそのまま `registered` の行になる（`@mnemora/postgres`・testkit とも。
    * `tags` の要素と同じく完全一致の語彙で、正規化もしない。docs/memory-model.md §8）。`@mnemora/postgres` では、NUL を含む名前は
-   * 例外になり、孤立サロゲートは U+FFFD に置き換わり、索引の1行の上限を超える長い名前は例外になる（`Ctx` の doc、Issue #1074）。
+   * 例外になり、孤立サロゲートは U+FFFD に置き換わり、索引の1行の上限を超える長い名前は例外になる（`Ctx` の doc）。
    * testkit は長さの上限を持たず、そのまま受け入れる。孤立サロゲートの U+FFFD への置き換えは、testkit も同じである
    * （[ADR 0543](../../../../docs/decisions/0543-inmemory-lone-surrogate-replaced-with-fffd.md)）。
    */
@@ -1737,7 +1730,7 @@ export interface MemoryStore {
 
   /**
    * このテナントに属する行を**跡形なく**消す——`purgeMemory?` と違い、行そのものを物理削除する（tombstone を書き残さない）
-   * （Issue #1207、[ADR 0383](../../../../docs/decisions/0383-erase-tenant.md)）。**このメソッド単体は orchestrator ではない**——
+   * （[ADR 0383](../../../../docs/decisions/0383-erase-tenant.md)）。**このメソッド単体は orchestrator ではない**——
    * 呼び出し順・他 port との整合は `eraseTenant`（`packages/core/src/erase-tenant.ts` の独立関数）側の責務で、このメソッドは
    * 「自分が持つ表からこのテナントの行を消す」ことだけを行う。
    *
@@ -1936,7 +1929,7 @@ export interface PurgeExpiredEventsOptions {
   /**
    * 1回の呼び出しで削除する上限。**必須・既定値なし**（`ClaimOutboxJobsOptions.leaseMs` と同じ）。
    *
-   * **0以上の整数を渡す前提である。負数を渡したときの結果は未定義で、実装ごとに違う**（[Issue #876](https://github.com/takecchi/mnemora/issues/876)）。
+   * **0以上の整数を渡す前提である。負数を渡したときの結果は未定義で、実装ごとに違う**。
    *
    * | 実装 | `limit: -1` | `limit <= -2` |
    * |---|---|---|
@@ -1944,7 +1937,7 @@ export interface PurgeExpiredEventsOptions {
    * | `InMemoryMemoryStore`（`@mnemora/testkit`）／`FakeMemoryStore`（`@mnemora/core`） | 例外（`purgeExpiredEvents: limit must not be negative`） | 例外（同上） |
    *
    * **どちらの実装でも「誤って削除する」ことは起きない。**`-1` の結果そのもの（例外か `purged: 0` か）は実装間で分かれたままで、
-   * **揃える予定は無い**（採らなかった案は [ADR 0115](../../../../docs/decisions/0115-event-retention-purge.md) の追記）。
+   * **揃える予定は無い**（採らなかった案は [ADR 0115](../../../../docs/decisions/0115-event-retention-purge.md)）。
    */
   limit: number;
   /** `true` なら削除もイベント追記も行わず、何が起きるかだけを返す。省略時は `false`。 */
@@ -1977,7 +1970,7 @@ export interface PurgeExpiredRecallsResult {
   dryRun: boolean;
 }
 
-/** {@link MemoryStore.purgeExpiredEvents} の返り値（Issue #210、ADR 0115）。 */
+/** {@link MemoryStore.purgeExpiredEvents} の返り値（ADR 0115）。 */
 export interface PurgeExpiredEventsResult {
   /** 実際に削除された行数。`opts.dryRun === true` のときは、削除していたら消えていたであろう件数（プレビュー）。 */
   purged: number;
@@ -1994,7 +1987,7 @@ export interface PurgeExpiredEventsResult {
 /**
  * {@link MemoryStore.purgeExpiredEventsByRetention} の引数（[ADR 0354](../../../../docs/decisions/0354-atomic-event-retention-purge.md)）。
  * {@link PurgeExpiredEventsOptions} と違い `olderThan` を持たない——cutoff はこのメソッドの内部で、保持期間を読んだ直後に `opts.now` から計算する
- * （呼び出し側が計算して渡すと、Issue #1232 の race が形を変えて残る）。
+ * （呼び出し側が計算して渡すと、保持期間を読んでから削除するまでの間に保持期間が変わる race が残る）。
  */
 export interface PurgeExpiredEventsByRetentionOptions {
   /** 「いま」。**必須・既定値なし**（`PurgeExpiredEventsForTenantOptions.now` と同じ。`purgeExpiredEventsForTenant` は省略時に `new Date()` を補って渡す）。 */

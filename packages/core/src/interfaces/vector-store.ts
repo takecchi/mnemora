@@ -86,7 +86,7 @@ export interface VectorFilter {
    *
    * **契約: `true` かつ `decayFloorAtAfter` と `decayFloorSeqAfter` の両方が与えられているときに限り、その2つだけを OR で結ぶ**
    * （`decay_floor_at > decayFloorAtAfter OR (decay_floor_seq IS NULL OR decay_floor_seq > decayFloorSeqAfter)`）。
-   * **他の条件は従来どおり AND のまま。** どちらか一方しか与えられていない場合、この欄は無視される。
+   * **他の条件は AND のまま。** どちらか一方しか与えられていない場合、この欄は無視される。
    */
   decayFloorAnyAxis?: boolean | undefined;
   /**
@@ -143,9 +143,9 @@ export interface VectorHit {
  * 判定は `instanceof` ではなく {@link isEmbeddingSpaceNotRegisteredError} で行う（ADR 0418）。
  * 空間を登録してから（`@mnemora/postgres` の `registerEmbeddingSpace`）呼び直す。
  *
- * ⚠ **例外にならなかった入力は変えていない。** 未登録の空間でも例外にならない入力（形式不正な id だけの `delete`・`getVectors`、
- * 空の `searchMany`、全 space を掃く `deleteAcrossSpaces`・`eraseTenant`）は、今も例外にならない。
- * 他の adapter がこの例外を投げることは、適合テストの要件にしていない。
+ * ⚠ 未登録の空間でも例外にならない入力（形式不正な id だけの `delete`・`getVectors`、
+ * 空の `searchMany`、全 space を掃く `deleteAcrossSpaces`・`eraseTenant`）は、この例外にならない。
+ * 他の adapter がこの例外を投げることは要件ではない。
  */
 export class EmbeddingSpaceNotRegisteredError extends Error {
   /** 判別子。クラスが2つの版に分かれても読める値（ADR 0418）。分岐は {@link isEmbeddingSpaceNotRegisteredError} で行う。 */
