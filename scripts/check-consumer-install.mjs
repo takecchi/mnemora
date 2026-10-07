@@ -1,40 +1,12 @@
 #!/usr/bin/env node
 /**
- * 出荷パッケージ（PUBLISH_TARGETS。件数はそちらが唯一の定義）を、利用者の立場で
- * repo の外に入れて確かめる（ADR 0346）。
- *
- * 1. `scripts/pack-publish-targets.mjs` で全対象の tarball を作る（`pack:check` と同じ `pnpm pack`）。
- * 2. 各 tarball の `exports` から列挙した入口を、`./check-consumer-install-lib.mjs` の
- *    `EXPECTED_ENTRY_POINTS` と両向きで突き合わせる（入口が消えた・増えた、を赤にする）。
- * 3. OS の一時ディレクトリ（repo の外）に空のプロジェクトを作り、全対象の tarball と
- *    `typescript`・`@types/node`（ルートの devDependencies と同じ版）を `npm install --ignore-scripts` で入れる。
- *    `--ignore-scripts` は、依存の install スクリプト（onnxruntime-node の CUDA 用バイナリなど）が
- *    registry の外へ取りに行くのを止めるため。この検査はネイティブのバイナリを使わない。
- *    `--install-strategy=nested` は hoist を止めるため——hoist すると、あるパッケージが `dependencies` に
- *    宣言し忘れた依存も、別のパッケージが持っていれば解決できてしまい、pnpm の厳格な配置の利用者だけが
- *    `Cannot find package` で止まる形（#1117 で README の install 行に見つけたのと同じ種類）を見逃す。
- * 4. すべての入口を import する `smoke.ts` を、`moduleResolution` が `node16` と `bundler` の両方で
- *    `tsc --noEmit`（strict、`skipLibCheck: true`）に掛ける。
- * 5. すべての入口を import する `smoke.mjs` を node で実行する（解決先が install 先であること、
- *    export が1つ以上あること、`scripts/__snapshots__/public-api/*.d.ts` から引いた値の名前が
- *    実行時に undefined でないこと。値と型の区別とその限界は `check-consumer-install-lib.mjs` と ADR 0441）。
- * 6. すべての入口を `require` する `smoke.cjs` を node で実行する（README の前提「CommonJS からは
- *    Node 22.12 以降の `require(esm)` で読み込める」。見るものは 5 と同じ。型は見ない）。
- *
- * どこかで落ちたら、その段を名指しして exit 1。
- *
- * ⚠ **この道具自体（1〜6段すべて）は既定の CI には入れていない。リリース前に人が打つ**
- * （`docs/release-v1.md` 0.11）。npm registry から依存を取り（キャッシュが空なら約 550MB）、
- * ロックファイル無しで範囲を解決するので、上流の新しい版で PR と無関係に赤になりうる
- * （理由と実測は ADR 0346）。
- *
- * **6段目（README の `require(esm)` の約束）だけは、registry に出ない別の道具
- * （`scripts/check-cjs-require-smoke.mjs`。ADR 0387）が毎 PR の CI（`.github/workflows/ci.yml`
- * の `cjs-require-smoke` ジョブ。required status check ではない）で確かめている。**
- * それ以外（型・ESM 経路・入口一覧の突き合わせ・依存の宣言漏れ・registry とのずれ）は、
- * 引き続きこの道具だけが見る——リリース前に人が打つ運用のままである。
- *
- * 使い方: `pnpm run check:consumer-install`（`--keep` で一時ディレクトリを残す）
+ * ⛔ `npm install` は `--install-strategy=nested`（hoist しない）で行う。hoist すると、`dependencies` に
+ * 宣言し忘れた依存も別のパッケージが持っていれば解決できてしまい、pnpm の厳格な配置の利用者だけが
+ * `Cannot find package` で止まる形を見逃す。
+ * `--ignore-scripts` は、依存の install スクリプト（onnxruntime-node の CUDA 用バイナリなど）が
+ * registry の外へ取りに行くのを止める。
+ * ⚠ 既定の CI には入れていない（リリース前に人が打つ）。registry から依存を取り、ロックファイル無しで
+ * 範囲を解決するので、上流の新しい版で PR と無関係に赤になりうる。
  */
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -145,7 +117,6 @@ try {
   );
   if (!install.ok) throw new Error("install");
 
-  // snapshot の値の名前（入口ごと）。空・引けないときは例外で止まり、赤になる。
   const valueNames = collectValueNamesForEntries(EXPECTED_ENTRY_POINTS, REPO_ROOT);
   writeFileSync(join(consumerDir, "smoke.ts"), buildSmokeTs(EXPECTED_ENTRY_POINTS));
   writeFileSync(join(consumerDir, "smoke.mjs"), buildSmokeMjs(EXPECTED_ENTRY_POINTS, valueNames));

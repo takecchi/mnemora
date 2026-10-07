@@ -1,24 +1,8 @@
 #!/usr/bin/env node
 /**
- * `docs/decisions/README.md` の索引テーブルを `docs/decisions/*.md` から生成する
- * （Issue #230 案A、ADR 0137）。純関数側は `scripts/generate-adr-index-lib.mjs`。
- *
- * 使い方:
- *   node scripts/generate-adr-index.mjs          # 生成して書き込む（変更が無ければ何もしない）
- *   node scripts/generate-adr-index.mjs --check  # 書き込まず、最新かどうかだけを判定する
- *                                                 # （終了コード 0=最新 / 1=陳腐化）
- *
- * **ADR を追加する PR の側で、このスクリプトを実行して索引も一緒にコミットする。**
- * `adr-index-freshness` の歯を PR 上で緑にしてからマージする。ほかの ADR の PR と
- * 索引の行が衝突したら、`main` を merge で取り込み、このスクリプトで作り直す
- * （ADR 0137「決定」2番は「作成者は触らない」と読めるが、実際の運用はこちら。
- * 同 ADR と ADR 0192 の末尾の 2026-09-30 の追記を見ること）。
- *
- * ⚠ **「マージした直後に `main` 上で実行する」ではない。** そうすると
- * squash コミット自体が索引の陳腐化した状態のまま `main` に着地し、
- * `main` への push で毎回走る CI（`ci.yml`）を赤くする。マージ**前**に
- * PR ブランチ上で実行することで、`main` に着地する squash コミットは
- * 最初から索引が最新の状態を含む（ADR 0137「決定」2番）。
+ * ADR を追加する PR の側で実行して索引も一緒にコミットする（ADR 0137・0192 末尾の 2026-09-30 の追記）。
+ * ⚠ 「マージした直後に `main` 上で実行する」ではない。squash コミット自体が索引の陳腐化した状態で
+ * `main` に着地し、push で毎回走る CI を赤くする。マージ前に PR ブランチ上で実行すること。
  */
 import { readFileSync, writeFileSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
