@@ -3,15 +3,7 @@ import { z } from "zod";
 import { ExtractedMemoryCandidateSchema, ExtractionResultSchema } from "@mnemora/core";
 import { translateForAnthropicStructuredOutput } from "../json-schema.js";
 
-/**
- * 「zod スキーマ → Anthropic のネイティブ構造化出力への翻訳」だけを直接検査する歯
- * （`@mnemora/openai` の json-schema.test.ts と同じ理由: 擬似 provider ではこの翻訳の
- * 壊れに気づけないため、翻訳結果そのものを見るテストを別に持つ）。
- *
- * `@mnemora/core` から `ExtractedMemoryCandidateSchema`/`ExtractionResultSchema` を
- * import できることを確認済み（`packages/core/src/index.ts` が `extraction.js` を
- * re-export している）。
- */
+/** 翻訳結果そのものを見るテストを別に持つ。擬似 provider ではこの翻訳の壊れに気づけないため。 */
 describe("translateForAnthropicStructuredOutput", () => {
   it("type: 'json_schema' を返し、name も strict も生えていない（OpenAI との差）", () => {
     const schema = z.object({ content: z.string() });
@@ -37,7 +29,6 @@ describe("translateForAnthropicStructuredOutput", () => {
     });
     const { schema: jsonSchema } = translateForAnthropicStructuredOutput(schema);
     expect(jsonSchema.required).toEqual(["content"]);
-    // digest は optional のまま——type が ["string", "null"] のような null 許容化はされない。
     const digestSchema = (jsonSchema.properties as Record<string, Record<string, unknown>>).digest!;
     expect(digestSchema.type).toBe("string");
   });
@@ -65,13 +56,7 @@ describe("translateForAnthropicStructuredOutput", () => {
     expect(itemSchema.required).toEqual(["content"]);
   });
 
-  /**
-   * **実測で分かったこと（json-schema.ts 冒頭のコメント参照）**: Anthropic 公式ヘルパの
-   * `transformJSONSchema` は `type`/`description`/`title` と type 別の少数キーしか
-   * 素通りさせない。`z.enum(...)` が生む `enum` キーはそのまま残らず、`description` へ
-   * JSON 文字列として埋め込まれる。OpenAI 側（`z.enum` が `enum` キーのまま残る）と
-   * 明確に違うため、ここで実際の形を固定しておく。
-   */
+  /** Anthropic 公式ヘルパの `transformJSONSchema` は `type`/`description`/`title` と type 別の少数キーしか素通りさせず、`z.enum(...)` の `enum` キーは `description` へ JSON 文字列として埋め込まれる。OpenAI 側（`enum` キーのまま残る）と違うので、実際の形を固定する。 */
   it("z.enum で作った列挙型は enum キーとしては残らず、description に埋め込まれる（OpenAI と違う。実測）", () => {
     const schema = z.object({
       provenanceKind: z.enum(["stated", "inferred"]),
@@ -98,7 +83,6 @@ describe("translateForAnthropicStructuredOutput", () => {
       ExtractedMemoryCandidateSchema,
     );
     expect(jsonSchema.type).toBe("object");
-    // content と provenanceKind だけが required（digest/tags/confidence は optional のまま）。
     expect(jsonSchema.required).toEqual(["content", "provenanceKind"]);
   });
 

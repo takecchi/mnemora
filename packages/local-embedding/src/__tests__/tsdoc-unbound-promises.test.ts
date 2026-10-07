@@ -9,13 +9,7 @@ import {
 } from "../pipeline.js";
 import { LocalEmbeddingProviderError } from "../errors.js";
 
-/**
- * TSDoc・README が約束していて、ほかのどのテストも縛っていなかった振る舞いを縛る
- * （provider の公開の口の棚卸し。今の振る舞いの固定であり、望ましい姿の主張ではない）。
- *
- * `createPipeline` を注入するか、偽の extractor を `buildLocalEmbeddingPipeline` に渡すだけで、
- * 本物のモデルは読まない（ネットワークにも出ない）。
- */
+/** `createPipeline` を注入するか、偽の extractor を `buildLocalEmbeddingPipeline` に渡すだけで、本物のモデルは読まない（ネットワークにも出ない）。 */
 
 const ctx: Ctx = { tenantId: "tenant-1" };
 
@@ -106,16 +100,6 @@ describe("retry.attempts: 0 以下・NaN は1回に丸める（コンストラ�
   );
 });
 
-/**
- * ⚠ 2026-09-29 更新（Issue #1141 / ADR 0358）: このブロックは以前
- * 「embed(): 受け取った配列を分割せずに1回で推論する」という題で、件数によらず
- * 常に1回であることを固定していた。**それは当時の振る舞いの棚卸しであって、
- * 望ましい姿の主張ではなかった**（このファイル冒頭の docstring）。
- * `maxBatchSize`（既定 128）の導入で、既定値以下は今までどおり1回のままだが、
- * 既定値を超える件数は分割されるようになった——その新しい既定の振る舞いを、
- * このブロックが改めて固定する。既定値以下でビット一致することは
- * `max-batch-size.test.ts` がより詳しく測る。
- */
 describe("embed(): 件数が maxBatchSize 以下なら1回、超えたら分割して推論する（README の peak RSS の節、Issue #1141 / ADR 0358）", () => {
   it("既定値（128件）以下なら、pipeline.embed は1回だけ、渡した件数のまま呼ばれる", async () => {
     const embed = vi.fn(async (texts: string[]) => vectors(texts.length));

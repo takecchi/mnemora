@@ -1,14 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createLocalEmbeddingPipeline, type LocalEmbeddingModelSpec } from "../pipeline.js";
 
-/**
- * `createLocalEmbeddingPipeline` が、spec の `cacheDir` と `numThreads` を transformers.js の
- * `pipeline()` の options（`cache_dir`・`session_options.intraOpNumThreads`）へ渡すこと。
- *
- * `revision-passthrough.test.ts` が固定しているのは、`cacheDir` 未指定・スレッド数 4 の形だけだった。
- * ここでは既定と違う値を渡して、値がそのまま届くことを見る。`@huggingface/transformers` は `vi.mock` で
- * 差し替えるので、本物のモデルも onnxruntime も読み込まない。
- */
+/** `@huggingface/transformers` は `vi.mock` で差し替えるので、本物のモデルも onnxruntime も読み込まない。 */
 
 const pipelineMock = vi.hoisted(() => vi.fn());
 

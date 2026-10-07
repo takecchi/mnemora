@@ -5,13 +5,6 @@ import { OpenAIEmbeddingProvider } from "../embedding-provider.js";
 import { OpenAILLMProvider } from "../llm-provider.js";
 import { OpenAILLMProviderError } from "../errors.js";
 
-/**
- * TSDoc・README が約束していて、ほかのどのテストも縛っていなかった振る舞いを縛る
- * （provider の公開の口の棚卸し。今の振る舞いの固定であり、望ましい姿の主張ではない）。
- *
- * どれも偽の client か、`client` を省いて構築するだけで、実 API には繋がない（鍵も使わない）。
- */
-
 const ctx: Ctx = { tenantId: "tenant-1" };
 const prompt = { messages: [{ role: "user" as const, content: "u" }] };
 const schema = z.object({ a: z.string() });
@@ -162,7 +155,6 @@ describe("embed: 件数・次元を検査する（TSDoc、README の Issue #860�
       dimensions: 3,
       client: { embeddings: { create } } as never,
     });
-    // 入力は2件・宣言は3次元なのに、1件・1次元が返る。
     const error = await rejection(() => provider.embed(ctx, ["a", "b"]));
     expect(error).toBeInstanceOf(Error);
     expect((error as Error).message).toMatch(/^OpenAIEmbeddingProvider:/);
@@ -178,7 +170,7 @@ describe("client を省いたとき、SDK 既定の再試行・timeout が効く
       () => new OpenAIEmbeddingProvider({ apiKey: "sk-test", model: "m", dimensions: 3 }),
     ],
   ] as const)("%s: maxRetries 2・timeout 600000ms", (_name, build) => {
-    // `client` は TypeScript の private であり、実行時には読める。README の実測値の歯。
+    // `client` は TypeScript の private であり、実行時には読める。
     const client = (build() as unknown as { client: { maxRetries: number; timeout: number } })
       .client;
     expect(client.maxRetries).toBe(2);

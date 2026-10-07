@@ -1,11 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Ctx, TickOptions } from "@mnemora/core";
 
-// Redis を要らない検査。processor（`runtime.tick()` を呼ぶ関数）が throw したとき、
-// BullMQ の Worker は **`'error'` ではなく `'failed'`（job, err, prev）を emit する**
-// ——bullmq 6.3.8 の `worker.js` `handleFailed`（`this.emit('failed', job, err, 'active')`）と、
-// 実 Redis（`tick-driver.failed.redis.test.ts`）での実測による。この fake はその emit を写し、
-// driver が `'failed'` を拾って `onTickError` へ **error（job ではない）** を渡すことを縛る。
+// この fake は実 Worker の emit（processor が throw すると `'error'` ではなく `'failed'`）を写す。実物との一致は `tick-driver.failed.redis.test.ts` が見る。
 
 type Listener = (...args: unknown[]) => void;
 type Processor = (job: unknown) => Promise<unknown>;
@@ -54,7 +50,6 @@ beforeEach(() => {
 const CTX: Ctx = { tenantId: "t1" };
 const TICK: TickOptions = { leaseMs: 1000 };
 
-/** 実 Worker がしていること（processor を呼び、throw したら `'failed'` を emit する）を写す。 */
 async function runJob(worker: FakeWorker, job: unknown): Promise<void> {
   try {
     await worker.processor(job);

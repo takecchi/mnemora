@@ -1,16 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createLocalEmbeddingPipeline, type LocalEmbeddingModelSpec } from "../pipeline.js";
 
-/**
- * Issue #1403 の直し方（`pipeline.ts` の `revision` の埋め込み）そのものを縛る歯。
- *
- * `revision-offline-preflight.test.ts` は「結果としてネットワークへ出ないこと」を本物の transformers.js で
- * 縛っている。ここはその**仕組み**——`pipeline()` を呼んでいる間だけ、`env.remotePathTemplate` に
- * `revision` を埋め込み、キャッシュの根（`cache_dir` と `env.cacheDir`）を `<根>/<revision>` に分け、
- * `revision` は `pipeline()` へ渡さない、終わったら戻す——を、`@huggingface/transformers` を丸ごと
- * `vi.mock` で差し替えて縛る（`cache-dir-env-swap-serialization.test.ts` と同じ形）。
- */
-
 const DEFAULT_TEMPLATE = "{model}/resolve/{revision}/";
 
 const pipelineMock = vi.hoisted(() => vi.fn());
@@ -46,7 +36,6 @@ function baseSpec(overrides: Partial<LocalEmbeddingModelSpec> = {}): LocalEmbedd
   };
 }
 
-/** `pipeline()` が呼ばれた瞬間の `env` と options を記録し、`outcome` で決着させる。 */
 function observeCalls(outcome: "resolve" | "reject" = "resolve"): Observed[] {
   const observed: Observed[] = [];
   pipelineMock.mockImplementation(

@@ -5,13 +5,6 @@ import { AnthropicLLMProvider } from "../llm-provider.js";
 import { AnthropicLLMProviderError } from "../errors.js";
 import { translateForAnthropicStructuredOutput } from "../json-schema.js";
 
-/**
- * TSDoc・README が約束していて、ほかのどのテストも縛っていなかった振る舞いを縛る
- * （provider の公開の口の棚卸し。今の振る舞いの固定であり、望ましい姿の主張ではない）。
- *
- * どれも偽の client か、`client` を省いて構築するだけで、実 API には繋がない（鍵も使わない）。
- */
-
 const ctx: Ctx = { tenantId: "tenant-1" };
 const prompt = { messages: [{ role: "user" as const, content: "u" }] };
 const schema = z.object({ a: z.string() });
@@ -132,7 +125,7 @@ describe("応答の形そのものが壊れているとき（Issue #885）: 生�
 describe("client を省いたとき、SDK 既定の再試行・timeout が効く（README の Issue #884。SDK の版が上がれば変わりうる）", () => {
   it("maxRetries 2・timeout 600000ms", () => {
     const provider = new AnthropicLLMProvider({ apiKey: "sk-ant-test", model: "m" });
-    // `client` は TypeScript の private であり、実行時には読める。README の実測値の歯。
+    // `client` は TypeScript の private であり、実行時には読める。
     const client = (provider as unknown as { client: { maxRetries: number; timeout: number } })
       .client;
     expect(client.maxRetries).toBe(2);

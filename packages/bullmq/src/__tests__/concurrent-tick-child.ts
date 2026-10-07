@@ -1,14 +1,4 @@
-// 子プロセスの実体（`concurrent-tick.redis.test.ts` から `pnpm exec tsx` で spawn される）。
-//
-// 🔴 **`@mnemora/core`/`@mnemora/postgres` を相対 import で読む（bare specifier で
-// `import ... from "@mnemora/postgres"` としない）。** この歯は変異試験
-// （`packages/postgres/src/outbox-store.ts` を `cp` で退避 → 変異 → 撃つ → `cp` で戻す、
-// AGENTS.md「⛔ 変異を戻すのに `git checkout` を使わない」節）から使うことを前提にしている。
-// 子プロセスは vitest の外（plain な `tsx` 実行）なので、Node の通常の module 解決が効く
-// ——bare specifier だと `packages/bullmq/node_modules/@mnemora/postgres` → `dist/index.js`
-// に解決され、**変異のたびに `pnpm --filter @mnemora/postgres run build` を挟まないと
-// 反映されない**（`vitest.redis.config.mts` の alias は親プロセスにしか効かない）。
-// 相対 import ならビルド無しで src を直接読むので、変異が即座に反映される。
+// `@mnemora/core`/`@mnemora/postgres` は相対 import で読む（bare specifier にしない）。子プロセスは vitest の外で動くので、bare specifier だと `dist` に解決され、変異試験のたびに build を挟まないと反映されない。
 import { createHash } from "node:crypto";
 import { createRuntime } from "../../../core/src/index.js";
 import type {
@@ -47,16 +37,7 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-/**
- * 呼ばれるたびに `texts` をそのまま記録するだけの `EmbeddingProvider`。
- * 「本物と偽物を分ける」のは Postgres と Redis であって embedding provider ではない
- * （本 PR の決定5「embedding provider 等は数を数える fake でよい」）。
- * `EMBED_DELAY_MS` は embed 処理に現実的な所要時間を持たせるだけの小さな遅延
- * ——**「同時に tick が重なること」自体は、この遅延にはもう依存していない**
- * （2026-09-25 追記。ADR 0325「測ったこと」参照）。重なりを作る主因は
- * `concurrent-tick.redis.test.ts` がラウンドごとに BullMQ の queue へ明示的に
- * まとめ撃ちする「起爆ジョブ」の束（`queue.addBulk`）である。
- */
+/** Postgres と Redis は本物にし、embedding provider は呼び出しを記録するだけの fake にする。 */
 class RecordingEmbeddingProvider implements EmbeddingProvider {
   readonly space = CONCURRENCY_TEST_EMBEDDING_SPACE;
   readonly calls: string[] = [];
@@ -71,7 +52,6 @@ class RecordingEmbeddingProvider implements EmbeddingProvider {
   }
 }
 
-/** embed ジョブの処理経路では呼ばれない。呼ばれたら歯の前提が崩れているので投げる。 */
 const throwingLlmProvider: LLMProvider = {
   complete(_ctx: Ctx, _req: PromptSpec) {
     throw new Error("concurrent-tick-child: LLMProvider.complete は呼ばれない想定");
@@ -99,14 +79,9 @@ async function main(): Promise<void> {
   const leaseMs = Number(requireEnv("LEASE_MS"));
   const tickLimit = Number(requireEnv("TICK_LIMIT"));
 
-  // 🔴 自分専用の pg.Pool（決定5「複数の子プロセスが、それぞれ自分の pg.Pool …を持ち」）。
   const client = createPostgresClient(databaseUrl);
 
-  // 🔴 **接続を先に温める**（ADR 0206「測ったこと2」「案F」と同じ実測に基づく）。
-  // `pg.Pool` は遅延接続なので、ここで並行数ぶんの接続を先に張っておかないと、
-  // 最初の tick 群の接続確立の時間差そのものが「競争の窓」を閉じてしまい、
-  // `FOR UPDATE SKIP LOCKED` を丸ごと削った変異を入れても偶然赤くならないことが
-  // ある（本 PR で実測——温めずに3試行したところ 1/3 しか検出できなかった）。
+  // 接続を先に温める。`pg.Pool` は遅延接続で、温めないと最初の tick 群の接続確立の時間差が競争の窓を閉じ、`FOR UPDATE SKIP LOCKED` を削る変異が偶然赤くならないことがある。
   await Promise.all(
     Array.from({ length: concurrency }, () => client.pool.query("SELECT pg_sleep(0.05)")),
   );
@@ -140,8 +115,7 @@ async function main(): Promise<void> {
       tickCalls += 1;
     },
     onTickError: (err) => {
-      // 個々の tick 呼び出しの失敗（embed 自体の失敗等）は TickResult.failed に
-      // 現れるので、ここに来るのは Worker/接続レベルの異常。落とさず観測だけする。
+      // ここに来るのは Worker/接続レベルの異常。落とさず観測だけする。
       process.stderr.write(`[${workerId}] worker error: ${String(err)}\n`);
     },
   });

@@ -4,19 +4,7 @@ import type { Ctx } from "@mnemora/core";
 import { ExtractionResultSchema } from "@mnemora/core";
 import { OpenAILLMProvider } from "../llm-provider.js";
 
-/**
- * `completeStructured` の戻りの `null` の扱い（`llm-provider.ts` の `parseStructuredValue`）。
- *
- * OpenAI の strict への翻訳は `.optional()` を「必須 + null 許容」にするので、戻りの `null` は
- * `stripNulls` で省略へ戻してから `req.schema` で検査する（1段目）。だがそれだけだと、スキーマが
- * もともと `null` を許す位置（必須の `.nullable()`・配列の要素・根）の `null` まで消して、
- * README が「通る」とした `nullable` が `ZodError` になっていた。
- *
- * ⟹ 1段目が `ZodError` のときだけ、スキーマが `null` を許す位置の `null` を残して検査し直す（2段目）。
- * - 1段目で通る入力の結果は変えない（union の例）。
- * - `.nullable().optional()`（Issue #1082 の `subjectId`）は今どおり省略として届く。
- * - 2段目でも落ちたら、1段目の `ZodError` をそのまま投げる。
- */
+/** 1段目（`stripNulls`）だけだと、スキーマがもともと `null` を許す位置（必須の `.nullable()`・配列の要素・根）の `null` まで消して `ZodError` になる。そこで1段目が `ZodError` のときだけ、`null` を許す位置の `null` を残して検査し直す（2段目）。2段目でも落ちたら、1段目の `ZodError` をそのまま投げる。 */
 
 const ctx: Ctx = { tenantId: "tenant-1" };
 const prompt = { messages: [{ role: "user" as const, content: "u" }] };
@@ -122,7 +110,6 @@ describe("2段目でも落ちたら、1段目の ZodError をそのまま投げ�
       (reason: unknown) => reason,
     );
     expect(error).toBeInstanceOf(ZodError);
-    // 1段目は null を全部消した {} を検査する。
     const firstStage = schema.safeParse({});
     expect(firstStage.success).toBe(false);
     expect((error as ZodError).issues).toEqual(firstStage.error!.issues);

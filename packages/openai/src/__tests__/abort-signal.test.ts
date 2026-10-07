@@ -4,19 +4,7 @@ import type { Ctx } from "@mnemora/core";
 import { OpenAILLMProvider } from "../llm-provider.js";
 import { OpenAIEmbeddingProvider } from "../embedding-provider.js";
 
-/**
- * [Issue #1200](https://github.com/takecchi/mnemora/issues/1200) /
- * [ADR 0359](../../../docs/decisions/0359-abort-signal-for-provider-calls.md):
- * `opts?.signal` が `chat.completions.create`/`embeddings.create` の request options
- * （`{ signal }`）へ実際に届くこと、そして SDK が signal を尊重する体の偽 client を
- * 使ったとき、abort で reject することを確かめる。
- *
- * **正直に書く**: ここでの `create` は手書きの偽物であり、本物の OpenAI SDK の
- * `AbortSignal` 対応の実装そのものは検査していない（OpenAI SDK 自身がその契約を
- * 守るかどうかは、この repo の外側の話である）。ここで検査しているのは
- * 「`@mnemora/openai` が signal を渡し忘れていないか」「渡した signal が abort
- * されたときに reject する経路そのものは壊れていないか」だけである。
- */
+/** ここでの `create` は手書きの偽物で、OpenAI SDK 自身の `AbortSignal` 対応は検査しない。見るのは「signal を渡し忘れていないか」「abort されたときに reject する経路が壊れていないか」だけ。 */
 const ctx: Ctx = { tenantId: "tenant-abort" };
 
 describe("OpenAILLMProvider — AbortSignal", () => {

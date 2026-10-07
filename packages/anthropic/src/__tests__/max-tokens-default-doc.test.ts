@@ -5,12 +5,7 @@ import type { Ctx } from "@mnemora/core";
 import * as providerModule from "../llm-provider.js";
 import { AnthropicLLMProvider } from "../llm-provider.js";
 
-/**
- * `AnthropicLLMProviderOptions.maxTokens` を省いたときに送る `max_tokens` が、TSDoc に書かれた既定と一致することを縛る。
- * **doc の値は `llm-provider.ts` の TSDoc を読んで**（`maxTokens` の doc が `{@link DEFAULT_MAX_TOKENS}` で指す定数と、
- * その定数の doc に書かれた数字の両方）、**実装の値は `maxTokens` を省いた provider が実際に送るリクエストから**取る。
- * 実 API は使わない（`client` を差し替える）。
- */
+/** doc の値は `llm-provider.ts` の TSDoc を読んで取り、実装の値は `maxTokens` を省いた provider が実際に送るリクエストから取る。 */
 
 const SOURCE = readFileSync(fileURLToPath(new URL("../llm-provider.ts", import.meta.url)), "utf8");
 

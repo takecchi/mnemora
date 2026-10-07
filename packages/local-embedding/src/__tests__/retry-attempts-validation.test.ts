@@ -1,9 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { LocalEmbeddingProvider } from "../local-embedding-provider.js";
 
-// `retry.attempts` の扱い（Issue #1785）。
-// 有限でない数（±Infinity）は構築時に RangeError で拒む。NaN・0以下は1回に丸め、小数は
-// `<=` 比較で実質切り捨てる（今までどおり）。`new` はモデルを読まないので、ネットワークは要らない。
+// `new` はモデルを読まないので、ネットワークは要らない。
 
 async function attemptsMade(attempts: number | undefined): Promise<number> {
   let calls = 0;

@@ -3,16 +3,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { createBullmqTickDriver } from "../tick-driver.js";
 import type { BullmqTickDriver } from "../tick-driver.js";
 
-/**
- * 実 Redis（`REDIS_PORT`）での実測の歯（ADR 0449。redis-server 7.4.7・bullmq 6.3.8 で測った）。
- * README と `tick-driver.ts` の doc が「コードからの読み」と書いていた3つの振る舞いを、今の振る舞いとして縛る。
- *
- * - 同じ `queueName`・`jobName` の scheduler は1つで、後から `start()` した driver の `everyMs` が勝つ。
- * - 1台の `stop()` は、他の Worker が居れば共有の scheduler を消さず、動いたままの別の driver の tick は続く（ADR 0655。
- *   ADR 0449 の時点では消えて止まった。詳しい歯は `tick-driver.stop-last-worker.redis.test.ts`）。
- * - 完了したジョブは、既定では直近 1000 件まで、`completedJobsToKeep` を渡せばその件数だけ残る
- *   （ADR 0548。以前は `removeOnComplete` を指定せず、全部残った）。
- */
+/** redis-server 7.4.7・bullmq 6.3.8 で測った振る舞いを縛る。モックでは scheduler の共有や保持件数が実物どおりか分からない。 */
 const REDIS_PORT = process.env.REDIS_PORT;
 if (!REDIS_PORT) {
   throw new Error(
@@ -80,10 +71,8 @@ describe("実 Redis: 共有の scheduler（ADR 0449）", () => {
     const a = make(name, 60_000, () => undefined);
     await a.start();
     expect((await q.getJobSchedulers()).map((s) => s.every)).toEqual([60_000]);
-    // 同じ driver の start() の重ね呼びは何も変えない。
     await a.start();
     expect((await q.getJobSchedulers()).map((s) => s.every)).toEqual([60_000]);
-    // 別の driver が everyMs を変えて start() すると、先に動いていた a の間隔も変わる。
     const b = make(name, 120_000, () => undefined);
     await b.start();
     expect((await q.getJobSchedulers()).map((s) => s.every)).toEqual([120_000]);
@@ -97,7 +86,6 @@ describe("実 Redis: 共有の scheduler（ADR 0449）", () => {
     const b = make(name, 100, () => undefined);
     await a.start();
     await b.start();
-    // 陽性対照: stop() の前は発火している。
     await waitFor(() => ticksA >= 1, 10_000);
 
     await b.stop();
@@ -126,7 +114,6 @@ describe("実 Redis: 共有の scheduler（ADR 0449）", () => {
     let ticks = 0;
     const a = make(name, 50, () => (ticks += 1), undefined, { completedJobsToKeep: 3 });
     await a.start();
-    // 陽性対照: 上限の 3 件より多く tick が走ったうえで、残りが 3 件以下に収まる。
     await waitFor(() => ticks >= 12, 15_000);
     await a.stop();
     const counts = await q.getJobCounts("completed");

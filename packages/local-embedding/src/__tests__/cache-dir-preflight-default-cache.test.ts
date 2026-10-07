@@ -13,31 +13,10 @@ import {
 const execFileAsync = promisify(execFile);
 
 /**
- * Issue #1239 の直った振る舞いを縛る歯。README「`cacheDir` を渡すと、読み込みの前段の確認も
- * そこを見る」。
- *
- * `@huggingface/transformers@4.2.0` の `pipeline()` は、読み込みの前段の確認
- * （`get_pipeline_files` の中の `get_config` / `get_file_metadata`）で `config.json`・
- * `tokenizer_config.json` の有無を**既定のキャッシュ（`env.cacheDir`）だけ**で確かめ、
- * `cache_dir` オプションを運ばない。`createLocalEmbeddingPipeline`（`pipeline.ts`）は、
- * `spec.cacheDir` が指定されているとき、`pipeline()` を呼んでいる間だけ `env.cacheDir` を
- * 同じ場所へ差し替えることでこれを直す。
- *
- * - **`createLocalEmbeddingPipeline` 経由で読み込む**——`@huggingface/transformers` の
- *   `pipeline()` を直接呼ぶのではない（直した対象そのものを通す）。
- * - ネットワークには出ない: 子プロセスの `env.fetch` は、呼ばれたら記録して必ず失敗する。
- * - 本物の重みは要らない: `cacheDir` に置くのは中身の無い偽のファイルで、この歯が見るのは「外へ出ようと
- *   したか・どこへ」だけである（偽のファイルなので、この先の解釈は失敗してよい——読み込みの成否は
- *   この歯の主張ではない）。
- * - 既定のキャッシュは、子プロセスの `env.cacheDir` を一時ディレクトリへ向けて模す（本物の置き場には触らない）。
- * - `@mnemora/local-embedding` は**ビルド済みの dist**を使う（`probe-preflight-default-cache.mjs`
- *   の doc）——このテストを走らせる前に `pnpm --filter @mnemora/local-embedding run build`
- *   （と、依存する `pnpm --filter @mnemora/core run build`）が要る。
- *
- * ⭐ この歯が赤くなるのは2通りある——**転じて別の意味を持つ**——ので、赤くなったら理由を見分けること:
- * (a) `pipeline.ts` の `env.cacheDir` の差し替えが壊れた（退行）。
- * (b) transformers.js の版が上がり、前段の確認自身が `cache_dir` を運ぶようになった（前進。
- *     その場合はこの差し替え自体が不要になりうる——README と ADR 0361 を一緒に見直すこと）。
+ * `createLocalEmbeddingPipeline` 経由で読み込む（`pipeline()` を直接呼ばない。直した対象そのものを通す）。
+ * 子プロセスの `env.fetch` は呼ばれたら記録して必ず失敗する。`cacheDir` に置くのは中身の無い偽のファイルで、見るのは「外へ出ようとしたか・どこへ」だけ（読み込みの成否は主張しない）。
+ * `@mnemora/local-embedding` はビルド済みの dist を使う（`probe-preflight-default-cache.mjs`）ので、走らせる前に `pnpm --filter @mnemora/local-embedding run build`（と `pnpm --filter @mnemora/core run build`）が要る。
+ * この歯が赤くなるのは2通り: (a) `env.cacheDir` の差し替えが壊れた（退行）。(b) transformers.js の版が上がり、前段の確認自身が `cache_dir` を運ぶようになった（前進。その場合は差し替え自体が不要になりうる）。
  */
 
 const PROBE = fileURLToPath(
@@ -75,10 +54,8 @@ beforeEach(async () => {
   root = await mkdtemp(path.join(tmpdir(), "mnemora-local-embedding-preflight-"));
   defaultCacheDir = path.join(root, "default-cache");
   cacheDir = path.join(root, "cache-dir");
-  // 既定のキャッシュは常に空にする——直った振る舞いでは、そこに何も置かなくてよいことを
-  // 主張するため（旧い歯は、既定のキャッシュに手当てを置く形を縛っていた）。
+  // 既定のキャッシュは常に空にする。直った振る舞いでは、そこに何も置かなくてよいことを主張するため。
   await mkdir(defaultCacheDir, { recursive: true });
-  // `cacheDir` には4ファイルとも揃える（中身は偽物）。
   await put(cacheDir, "config.json", JSON.stringify({ model_type: "modernbert" }));
   await put(cacheDir, "tokenizer_config.json", "{}");
   await put(cacheDir, "tokenizer.json", "{}");
@@ -94,7 +71,6 @@ describe("createLocalEmbeddingPipeline({ cacheDir }): 既定のキャッシュ�
     const result = await probe();
     expect(result.urls).toEqual([]);
     expect(result.fetchCount).toBe(0);
-    // 読み込みの成否はこの歯の主張ではない（偽のファイルなので、ネットワークに出ずにその先で失敗する）。
     expect(result.error ?? "").not.toContain("network is disabled");
   }, 90_000);
 });

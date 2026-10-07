@@ -2,11 +2,7 @@ import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { translateForOpenAIStructuredOutput } from "../json-schema.js";
 
-/**
- * 「zod スキーマ → OpenAI の JSON Schema への翻訳」だけを直接検査する歯
- * （PR 本文「擬似物の扱い」: 擬似の LLM/EmbeddingProvider では翻訳の壊れに気づけないため、
- * この翻訳結果そのものを見るテストを別に持つ）。
- */
+/** 翻訳結果そのものを見るテストを別に持つ。擬似の LLM/EmbeddingProvider では翻訳の壊れに気づけないため。 */
 describe("translateForOpenAIStructuredOutput", () => {
   it("name をそのまま返し、strict: true を持つ", () => {
     const schema = z.object({ content: z.string() });
@@ -24,11 +20,7 @@ describe("translateForOpenAIStructuredOutput", () => {
   });
 
   it("z.looseObject（passthrough）でも additionalProperties: false へ強制される", () => {
-    // z.object() は zod v4 の既定で additionalProperties: false を出すため、
-    // 前のテストだけでは「明示的な強制」が本当に効いているかを検出できない
-    // （zod の既定値と偶然一致するだけでも緑になる）。z.looseObject は
-    // additionalProperties: {} を出す（実測済み）ため、この歯だけがハードン処理の
-    // 上書きを実際に検査する。
+    // z.object() は zod v4 の既定で additionalProperties: false を出すので、前のテストだけでは「明示的な強制」が効いているかを検出できない（既定値と偶然一致しても緑になる）。z.looseObject は additionalProperties: {} を出すので、この歯だけがハードン処理の上書きを検査する。
     const schema = z.looseObject({ a: z.string() });
     const { schema: jsonSchema } = translateForOpenAIStructuredOutput("f", schema);
     expect(jsonSchema.additionalProperties).toBe(false);
@@ -50,8 +42,6 @@ describe("translateForOpenAIStructuredOutput", () => {
     });
     const { schema: jsonSchema } = translateForOpenAIStructuredOutput("f", schema);
     const digestSchema = (jsonSchema.properties as Record<string, Record<string, unknown>>).digest!;
-    // string.optional() は type: "string" を持つノードになるため、type が配列 ["string", "null"]
-    // に変換されているはず。
     expect(digestSchema.type).toEqual(["string", "null"]);
   });
 
@@ -95,9 +85,7 @@ describe("translateForOpenAIStructuredOutput", () => {
     expect(kindSchema.enum).toEqual(["stated", "inferred"]);
   });
 
-  // `.optional()` の enum / literal は、null を値として受け付ける形にならなければならない。
-  // `type` に "null" を足しただけでは、`enum` / `const` が null を弾くので、strict モードの
-  // モデルは「省略」を表せず、列挙のどれかを埋めるしかなくなる（任意の欄が実質必須に化ける）。
+  // `type` に "null" を足しただけでは `enum` / `const` が null を弾くので、strict モードのモデルは「省略」を表せず、任意の欄が実質必須に化ける。
   it("省略可能な z.enum は enum に null を含む（type だけでなく）", () => {
     const schema = z.object({ kind: z.enum(["a", "b"]).optional() });
     const { schema: jsonSchema } = translateForOpenAIStructuredOutput("f", schema);
@@ -113,9 +101,7 @@ describe("translateForOpenAIStructuredOutput", () => {
     expect(kindSchema).toEqual({ anyOf: [{ type: "string", const: "x" }, { type: "null" }] });
   });
 
-  // Issue #1775 の #808（変異6・7）: `makeNullable` は型を問わず `const`・`enum` を持つ形を扱う
-  // （doc: 「`const` を持つ形は `anyOf` に包み、`enum` を持つ形は `enum` にも null を足す」。型を限っていない）。
-  // 文字列の literal・enum だけでなく、数値・真偽値の形も同じ。
+  // `makeNullable` は型を問わず `const`・`enum` を持つ形を扱うので、文字列だけでなく数値・真偽値の形も同じ。
   it.each([
     ["数値", z.literal(1), "number", 1],
     ["真偽値", z.literal(true), "boolean", true],

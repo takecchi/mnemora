@@ -3,16 +3,6 @@ import { z } from "zod";
 import type { Ctx } from "@mnemora/core";
 import { AnthropicLLMProvider } from "../llm-provider.js";
 
-/**
- * `assertNotRefusedOrTruncated` の「やりすぎ」側の歯（#603 の確かめ直し）。
- *
- * 断るのは `refusal`・`max_tokens`・`model_context_window_exceeded` だけである。応答が最後まで
- * 書き終わって返った正常な `stop_reason`（`end_turn`・`stop_sequence`）と、`stop_reason` が
- * 無い/null の応答は、断らずに本文を返す。
- *
- * `llm-provider.conformance.test.ts` の足場は `end_turn` の応答しか使わないため、
- * 「`stop_sequence` も断る」変異は、適合 suite にも既存の refusal/truncated の歯にもすり抜けていた。
- */
 const ctx: Ctx = { tenantId: "tenant-1" };
 
 function providerReturning(stopReason: string | null, text: string): AnthropicLLMProvider {

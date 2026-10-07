@@ -3,11 +3,6 @@ import type { Ctx } from "@mnemora/core";
 import { LocalEmbeddingProvider } from "../local-embedding-provider.js";
 import type { LocalEmbeddingPipeline } from "../pipeline.js";
 
-/**
- * ADR 0445: 件数が `maxBatchSize` を超えて `#embedInChunks` に回ったとき、チャンクの**合間**で abort を見る。
- * 1回の `pipeline.embed` 呼び出しは止められない（ADR 0359・ADR 0428）が、次のチャンクは始めない。
- * 直す前は、abort 後も残りのチャンクをすべて推論してから（最後の `throwIfAborted` で）reject していた。
- */
 const ctx: Ctx = { tenantId: "test-tenant" };
 
 function providerWith(embedCalls: string[][], onCall: (n: number) => void) {
@@ -33,13 +28,13 @@ describe("LocalEmbeddingProvider — チャンクの合間の abort（ADR 0445�
     const controller = new AbortController();
     const reason = new Error("caller-reason");
     const provider = providerWith(calls, (n) => {
-      if (n === 1) controller.abort(reason); // 1チャンク目の推論の最中に abort
+      if (n === 1) controller.abort(reason);
     });
 
     await expect(
       provider.embed(ctx, ["a", "b", "c", "d", "e", "f"], { signal: controller.signal }),
     ).rejects.toBe(reason);
-    expect(calls).toEqual([["a", "b"]]); // 3チャンク中、最初の1チャンクだけ
+    expect(calls).toEqual([["a", "b"]]);
   });
 
   it("陽性対照: abort しなければ全チャンクを推論して全ベクトルを返す", async () => {

@@ -1,12 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createBullmqTickDriver } from "../tick-driver.js";
 
-// ADR 0477（検査を足す直しは ADR 0498）: `everyMs`・`jobName` は構築時に検査して断る。`queueName` は BullMQ が
-// 同期的に投げるので driver は検査せずそのまま渡す。この歯は Redis の要らない形（`bullmq` を丸ごとモックに
-// 差し替える）で、(1) 断る入力は `Queue`・`Worker` を作る前に投げること、(2) 正当な入力はそのまま渡ることを縛る。
-// 検査を外すと (1) が赤、正当な入力まで断ると (2) が赤になる。
-// 実 Redis で BullMQ が止まる様子（負・1 未満・1e21 の everyMs、空の jobName）は ADR 0477 に表で書いてある。
-// `concurrency` は `resolveConcurrency` が検査する（`tick-driver.test.ts`）。
+// `queueName` は BullMQ が同期的に投げるので、driver は検査せずそのまま渡す（`everyMs`・`jobName` は構築時に断る）。
 
 const queueCtorArgs: unknown[][] = [];
 const workerCtorArgs: unknown[][] = [];
@@ -61,7 +56,6 @@ describe("createBullmqTickDriver: everyMs・jobName は構築時に検査し、q
   it("陽性対照: 普通の値はそのまま渡る（jobName の既定は mnemora-tick）", async () => {
     const driver = make({});
     await driver.start();
-    // ADR 0548: job template の opts に removeOnComplete の既定（count: 1000）が入る。removeOnFail は触らない。
     expect(upsertCalls).toEqual([
       [
         "mnemora-tick",
@@ -148,9 +142,7 @@ describe("createBullmqTickDriver: everyMs・jobName は構築時に検査し、q
     },
   );
 
-  // ADR 0525: 型の誤りは TypeError、範囲の誤りは RangeError（message は変えない）。
-  // `toThrow(TypeError)` は `RangeError` を通さず、`toThrow(RangeError)` は `TypeError` を通さない
-  // （どちらも `Error` の子だが、互いの子ではない）。
+  // `toThrow(TypeError)` は `RangeError` を通さず、その逆も同じ（どちらも `Error` の子だが、互いの子ではない）。
   it.each([
     ["文字列 '50'", "50"],
     ["null", null],
@@ -219,7 +211,6 @@ describe("createBullmqTickDriver: everyMs・jobName は構築時に検査し、q
   });
 });
 
-// ADR 0548: lockDuration を Worker へ渡す口と、完了ジョブの保持（removeOnComplete）の既定・上書き。
 describe("ADR 0548: lockDuration と完了ジョブの保持", () => {
   function workerOpts(): Record<string, unknown> {
     return workerCtorArgs[0]?.[2] as Record<string, unknown>;
@@ -382,8 +373,7 @@ describe("ADR 0548: lockDuration と完了ジョブの保持", () => {
     );
   });
 
-  // 変異試験の穴を塞ぐ歯（ADR 0548）。opts を丸ごと `toEqual` で固定し、余計なキーが増えたら赤にする。
-  // 特に `removeOnFail`（Worker にも Queue の defaultJobOptions にも）が入ると、失敗したジョブが消えうる。
+  // opts を丸ごと `toEqual` で固定する。`removeOnFail` が入ると失敗したジョブが消えうるため。
   const CONNECTION = { host: "127.0.0.1", port: 1 };
 
   it("⭐ Worker の opts は丸ごと固定（lockDuration あり）。removeOnComplete・removeOnFail・stalledInterval などの余計なキーを許さない", () => {
@@ -391,7 +381,7 @@ describe("ADR 0548: lockDuration と完了ジョブの保持", () => {
     expect(workerOpts()).toEqual({
       connection: CONNECTION,
       concurrency: 1,
-      name: expect.stringMatching(/^mnemora-tick-[0-9a-f-]{36}$/), // ADR 0655: stop() が自分を見分ける名前
+      name: expect.stringMatching(/^mnemora-tick-[0-9a-f-]{36}$/),
       autorun: false,
       lockDuration: 120_000,
     });
@@ -402,7 +392,7 @@ describe("ADR 0548: lockDuration と完了ジョブの保持", () => {
     expect(workerOpts()).toEqual({
       connection: CONNECTION,
       concurrency: 1,
-      name: expect.stringMatching(/^mnemora-tick-[0-9a-f-]{36}$/), // ADR 0655: stop() が自分を見分ける名前
+      name: expect.stringMatching(/^mnemora-tick-[0-9a-f-]{36}$/),
       autorun: false,
     });
   });
@@ -420,7 +410,7 @@ describe("ADR 0548: lockDuration と完了ジョブの保持", () => {
     expect(workerOpts()).toEqual({
       connection: CONNECTION,
       concurrency: 2,
-      name: expect.stringMatching(/^mnemora-tick-[0-9a-f-]{36}$/), // ADR 0655: stop() が自分を見分ける名前
+      name: expect.stringMatching(/^mnemora-tick-[0-9a-f-]{36}$/),
       autorun: false,
       lockDuration: 90_000,
     });

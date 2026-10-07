@@ -4,14 +4,7 @@ import { ZodError } from "zod";
 import type { Ctx } from "@mnemora/core";
 import { AnthropicLLMProvider, DEFAULT_MAX_TOKENS, toAnthropicRequest } from "../llm-provider.js";
 
-/**
- * **正直に書く**: `client` は手書きの偽物であり、本物の Anthropic API を叩かない。
- * ここで検査しているのは (a) `completeStructured` が正しい `output_config.format` を
- * 組み立てて渡すこと、(b) `system` の扱い（`prompt.system` と `role: "system"` の
- * メッセージが top-level `system` へ連結され、`messages` に残らないこと）、
- * (c) `model`/`maxTokens` が正しく渡ること、(d) 異常系で例外を投げること。
- * 「LLM が実際に良い抽出結果を返すか」はここでは検査できない（live テスト参照）。
- */
+/** `client` は手書きの偽物で、本物の API を叩かない。「LLM が実際に良い抽出結果を返すか」はここでは検査できない（live テスト参照）。 */
 const ctx: Ctx = { tenantId: "tenant-1" };
 
 const sampleSchema = z.object({
@@ -43,7 +36,6 @@ describe("toAnthropicRequest", () => {
       ],
     });
     expect(result.system).toBe("運用者の指示1\n運用者の指示2");
-    // messages には role: "system" が残らない。
     expect(result.messages).toEqual([{ role: "user", content: "hi" }]);
   });
 
@@ -168,10 +160,8 @@ describe("AnthropicLLMProvider.completeStructured", () => {
     expect(create).toHaveBeenCalledTimes(1);
     const callArgs = create.mock.calls[0]![0];
     expect(callArgs.output_config.format.type).toBe("json_schema");
-    // name/strict は無い（OpenAI との差。json-schema.test.ts が翻訳自体を直接検査する）。
     expect("name" in callArgs.output_config.format).toBe(false);
     expect("strict" in callArgs.output_config.format).toBe(false);
-    // content は required（.optional() を付けていない）、digest/tags は required に無い。
     expect(callArgs.output_config.format.schema.required).toEqual(["content"]);
   });
 
@@ -199,8 +189,7 @@ describe("AnthropicLLMProvider.completeStructured", () => {
   });
 
   it("Anthropic が返した JSON をそのまま zod でパースする（stripNulls 相当は無い。optional は省略のまま通る）", async () => {
-    // Anthropic 側は required を元のままにするため、モデルが digest/tags を省略した
-    // JSON をそのまま返してくる想定（OpenAI の strict モードのように null で埋めない）。
+    // Anthropic 側は required を元のままにするので、モデルが digest/tags を省略した JSON をそのまま返してくる想定（OpenAI の strict モードのように null で埋めない）。
     const create = vi.fn().mockResolvedValue(textResponse(JSON.stringify({ content: "本文" })));
     const provider = new AnthropicLLMProvider({
       model: "claude-test",

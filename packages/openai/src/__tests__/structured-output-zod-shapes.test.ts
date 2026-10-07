@@ -5,17 +5,8 @@ import { OpenAILLMProvider } from "../llm-provider.js";
 import { OpenAILLMProviderError } from "../errors.js";
 
 /**
- * 利用者が `completeStructured` に渡す zod の形のうち、どれが送る前に落ちるか
- * （[Issue #1148](https://github.com/takecchi/mnemora/issues/1148)、
- * [ADR 0360](../../../../docs/decisions/0360-schema-unsupported-thrown-before-send.md)）。
  * README「`completeStructured` に渡せる zod の形」の歯。偽の client で、送ったかどうかだけを見る。
- *
- * ⚠ **2026-09-29 追記: 振る舞いを変えた。**以前は `z.record`・`z.tuple`・`z.date`・`transform` の
- * どれも送ってからベンダーに拒ませていた（【実測 2026-09-27】OpenAI が HTTP 400 で拒む）。
- * **いまは4つとも送る前に `OpenAILLMProviderError`（`kind: "schema_unsupported"`）で落ちる**
- * ——`z.date`・`transform` は zod 自身の既定（throw）が、`z.record`・`z.tuple` は送る直前に
- * 通す `openai` SDK 自身の strict 検査（`toStrictJsonSchema`）が投げる。`z.lazy`（再帰）と
- * `default` は今までどおり通る。
+ * `z.date`・`transform` は zod 自身の既定（throw）が、`z.record`・`z.tuple` は送る直前に通す `openai` SDK 自身の strict 検査（`toStrictJsonSchema`）が投げる。
  */
 
 const ctx: Ctx = { tenantId: "tenant-1" };
@@ -45,7 +36,6 @@ describe("OpenAILLMProvider.completeStructured: 送る前に schema_unsupported 
       }
       expect(caught).toBeInstanceOf(OpenAILLMProviderError);
       expect((caught as OpenAILLMProviderError).kind).toBe("schema_unsupported");
-      // cause には元の例外（zod の Error か、openai SDK の toStrictJsonSchema が投げた Error）が載る。
       expect((caught as OpenAILLMProviderError).cause).toBeInstanceOf(Error);
       expect(create).not.toHaveBeenCalled();
     },
@@ -85,10 +75,7 @@ describe("OpenAILLMProvider.completeStructured: 送る前に schema_unsupported 
   );
 });
 
-/**
- * README「上の表に無い形の、今の振る舞い」の歯（[ADR 0471](../../../../docs/decisions/0471-structured-output-zod-shapes-recorded-in-readme.md)）。
- * ⚠ **今の振る舞いの記録であって、約束ではない**——変えるかどうかはオーナーの判断が要る。変えると決まったら、この歯と README の表を一緒に書き換えること。
- */
+/** 今の振る舞いの記録であって、約束ではない。変えると決まったら、この歯と README の表を一緒に書き換えること。 */
 describe("OpenAILLMProvider.completeStructured: 上の表に無い形の、今の振る舞い（記録）", () => {
   async function sendAndParse(schema: z.ZodType<unknown>, response: unknown) {
     const create = vi.fn(async (_body: unknown) => ({

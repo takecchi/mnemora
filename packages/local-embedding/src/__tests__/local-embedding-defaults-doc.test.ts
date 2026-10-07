@@ -10,12 +10,7 @@ import type {
   LocalEmbeddingPipeline,
 } from "../pipeline.js";
 
-/**
- * `LocalEmbeddingProvider` の options を省いたときの既定値が、TSDoc と README に書かれた値と一致することを縛る。
- * **doc の値は `local-embedding-provider.ts` の TSDoc と `README.md` を読んで**（`{@link DEFAULT_…}` で定数を
- * 指している欄はその定数を解決して）、**実装の値は options を省いた provider の振る舞いから**、どちらも実行時に
- * 取って突き合わせる。モデルは読み込まない（偽の pipeline を注入する）。
- */
+/** doc の値は TSDoc と `README.md` を読み、実装の値は options を省いた provider の振る舞いから、どちらも実行時に取って突き合わせる。モデルは読み込まない（偽の pipeline を注入する）。 */
 
 const SOURCE = readFileSync(
   fileURLToPath(new URL("../local-embedding-provider.ts", import.meta.url)),
@@ -23,7 +18,6 @@ const SOURCE = readFileSync(
 );
 const README = readFileSync(fileURLToPath(new URL("../../README.md", import.meta.url)), "utf8");
 
-/** `interface <name> { … }` の中で、`field?:` の直前の TSDoc を返す。 */
 function docOf(interfaceName: string, field: string): string {
   const start = SOURCE.indexOf(`export interface ${interfaceName} {`);
   const end = SOURCE.indexOf("\n}\n", start);
@@ -33,7 +27,6 @@ function docOf(interfaceName: string, field: string): string {
   return block.slice(block.lastIndexOf("/**", at), at);
 }
 
-/** TSDoc の既定値。「既定 `"q8"`」「既定は `""`」「既定 `256`」「既定 {@link DEFAULT_X}」の形を読む。 */
 function documentedDefault(interfaceName: string, field: string): string | number {
   const doc = docOf(interfaceName, field);
   const link = doc.match(/既定は?\s*\{@link\s+([A-Z0-9_]+)\}/);
@@ -81,7 +74,6 @@ describe("LocalEmbeddingProvider の既定値は TSDoc と README の値と一�
     expect(provider.space).toMatchObject({ model: doc("modelId"), dimensions: doc("dimensions") });
     expect(embedded[0]).toEqual([`${doc("prefix")}本文`]);
 
-    // README の「既定設定（`ruri-v3-30m/sym`・q8・256次元」「既定の設定（q8・4スレッド）」。
     const settings = README.match(/既定設定（`([^`]+)`・(q\d+)・\s*(\d+)次元/);
     const threads = README.match(/既定の設定（(q\d+)・(\d+)スレッド）/);
     expect(settings, "README に既定設定の記述が見つからない").not.toBeNull();

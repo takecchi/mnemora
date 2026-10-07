@@ -7,30 +7,14 @@ import {
 } from "../pipeline.js";
 
 /**
- * `revision` の素通し（Issue #597 の最小の形）。
- *
- * ⭐ **測っているのは2つの層である。**
- *
- * 1. `LocalEmbeddingProvider` の options に渡した `revision` が、注入点
- *    （`createPipeline`）へ渡る spec に載ること／省いたら `undefined` のままであること。
- * 2. `createLocalEmbeddingPipeline` が、spec の `revision` を transformers.js の
- *    `pipeline()` の options へ渡すこと／**省いたら鍵ごと渡さず、`revision` を足す前と
- *    同じ呼び出しになること**（既定値は変えない。transformers.js の既定 `"main"` のまま）。
- *
- * `@huggingface/transformers` は `vi.mock` で差し替えるので、本物のモデルも onnxruntime も
- * 読み込まない。
- *
- * ⚠ **この歯が測っていないこと**: `revision` を渡したときに transformers.js が実際に
- * その revision を落とすか（本物のモデルを落として確かめていない）。キャッシュ鍵
- * （ADR 0263）と、読み込んだ重みの指紋の照合（ADR 0253）が、固定した revision を
- * どう扱うか（Issue #597 では決めていない）。
+ * `@huggingface/transformers` は `vi.mock` で差し替えるので、本物のモデルも onnxruntime も読み込まない。省いたら鍵ごと渡さず、`revision` を足す前と同じ呼び出しにする（既定値は変えない。transformers.js の既定 `"main"` のまま）。
+ * 測っていないこと: `revision` を渡したときに transformers.js が実際にその revision を落とすか。
  */
 
 const pipelineMock = vi.hoisted(() => vi.fn());
 
 vi.mock("@huggingface/transformers", () => ({ pipeline: pipelineMock }));
 
-/** `buildLocalEmbeddingPipeline` が組み立てに要る最小の形の偽 extractor。 */
 function fakeExtractor() {
   return Object.assign(async () => ({ tolist: () => [] }), {
     tokenizer: { model_max_length: 512 },
@@ -115,7 +99,6 @@ describe("createLocalEmbeddingPipeline: spec の revision を pipeline() へ素�
     expect(pipelineMock).toHaveBeenCalledTimes(1);
     const options = pipelineMock.mock.calls[0]?.[2] as Record<string, unknown>;
     expect(Object.hasOwn(options, "revision")).toBe(false);
-    // 足す前と同じ呼び出しであることを、options の形そのもので固定する。
     expect(options).toEqual({
       dtype: "q8",
       session_options: { intraOpNumThreads: 4, interOpNumThreads: 1 },

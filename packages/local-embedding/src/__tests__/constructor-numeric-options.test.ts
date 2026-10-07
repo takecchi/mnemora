@@ -1,8 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { LocalEmbeddingProvider } from "../local-embedding-provider.js";
 
-// ADR 0498: dimensions・numThreads は構築時に検査する（正の安全な整数）。省略時の既定は変えない。
-// `new` はモデルを読まない（読むのは最初の embed()）ので、ここはネットワークも要らない。
+// `new` はモデルを読まない（読むのは最初の embed()）ので、ネットワークも要らない。
 
 const bad: [string, unknown][] = [
   ["0", 0],
