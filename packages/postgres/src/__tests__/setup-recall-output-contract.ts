@@ -3,10 +3,9 @@ import type * as RuntimeModule from "../../../core/src/runtime.js";
 import { failOnRuntimeOutputContractViolations } from "../../../core/src/__tests__/runtime-output-contract-harness.js";
 
 /**
- * このパッケージのすべてのテストで、`createRuntime` が返す `Runtime` の各メソッドの戻り値を、
- * core と同じ検査に通す（`recall()` は `checkRecallResultContract`〔`packages/core/src/__tests__/runtime-fakes.ts`〕、
- * それ以外の16メソッドは `packages/core/src/__tests__/runtime-return-contract.ts` の `checkXxxContract`。
- * TSDoc の7巡目 B1・B2、8巡目で拡張）。
+ * このパッケージのすべてのテストで、`createRuntime` が返す `Runtime` の各メソッドの戻り値を、core と同じ検査に通す
+ * （`recall()` は `checkRecallResultContract`〔`packages/core/src/__tests__/runtime-fakes.ts`〕、
+ * それ以外の16メソッドは `packages/core/src/__tests__/runtime-return-contract.ts` の `checkXxxContract`）。
  * 配線の部品は core の `src/__tests__/runtime-output-contract-harness.ts` を共有する（コピーしない）。
  *
  * core の `src/runtime.ts` のモジュールそのものを包むので、`@mnemora/core` の入口から import しても

@@ -23,12 +23,10 @@ import {
 } from "./test-db.js";
 
 /**
- * `reflect` が何を材料として選ぶかを、`ConsolidateTarget` と対になる形で縛る
- * （`ReflectTarget` の TSDoc の2026-09-29 変更、`consolidate-target-selection.postgres.test.ts` と同じ形）。
+ * `reflect` が何を材料として選ぶかを、`ConsolidateTarget` と対になる形で縛る（`consolidate-target-selection.postgres.test.ts` と同じ形）。
  *
- * どの形（`{ memoryIds }`・`{ seedMemoryId }`・`{ query }`）でも、いまの時点で有効期間の外にある
- * 記憶は材料にしない（`basis` に `"expired"`/`"not_yet_valid"`。Issue #1188）。2実装
- * （Postgres・testkit の InMemory）で同じ結果になることも見る。
+ * どの形（`{ memoryIds }`・`{ seedMemoryId }`・`{ query }`）でも、いまの時点で有効期間の外にある記憶は材料にしない
+ * （`basis` に `"expired"`/`"not_yet_valid"`）。2実装（Postgres・testkit の InMemory）で同じ結果になることも見る。
  */
 
 interface Kit {
@@ -156,10 +154,8 @@ describe("reflect の対象の選び方（今の振る舞い）", () => {
           expect((await kit.memoryStore.get(ctx, current))?.status).toBe("active");
         }
 
-        // { memoryIds }: 未到来 U と有効な F・G。U を除いた2件が材料になる。F・G はどちらも
-        // 有効期間を持たない（`add` はデフォルトで validFrom/validUntil を付けない）ので、
-        // 積（Issue #1188 残り、ADR 0368）も両方 null——非 null な積は
-        // `consolidate-reflect-carryover.postgres.test.ts` の専用の it が検査する。
+        // { memoryIds }: 未到来 U と有効な F・G。U を除いた2件が材料になる。F・G はどちらも有効期間を持たない
+        // （`add` はデフォルトで validFrom/validUntil を付けない）ので、積も両方 null。非 null な積は `consolidate-reflect-carryover.postgres.test.ts` の専用の it が検査する。
         {
           const kit = await makeKit();
           const future = await add(kit, [1, 0, 0], { validFrom: FUTURE } as Partial<NewMemory>);

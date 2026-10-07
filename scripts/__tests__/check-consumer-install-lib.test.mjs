@@ -14,6 +14,7 @@ import {
   collectValueNamesForEntries,
   compareEntryPoints,
   entryPointsFromExports,
+  planConsumerProjects,
 } from "../check-consumer-install-lib.mjs";
 import { PUBLISH_TARGETS } from "../publish-targets.mjs";
 
@@ -229,4 +230,51 @@ describe("生成した smoke が、値の名前の欠けを実行時に検出す
       expect(runSmoke(kind, ["foo"], {}).status).toBe(1);
     });
   }
+});
+
+describe("planConsumerProjects（パッケージごとに別のプロジェクトへ入れる）", () => {
+  const manifests = [
+    { name: "@m/core", tarball: "/p/core.tgz", dependencies: { zod: "^4" } },
+    {
+      name: "@m/testkit",
+      tarball: "/p/testkit.tgz",
+      dependencies: { "@m/core": "^1" },
+    },
+    {
+      name: "@m/openai",
+      tarball: "/p/openai.tgz",
+      dependencies: { "@m/core": "^1", openai: "7", zod: "^4" },
+    },
+  ];
+  const entries = ["@m/core", "@m/testkit", "@m/testkit/fixtures", "@m/openai"];
+  const plan = planConsumerProjects(manifests, entries);
+  const byName = (name) => plan.find((p) => p.name === name);
+
+  it("パッケージの数だけプロジェクトを作る", () => {
+    expect(plan.map((p) => p.name)).toEqual(["@m/core", "@m/testkit", "@m/openai"]);
+  });
+
+  it("兄弟に頼らない core のプロジェクトへは core の tarball だけを入れる（testkit の peer の zod が混ざらない）", () => {
+    expect(byName("@m/core").installTarballs).toEqual(["/p/core.tgz"]);
+  });
+
+  it("兄弟の出荷パッケージは dependencies で頼るものだけを、自分の tarball と一緒に入れる", () => {
+    expect(byName("@m/testkit").installTarballs).toEqual(["/p/testkit.tgz", "/p/core.tgz"]);
+    expect(byName("@m/openai").installTarballs).toEqual(["/p/openai.tgz", "/p/core.tgz"]);
+    expect(byName("@m/openai").installTarballs).not.toContain("/p/testkit.tgz");
+  });
+
+  it("入口は自分のパッケージのものだけを、副入口も含めて割り当てる", () => {
+    expect(byName("@m/testkit").entries).toEqual(["@m/testkit", "@m/testkit/fixtures"]);
+    expect(byName("@m/core").entries).toEqual(["@m/core"]);
+  });
+
+  it("実際の EXPECTED_ENTRY_POINTS は、すべてちょうど1つのプロジェクトに割り当てられる", () => {
+    const real = PUBLISH_TARGETS.map((t) => ({
+      ...JSON.parse(readFileSync(`${repoRoot}${t.dir}/package.json`, "utf8")),
+      tarball: `/p/${t.name}.tgz`,
+    }));
+    const realPlan = planConsumerProjects(real, EXPECTED_ENTRY_POINTS);
+    expect(realPlan.flatMap((p) => p.entries).sort()).toEqual([...EXPECTED_ENTRY_POINTS].sort());
+  });
 });

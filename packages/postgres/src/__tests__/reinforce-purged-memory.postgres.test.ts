@@ -16,11 +16,9 @@ import {
 } from "./test-db.js";
 
 /**
- * ADR 0501（ADR 0453 負債3）: purged（`forget` → `purge` 済み）の記憶に `reinforce`・`reinforceMany`・
- * `recordUsageAndReinforce`・`Runtime.observe({kind:'memory_usage'})` を当てると、4つの口とも
- * `lastReinforcedAt` を書き換える。`status`（forgotten）・`purgedAt`・`content` は動かず、
- * `recall()` の結果には影響しない。`MemoryStore.reinforce` の TSDoc が purged をこう書く根拠の歯。
- * 振る舞いを変える直しではない（purged を弾くなら、それは store 契約の変更でオーナーの領分）。
+ * purged（`forget` → `purge` 済み）の記憶に `reinforce`・`reinforceMany`・`recordUsageAndReinforce`・`Runtime.observe({kind:'memory_usage'})` を当てると、
+ * 4つの口とも `lastReinforcedAt` を書き換える。`status`（forgotten）・`purgedAt`・`content` は動かず、`recall()` の結果には影響しない。
+ * `MemoryStore.reinforce` の TSDoc が purged をこう書く根拠の歯。
  */
 
 const ctx: Ctx = { tenantId: "reinforce-purged" };
@@ -107,7 +105,6 @@ describe("purged の記憶への強化（ADR 0501 / ADR 0453 負債3、本物の
     // ここは recordUsageAndReinforce が「新規挿入なし」を返す形になる。挿入される形は下の別の it で見る。
     await store.recordUsageAndReinforce!(ctx, recallId, [memoryId], at3);
 
-    // recall には出ない（forgotten ゲート）。
     const after = await runtime.recall(ctx, { text: "カバはとても重い" });
     expect(after.memories.map((m) => m.memoryId)).not.toContain(memoryId);
   });

@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 /**
+ * ⛔ install は出荷パッケージごとに別の空のプロジェクトへ行う（理由は planConsumerProjects）。
  * ⛔ `npm install` は `--install-strategy=nested`（hoist しない）で行う。hoist すると、`dependencies` に
  * 宣言し忘れた依存も別のパッケージが持っていれば解決できてしまい、pnpm の厳格な配置の利用者だけが
  * `Cannot find package` で止まる形を見逃す。
@@ -9,7 +10,7 @@
  * 範囲を解決するので、上流の新しい版で PR と無関係に赤になりうる。
  */
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -22,11 +23,14 @@ import {
   collectValueNamesForEntries,
   compareEntryPoints,
   entryPointsFromExports,
+  planConsumerProjects,
 } from "./check-consumer-install-lib.mjs";
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const keep = process.argv.includes("--keep");
 const rootPkg = JSON.parse(readFileSync(join(REPO_ROOT, "package.json"), "utf8"));
+
+class StepAborted extends Error {}
 
 const steps = [];
 function step(name, fn) {
@@ -52,7 +56,7 @@ function run(cmd, args, cwd) {
 }
 
 const packDir = mkdtempSync(join(tmpdir(), "mnemora-consumer-pack-"));
-const consumerDir = mkdtempSync(join(tmpdir(), "mnemora-consumer-"));
+const consumersRoot = mkdtempSync(join(tmpdir(), "mnemora-consumers-"));
 let failed = false;
 try {
   let tarballs = [];
@@ -71,14 +75,17 @@ try {
       ? { ok: true }
       : { ok: false, reason: "publish-order.txt が空だった。" };
   });
-  if (!pack.ok) throw new Error("pack");
+  if (!pack.ok) throw new StepAborted();
 
+  const manifests = [];
   const entries = step("tarball の exports と、利用者が頼ってよい入口の一覧の突き合わせ", () => {
     const actual = [];
     for (const tgz of tarballs) {
       const r = run("tar", ["-xzOf", tgz, "package/package.json"], packDir);
       if (!r.ok) return r;
-      actual.push(...entryPointsFromExports(JSON.parse(r.out)));
+      const manifest = JSON.parse(r.out);
+      manifests.push({ name: manifest.name, tarball: tgz, dependencies: manifest.dependencies });
+      actual.push(...entryPointsFromExports(manifest));
     }
     const { missing, unexpected } = compareEntryPoints(EXPECTED_ENTRY_POINTS, actual);
     if (missing.length === 0 && unexpected.length === 0) return { ok: true };
@@ -92,59 +99,71 @@ try {
     };
   });
   if (!entries.ok) failed = true;
-
-  writeFileSync(
-    join(consumerDir, "package.json"),
-    `${JSON.stringify({ name: "mnemora-consumer-install-check", private: true, version: "0.0.0", type: "module" }, null, 2)}\n`,
-  );
-  const install = step(
-    "repo の外へ npm install（--ignore-scripts、--install-strategy=nested）",
-    () =>
-      run(
-        "npm",
-        [
-          "install",
-          "--no-audit",
-          "--no-fund",
-          "--ignore-scripts",
-          "--install-strategy=nested",
-          ...tarballs.map((t) => `file:${t}`),
-          `typescript@${rootPkg.devDependencies.typescript}`,
-          `@types/node@${rootPkg.devDependencies["@types/node"]}`,
-        ],
-        consumerDir,
-      ),
-  );
-  if (!install.ok) throw new Error("install");
+  if (manifests.length !== tarballs.length) throw new StepAborted();
 
   const valueNames = collectValueNamesForEntries(EXPECTED_ENTRY_POINTS, REPO_ROOT);
-  writeFileSync(join(consumerDir, "smoke.ts"), buildSmokeTs(EXPECTED_ENTRY_POINTS));
-  writeFileSync(join(consumerDir, "smoke.mjs"), buildSmokeMjs(EXPECTED_ENTRY_POINTS, valueNames));
-  writeFileSync(join(consumerDir, "smoke.cjs"), buildSmokeCjs(EXPECTED_ENTRY_POINTS, valueNames));
-  const tsc = join(consumerDir, "node_modules", "typescript", "bin", "tsc");
-  for (const mr of ["node16", "bundler"]) {
-    writeFileSync(join(consumerDir, `tsconfig.${mr}.json`), buildTsconfig(mr));
-    const r = step(`型検査（moduleResolution: ${mr}、skipLibCheck: true）`, () =>
-      run(process.execPath, [tsc, "-p", `tsconfig.${mr}.json`], consumerDir),
+  const projects = planConsumerProjects(manifests, EXPECTED_ENTRY_POINTS);
+  for (const [index, project] of projects.entries()) {
+    const label = `[${project.name}]`;
+    const consumerDir = join(consumersRoot, String(index));
+    mkdirSync(consumerDir);
+    writeFileSync(
+      join(consumerDir, "package.json"),
+      `${JSON.stringify({ name: "mnemora-consumer-install-check", private: true, version: "0.0.0", type: "module" }, null, 2)}\n`,
     );
-    if (!r.ok) failed = true;
+    const install = step(
+      `${label} repo の外へ npm install（--ignore-scripts、--install-strategy=nested）`,
+      () =>
+        run(
+          "npm",
+          [
+            "install",
+            "--no-audit",
+            "--no-fund",
+            "--ignore-scripts",
+            "--install-strategy=nested",
+            ...project.installTarballs.map((t) => `file:${t}`),
+            `typescript@${rootPkg.devDependencies.typescript}`,
+            `@types/node@${rootPkg.devDependencies["@types/node"]}`,
+          ],
+          consumerDir,
+        ),
+    );
+    if (!install.ok) {
+      failed = true;
+      continue;
+    }
+
+    writeFileSync(join(consumerDir, "smoke.ts"), buildSmokeTs(project.entries));
+    writeFileSync(join(consumerDir, "smoke.mjs"), buildSmokeMjs(project.entries, valueNames));
+    writeFileSync(join(consumerDir, "smoke.cjs"), buildSmokeCjs(project.entries, valueNames));
+    const tsc = join(consumerDir, "node_modules", "typescript", "bin", "tsc");
+    for (const mr of ["node16", "bundler"]) {
+      writeFileSync(join(consumerDir, `tsconfig.${mr}.json`), buildTsconfig(mr));
+      const r = step(`${label} 型検査（moduleResolution: ${mr}、skipLibCheck: true）`, () =>
+        run(process.execPath, [tsc, "-p", `tsconfig.${mr}.json`], consumerDir),
+      );
+      if (!r.ok) failed = true;
+    }
+    const esm = step(`${label} ESM で入口を import`, () =>
+      run(process.execPath, ["smoke.mjs"], consumerDir),
+    );
+    if (!esm.ok) failed = true;
+    const cjs = step(`${label} CommonJS で入口を require（require(esm)）`, () =>
+      run(process.execPath, ["smoke.cjs"], consumerDir),
+    );
+    if (!cjs.ok) failed = true;
   }
-  const esm = step("ESM で全入口を import", () =>
-    run(process.execPath, ["smoke.mjs"], consumerDir),
-  );
-  if (!esm.ok) failed = true;
-  const cjs = step("CommonJS で全入口を require（require(esm)）", () =>
-    run(process.execPath, ["smoke.cjs"], consumerDir),
-  );
-  if (!cjs.ok) failed = true;
-} catch {
+} catch (error) {
+  if (!(error instanceof StepAborted))
+    console.error(error instanceof Error ? error.message : error);
   failed = true;
 } finally {
   if (!keep) {
     rmSync(packDir, { recursive: true, force: true });
-    rmSync(consumerDir, { recursive: true, force: true });
+    rmSync(consumersRoot, { recursive: true, force: true });
   } else {
-    console.log(`一時ディレクトリを残した: ${packDir} / ${consumerDir}`);
+    console.log(`一時ディレクトリを残した: ${packDir} / ${consumersRoot}`);
   }
 }
 

@@ -22,20 +22,14 @@ import {
 } from "./test-db.js";
 
 /**
- * ADR 0454（穴探し30巡目）: `reextract` が `superseded` にした記憶の `supersededById`（置き換えた側）は、
- * 今回の抽出で **`active` な行**を指す。
+ * `reextract` が `superseded` にした記憶の `supersededById`（置き換えた側）は、今回の抽出で `active` な行を指す。
  *
- * 抽出の冪等キー `(sourceObservationId, extractorVersion, contentHash)` は status を問わないので、候補が
- * 同じ Observation・同じ版の `superseded`／`archived` な既存行にぶつかると、`createMemoryWithOutbox`
- * 系はその行を `created: false` で返す。以前の実装は「候補列の先頭に対応する行」を無条件に置き換えた側にした
- * ため、次のことが起きていた（両実装・口あり／なしの両経路で同じ）。
- * - X → Y → X と LLM の出力が往復すると、Y が X に置き換えられ、X は Y に置き換えられたまま
- *   （循環。active が0件）。
- * - 先頭の候補が `archived` な既存行にぶつかると、別の active な記憶がその `archived` な行に置き換えられ、
- *   同じ呼び出しで作られた新しい active な記憶は誰も置き換えない。
+ * 抽出の冪等キー `(sourceObservationId, extractorVersion, contentHash)` は status を問わないので、候補が同じ Observation・同じ版の `superseded`／`archived` な既存行にぶつかると、
+ * `createMemoryWithOutbox` 系はその行を `created: false` で返す。「候補列の先頭に対応する行」を無条件に置き換えた側にすると、次のことが起きる（両実装・口あり／なしの両経路で同じ）。
+ * - X → Y → X と LLM の出力が往復すると、Y が X に置き換えられ、X は Y に置き換えられたまま（循環。active が0件）。
+ * - 先頭の候補が `archived` な既存行にぶつかると、別の active な記憶がその `archived` な行に置き換えられ、同じ呼び出しで作られた新しい active な記憶は誰も置き換えない。
  *
- * 直した後: 置き換えた側は、候補列のうち **`active` になる行**（新しく作る行・既に active な行）の先頭。
- * そういう候補が1件も無ければ、何も supersede しない。
+ * 置き換えた側は、候補列のうち `active` になる行（新しく作る行・既に active な行）の先頭。そういう候補が1件も無ければ、何も supersede しない。
  */
 
 type Next = { contents: string[] };
@@ -165,7 +159,6 @@ for (const [name, makeKit] of KITS) {
           Y: { status: "active", by: null },
         });
         expect(result.supersededMemoryIds).toEqual([]);
-        // 戻ってきた本文の行は既存の（superseded な）行で、skipped が理由を名乗る。
         expect(result.skipped).toContainEqual(
           expect.objectContaining({ kind: "status_not_active", status: "superseded" }),
         );

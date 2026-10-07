@@ -13,14 +13,8 @@ import {
 } from "./test-db.js";
 
 /**
- * Issue #207/#933 PR2（ADR 0292 決定2・3、ADR 0381、この回のマネージャー指示、本物の
- * Postgres + pgvector に対する歯）: 段3（必須の同伴取得）を多者間の `contested` 群にも
- * 広げたことを、実データに対して確かめる。
- *
- * `packages/core` 側の歯（`recall-relation-group-companion.test.ts`）が Fake で網羅的に
- * 検査している——ここでは同じ最小再現・上限と並び順・relationStore 未配線の3本だけを、
- * 実際の `PostgresMemoryStore`/`PostgresRelationStore` に対して繰り返す
- * （`AGENTS.md` の「テストは本物の Postgres + pgvector に対して走る」原則）。
+ * 段3（必須の同伴取得）を多者間の `contested` 群にも広げたことを、実際の `PostgresMemoryStore`/`PostgresRelationStore` に対して確かめる。
+ * core 側の歯（`recall-relation-group-companion.test.ts`）が Fake で網羅的に検査しているので、ここでは同じ最小再現・上限と並び順・relationStore 未配線の3本だけを繰り返す。
  */
 
 const TENANT = "recall-relation-group-tenant";
@@ -75,8 +69,7 @@ async function buildTestRuntime(opts: { withRelationStore?: boolean } = {}) {
     llmProvider: throwingLlm,
     embeddingProvider: makeEmbeddingProvider(),
     hashContent: (content: string) => `sha256(${content})`,
-    // buildNewMemoryFixture の既定 recordedAt（2026-01-01）に固定する
-    // （recall.postgres.test.ts と同じ理由——decay で score.total が落ちるのを防ぐ）。
+    // buildNewMemoryFixture の既定 recordedAt（2026-01-01）に固定する（decay で score.total が落ちるのを防ぐ）。
     clock: { now: () => new Date("2026-01-01T00:00:00.000Z") },
     relationStore: opts.withRelationStore === false ? undefined : relationStore,
   });
@@ -214,7 +207,6 @@ describe("runtime.recall() — 段3が多者間の contested 群も同伴取得�
     });
     const ctx: Ctx = { tenantId: TENANT };
 
-    // owner: NOW（buildTestRuntime の clock、2026-01-01）の時点で有効な窓。
     const owner = await createEmbeddedMemory(memoryStore, vectorStore, ctx, [1, 0, 0], {
       validFrom: new Date("2025-12-01T00:00:00Z"),
       validUntil: null,
@@ -229,10 +221,8 @@ describe("runtime.recall() — 段3が多者間の contested 群も同伴取得�
         validUntil: null,
       }),
     );
-    // c: owner の validFrom より前に終わる過去の窓——owner とは重ならないが、
-    // 無期限の a とは重なる。companion（a・c）は validAt を検査されないため、
-    // 期限切れの窓でも同伴取得の対象になる（`fetchMandatoryCompanions` の doc
-    // コメントと同じ規律）。
+    // c: owner の validFrom より前に終わる過去の窓。owner とは重ならないが、無期限の a とは重なる。
+    // companion（a・c）は validAt を検査されないため、期限切れの窓でも同伴取得の対象になる。
     const c = await memoryStore.createMemory(
       ctx,
       buildNewMemoryFixture({
@@ -249,8 +239,7 @@ describe("runtime.recall() — 段3が多者間の contested 群も同伴取得�
     const result = await runtime.recall(ctx, { vector: [1, 0, 0] });
     const ids = result.memories.map((m) => m.memoryId);
 
-    // 1段（owner の直接の隣接）だけなら a までしか見つからない。幅優先で a から先も
-    // 辿ることで、c（owner からは2ホップ先）まで同伴取得される。
+    // 1段（owner の直接の隣接）だけなら a までしか見つからない。c（owner からは2ホップ先）まで同伴取得されるのは、幅優先で a から先も辿るため。
     expect(ids).toContain(owner.id);
     expect(ids).toContain(a.id);
     expect(ids).toContain(c.id);
@@ -259,10 +248,8 @@ describe("runtime.recall() — 段3が多者間の contested 群も同伴取得�
   });
 
   /**
-   * 2026-09-30 の3つ目の直し（ADR 0381 決定4・§5.5）: 上限は群ごと。2段先まで含めて
-   * 11件以上になる群の形（core の `recall-relation-group-companion.test.ts` の
-   * `buildTwoHopGroup` と同じ形。owner は a とだけ重なり、a は c0〜c10 と重なり、
-   * c0〜c10 は owner と重ならない）。
+   * 上限は群ごと。2段先まで含めて11件以上になる群の形（core の `buildTwoHopGroup` と同じ形。
+   * owner は a とだけ重なり、a は c0〜c10 と重なり、c0〜c10 は owner と重ならない）。
    */
   async function buildTwoHopGroup(
     built: Awaited<ReturnType<typeof buildTestRuntime>>,
@@ -299,7 +286,6 @@ describe("runtime.recall() — 段3が多者間の contested 群も同伴取得�
     await runtime.markContestedGroup!(ctx, [owner.id, a.id, ...cs]);
     const related = await relationStore.listRelated(ctx, owner.id, "contradicts");
     expect(related.map((r) => r.memoryId)).toEqual([a.id]); // 前提: owner は a とだけ直接つながる。
-    // 新しい順: a、c10、c9 … c2 が残り、c1・c0 が落ちる。
     const kept = [a.id, ...[...cs].reverse().slice(0, 9)];
     const dropped = [cs[1]!, cs[0]!];
     return { owner, kept, dropped };
@@ -403,9 +389,8 @@ describe("runtime.recall() — 段3が多者間の contested 群も同伴取得�
     expect(shown).toEqual([owner.id, c2.id, c1.id, a.id]);
   });
 
-  // Issue #1449 項目7: 菱形（O が起点、O-B・O-C・B-D・C-D）。D へは B からも C からも同じ段で届く。
-  // `listRelated` は ORDER BY を持たない（契約も順を規定しない）ので、関係を張る順を入れ替えた
-  // 2通りで作り、どちらでも D の companionOf が id の小さい親になることを縛る。
+  // 菱形（O が起点、O-B・O-C・B-D・C-D）。D へは B からも C からも同じ段で届く。
+  // `listRelated` は ORDER BY を持たない（契約も順を規定しない）ので、関係を張る順を入れ替えた2通りで作り、どちらでも D の companionOf が id の小さい親になることを縛る。
   it.each([
     ["O-B, O-C, B-D, C-D の順に張る", false],
     ["O-C, O-B, C-D, B-D の順に張る（逆）", true],

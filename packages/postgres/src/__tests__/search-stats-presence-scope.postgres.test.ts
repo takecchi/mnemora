@@ -13,27 +13,18 @@ import { countMatchingQueries, requireDatabaseUrl } from "./test-db.js";
 import { dropTempDatabase } from "./temp-database.js";
 
 /**
- * Issue #1415 / ADR 0374: `PostgresVectorStore` の `StatsPresenceGate`
- * （`vector-store.ts` の doc コメント参照）が、実装が約束する3つの範囲——
- * **インスタンスごと・表ごと・テナントには依らない**——を実際に守っていることを
- * 縛る歯。
+ * `PostgresVectorStore` の `StatsPresenceGate` が、3つの範囲（インスタンスごと・表ごと・テナントには依らない）を実際に守っていることを縛る歯。
  *
  * ## 観測の手立て
  *
- * `StatsPresenceGate` はプライベートな状態（`Set`）であり、テストから直接覗けない
- * ——代わりに**副作用**（統計を確認するための余分な往復が起きたかどうか）を数える。
- * `StatsPresenceGate.bothPresent` は未確認のときだけ
- * `SELECT ... reltuples ... to_regclass ...` という形の往復を1回発行する
- * （`vector-store.ts` 参照）。この往復が起きた回数を `countMatchingQueries`
- * （`test-db.ts`、`/reltuples/i` を数える）で数えることで、「確認済みと見なした
- * か・見なしていないか」を外側から観測する。
+ * `StatsPresenceGate` はプライベートな状態（`Set`）であり、テストから直接覗けない。代わりに副作用（統計を確認するための余分な往復が起きたかどうか）を数える。
+ * `StatsPresenceGate.bothPresent` は未確認のときだけ `SELECT ... reltuples ... to_regclass ...` という形の往復を1回発行する。
+ * この往復が起きた回数を `countMatchingQueries`（`test-db.ts`、`/reltuples/i` を数える）で数えることで、「確認済みと見なしたか・見なしていないか」を外側から観測する。
  *
  * ## 使い捨てデータベースを使う理由
  *
- * `memories-statistics.postgres.test.ts` と同じ理由——この歯は `memories`/
- * 複数の埋め込み表の統計（`ANALYZE` の有無）を精密に制御する必要があり、他の
- * テストファイルと共有する worker ごとの DB では、他ファイルが打った
- * `ANALYZE`/積んだ行数のノイズと衝突しうる。
+ * この歯は `memories`/複数の埋め込み表の統計（`ANALYZE` の有無）を精密に制御する必要があり、他のテストファイルと共有する worker ごとの DB では、
+ * 他ファイルが打った `ANALYZE`/積んだ行数のノイズと衝突しうる（`memories-statistics.postgres.test.ts` と同じ理由）。
  */
 
 const TEST_DATABASE = "mnemora_search_stats_presence_scope_test";
@@ -125,22 +116,17 @@ describe("StatsPresenceGate: インスタンス・表ごとの範囲（Issue #14
     await pool.query(`ANALYZE ${tableA}`);
     await pool.query(`ANALYZE memories`);
 
-    // 1回目: 表Aへの search() ——未確認なので、reltuples の往復が1回発生する。
     const firstCallOnA = await countMatchingQueries(isReltuplesQuery, () =>
       vectorStore.search(ctx, spaceA, [1, 2, 3], { limit: 10, filter: { tenantId: TENANT_A } }),
     );
     expect(firstCallOnA, "表Aへの1回目は未確認のはずなので、reltuples の往復が1回起きる").toBe(1);
 
-    // 2回目: 同じ表Aへの search() ——確認済みなので、往復は増えない。
     const secondCallOnA = await countMatchingQueries(isReltuplesQuery, () =>
       vectorStore.search(ctx, spaceA, [4, 5, 6], { limit: 10, filter: { tenantId: TENANT_A } }),
     );
     expect(secondCallOnA, "表Aは確認済みのはずなので、2回目は reltuples の往復が起きない").toBe(0);
 
-    // 1回目: 表Bへの search() ——表Aを確認済みにしたことが、表Bの未確認を覆さない
-    // ことを縛る本題。表Bは一度も ANALYZE していないので統計は無いが、この歯が
-    // 見たいのは「往復が起きるかどうか」（=未確認として扱われるかどうか）だけである
-    // （速さや `reltuples` の値そのものは別の歯——`search-primary-key-lookup...`——が縛る）。
+    // 表Aを確認済みにしたことが、表Bの未確認を覆さないことを縛る本題。表Bは一度も ANALYZE していないので、見たいのは「往復が起きるかどうか」（未確認として扱われるかどうか）だけである。
     const firstCallOnB = await countMatchingQueries(isReltuplesQuery, () =>
       vectorStore.search(ctx, spaceB, [1, 2, 3], { limit: 10, filter: { tenantId: TENANT_A } }),
     );
@@ -163,7 +149,6 @@ describe("StatsPresenceGate: インスタンス・表ごとの範囲（Issue #14
     await pool.query(`ANALYZE ${embeddingSpaceTableName(space)}`);
     await pool.query(`ANALYZE memories`);
 
-    // instance1 を確認済みにする。
     const instance1First = await countMatchingQueries(isReltuplesQuery, () =>
       instance1.search(ctx, space, [1, 2, 3], { limit: 10, filter: { tenantId: TENANT_A } }),
     );
@@ -173,9 +158,7 @@ describe("StatsPresenceGate: インスタンス・表ごとの範囲（Issue #14
     );
     expect(instance1Second, "instance1 の2回目は確認済みのはず").toBe(0);
 
-    // 同じ db・同じ表に対する、まったく別の PostgresVectorStore インスタンス
-    // ——instance1 が確認済みでも、新しいインスタンスは覚えていない（大域・static で
-    // 共有していないことの直接の証拠）。
+    // 同じ db・同じ表に対する、まったく別の PostgresVectorStore インスタンス。instance1 が確認済みでも、新しいインスタンスは覚えていない。
     const instance2 = new PostgresVectorStore(db);
     const instance2First = await countMatchingQueries(isReltuplesQuery, () =>
       instance2.search(ctx, space, [7, 8, 9], { limit: 10, filter: { tenantId: TENANT_A } }),
@@ -201,14 +184,12 @@ describe("StatsPresenceGate: インスタンス・表ごとの範囲（Issue #14
     await pool.query(`ANALYZE ${embeddingSpaceTableName(space)}`);
     await pool.query(`ANALYZE memories`);
 
-    // テナントAで確認済みにする。
     const firstOnA = await countMatchingQueries(isReltuplesQuery, () =>
       vectorStore.search(ctxA, space, [1, 2, 3], { limit: 10, filter: { tenantId: TENANT_A } }),
     );
     expect(firstOnA, "テナントAの1回目は未確認のはず").toBe(1);
 
-    // テナントBに切り替えても、同じインスタンス・同じ表なので、確認済みの状態は
-    // そのまま——テナント単位の状態を別に持っていれば、ここで往復が1回起きてしまう。
+    // テナントBに切り替えても、同じインスタンス・同じ表なので、確認済みの状態はそのまま。テナント単位の状態を別に持っていれば、ここで往復が1回起きてしまう。
     const firstOnB = await countMatchingQueries(isReltuplesQuery, () =>
       vectorStore.search(ctxB, space, [4, 5, 6], { limit: 10, filter: { tenantId: TENANT_B } }),
     );
