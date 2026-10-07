@@ -43,12 +43,17 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 
 **この節は `v1.3.0` からの差分を対象とする。**⛔ **版は仮である**——破壊的変更が無ければ `1.3.1` になりうる。版を決めるのはオーナーである。起点は `v1.3.0` の tag が指す commit であり（tag の sha の正本は GitHub Release `v1.3.0`）、それより後に `main` へ入った PR がこの節の対象になる。まだ何も棚卸ししていない。⛔ ここに件数を書かないこと（[ADR 0234](./docs/decisions/0234-bake-no-numbers-into-tools-and-artifacts.md)）。
 
+### Breaking
+
+- **🔴 `@mnemora/postgres` の新しい migration `0033`・`0034` が、`memories.provenance` の jsonb に `kind` が無い行（`{}`・`{"kind": null}`・オブジェクトでない jsonb）を CHECK `memories_provenance_kind_present` で拒むようになった**（[ADR 0693](./docs/decisions/0693-provenance-kind-must-be-present-in-jsonb.md)。[Issue #1909](https://github.com/takecchi/mnemora/issues/1909)。**破壊的と数えるのは、クローンの判断で、オーナーが個別に決めたものではない。**オーナーの一般的な回答は、2026-09-28、ask_human 6911db12 の問6「v1.X.0とかで破壊的変更しちゃっていいよ僕しか使ってないし」）。
+  以前は、元の制約 `memories_provenance_kind_matches_provenance` が `provenance->>'kind'` の NULL を通すため、そういう行が入った。いまは生 SQL などでそういう行を書くと実行時の例外になり、すでにそういう行がある DB では `0034` が失敗する（`0033` の保護は残る）。`PostgresMemoryStore` 経由の書き込みは同じ値から列と jsonb の両方を書くので影響しない。型・シグネチャは変わらない。
+  - **破壊的と数える理由**: 以前は通っていた書き込みが例外になる。`0016`/`0017` を非破壊と数えた前例は、一致を強制しただけで正規の行が全部通った点が違う。
+  - **誰が影響を受けるか・どう直すか**: [docs/migration-v1.md](./docs/migration-v1.md) の「72.」。
+
 ### Changed（後方互換だが挙動が変わりうるもの）
 
 - **`@mnemora/testkit` の `InMemoryMemoryStore.supersedeWithNewMemories` が、CAS に弾かれた対象のイベントを確かめなくなった**（[ADR 0689](./docs/decisions/0689-recheck-0928-followups-cas-skipped-event-and-fake-provenance.md)。[Issue #1827](https://github.com/takecchi/mnemora/issues/1827)。クローンの判断で、オーナーの判断ではない）。
   以前は、CAS に弾かれる対象に書けないイベント（`kind` が列挙に無い・`at` が Invalid Date・`actor` に NUL・`meta` に BigInt・`sizeBeforeBytes` が整数でない）を渡すと例外になった。いまは `conflicted` に積んで返す（`MemoryStore.supersedeWithNewMemories` の TSDoc の約束。`@mnemora/postgres` は元からこの形）。CAS を通る対象は、いままでどおり状態を書き換える前に投げる。**投げる入力が減る向きだけの変更で、型・シグネチャは変わらない。**
-- **`@mnemora/postgres` の新しい migration `0033`・`0034` が、`memories.provenance` の jsonb に `kind` が無い行（`{}`・`{"kind": null}`・オブジェクトでない jsonb）を CHECK `memories_provenance_kind_present` で拒むようになった**（[ADR 0693](./docs/decisions/0693-provenance-kind-must-be-present-in-jsonb.md)。[Issue #1909](https://github.com/takecchi/mnemora/issues/1909)。クローンの判断で、オーナーの判断ではない）。
-  以前は、元の制約 `memories_provenance_kind_matches_provenance` が `provenance->>'kind'` の NULL を通すため、そういう行が入った。`PostgresMemoryStore` 経由の書き込みは同じ値から列と jsonb の両方を書くので影響しない。**影響を受けるのは、生 SQL などで `kind` を欠く jsonb を書いている書き手と、すでにそういう行がある DB である**（後者は `0034` が失敗する。`0033` の保護は残る。手順は [docs/migration-v1.md](./docs/migration-v1.md) の「v1.3.0 → 次の版で、挙動が変わるが手順は要らないもの」節）。型・シグネチャは変わらない。
 
 ## [1.3.0] - 2026-10-07
 
