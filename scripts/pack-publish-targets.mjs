@@ -1,30 +1,11 @@
 #!/usr/bin/env node
 /**
- * publish 対象パッケージ（`PUBLISH_TARGETS`）を `pnpm pack` し、**publish 順序に並べた tarball の一覧**を出す段。
+ * ⛔ この段は publish しない。tarball を作って並べるところまで。上げるのは `.github/workflows/publish.yml` の仕事。
  *
- * **なぜ pack と publish を別の道具に分けるか（ADR 0066）**
- *
- * ADR 0060 は「publish の道具は pnpm に統一する」と決めた。理由は `npm pack` が
- * `workspace:*` を置換せず、素の consumer の install が `EUNSUPPORTEDPROTOCOL` で落ちるためである
- * （実測済み）。**その理由は今も有効だが、決定は狭める必要があった。**
- *
- * | 仕事 | 道具 | なぜ |
- * |---|---|---|
- * | 梱包（pack） | **pnpm** | `workspace:` を実版へ置換できるのは pnpm だけ（ADR 0060 の実測） |
- * | アップロード（publish） | **npm** | Trusted Publishing (OIDC) と provenance は npm CLI の側にある。`pnpm publish` に `--provenance` フラグは**無い** |
- *
- * `npm publish <tarball>` は**すでに解決済みの manifest を持つ tarball** を上げるだけなので、
- * `workspace:` を見ることが無い——つまり ADR 0060 が塞いだ穴は開かない。
- *
- * **この段は publish しない。**tarball を作って並べるところまでで、上げるのは
- * `.github/workflows/publish.yml` の仕事である。手元で中身を確かめたいときにも、
- * この段だけを単体で打てる。
- *
- * 使い方:
- *   node scripts/pack-publish-targets.mjs <出力先ディレクトリ> [--expect-version <版>]
- *
- * `--expect-version` を渡すと、対象パッケージの版がそれと一致しない場合に落ちる
- * （workflow が tag `v0.1.0` と package.json の版のずれを掴むために使う）。
+ * ⛔ pack は pnpm、publish は npm と分ける(ADR 0066)。`npm pack` は `workspace:*` を置換せず、
+ * 素の consumer の install が `EUNSUPPORTEDPROTOCOL` で落ちる(ADR 0060)。一方 Trusted Publishing (OIDC) と provenance は
+ * npm CLI 側にあり、`pnpm publish` に `--provenance` は無い。`npm publish <tarball>` は解決済みの tarball を上げるだけなので、
+ * ADR 0060 が塞いだ穴は開かない。
  */
 import { spawnSync } from "node:child_process";
 import { mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
@@ -73,8 +54,7 @@ for (const target of PUBLISH_TARGETS) {
     continue;
   }
 
-  // pack 先をパッケージごとに分けるのは、生成された tarball が1つだけであることを
-  // 名前に依らず確かめられるようにするため（`check-publish-pack.mjs` と同じ理由）。
+  // pack 先をパッケージごとに分けるのは、生成された tarball が1つだけであることを名前に依らず確かめるため。
   const perPackageDir = join(destDir, target.name.replace("@", "").replace("/", "-"));
   mkdirSync(perPackageDir, { recursive: true });
 
@@ -111,7 +91,6 @@ if (problems.length > 0) {
   process.exit(1);
 }
 
-// publish 順序を一覧ファイルに書き出す。workflow はこの順に `npm publish` を打つ。
 const listPath = join(destDir, "publish-order.txt");
 writeFileSync(listPath, packed.map((p) => p.tarball).join("\n") + "\n");
 
