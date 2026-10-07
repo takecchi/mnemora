@@ -63,8 +63,6 @@ describe("carriedDigestTokensOf", () => {
     const digests = ["abc", "defgh"];
     const expected = heuristicTokenCounter.count(digests.join("\n")).tokens;
     expect(carriedDigestTokensOf(digests)).toBe(expected);
-    // 連結後に数える(個別に数えて足すのとは異なりうる)ことの確認——空文字を混ぜても
-    // 「\n」区切りの1本として数える。
     expect(carriedDigestTokensOf([])).toBe(heuristicTokenCounter.count("").tokens);
   });
 });
