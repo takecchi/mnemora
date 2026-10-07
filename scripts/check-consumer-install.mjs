@@ -122,7 +122,7 @@ try {
             "--no-fund",
             "--ignore-scripts",
             "--install-strategy=nested",
-            ...project.installTarballs.map((t) => `file:${t}`),
+            ...tarballs.map((t) => `file:${t}`),
             `typescript@${rootPkg.devDependencies.typescript}`,
             `@types/node@${rootPkg.devDependencies["@types/node"]}`,
           ],
