@@ -12,42 +12,7 @@ import {
 import { measureIntrusionMarginCandidates } from "../intrusion-margin-candidates.js";
 import type { SignedMarginStats } from "../intrusion-margin-candidates.js";
 
-/**
- * Issue #109 残件C（マネージャー依頼）——ADR 0291 §5.5/ADR 0321 が決めた
- * `intrusionMargin` の定義（B群、深い誤爆のときだけ `topScore − protectedFactScore`。
- * `protectedFacts` が0〜1件の今日の母集合では常に0になる、ADR 0321 §4 実測済み）を、
- * 同じ53件（A群21・B群32）に対して**候補の定義（`protectionMargin`）と並べて実測する**、
- * **手で回す測定スクリプト**（CI からは呼ばない。`local-embedding-synthetic-noise-fp.ts`
- * と同じ位置づけ）。
- *
- * ⚠ **当初「`correction-candidate-arm.ts`・基準値 JSON・summary スクリプト・`ci.yml` は
- * 1文字も変えない」という制約の下で書かれたスクリプトである**（ADR 0333 の測定・比較
- * フェーズ）。ADR 0333 §4.2 の推奨（案2）を実際に出荷した本作業では、上の4つとも
- * `protectionMargin`（並べて出す後継、`intrusionMargin` は凍結）を追加で持つ——
- * **この上の制約はその時点（比較のためだけの測定）にだけ適用されていたものであり、
- * 今は上書きされている。**このスクリプト自身は変更していない
- * （`../intrusion-margin-candidates.ts` を呼ぶだけの手動測定という位置づけのまま）。
- *
- * ## 候補
- *
- * - **案0（現行）**: `intrusionMargin = topScore − protectedFactScore`。深い誤爆
- *   のときだけ定義。今日の母集合では常に0（ADR 0321 §4）。
- * - **案1/2（数値は同一）**: `protectionMargin = protectedFactScore −
- *   topNonProtectedScore`。深い誤爆・誤爆(浅)の両方で定義され、符号が意味を持つ
- *   （正=深い誤爆側、負=誤爆(浅)側）。案1/2の違いは出荷方法（`intrusionMargin` の
- *   定義域を書き換えるか、別名で新設するか）——数値の比較はこのスクリプトの範囲、
- *   出荷方法の選択は ADR 側に委ねる（`/tmp/mgr-65f771d7/results-C.md` に論点を書いた）。
- *
- * ## 使い方
- *
- * ```
- * DATABASE_URL=postgresql://worker@127.0.0.1:<port>/mnemora_test \
- *   pnpm --filter @mnemora/example-chat exec tsx src/scripts/measure-intrusion-margin-candidates.ts
- * ```
- *
- * ⛔ 実 API は一切叩かない（`OPENAI_API_KEY` は読まない。LLM=`deterministic`、
- * embedding=`local`、`correction-candidates` サブコマンドと同じ組み合わせ）。
- */
+/** 手で回す測定（CI からは呼ばない）。現行の `intrusionMargin` と候補の `protectionMargin` を、同じ53件で並べて出す。 */
 
 const here = dirname(fileURLToPath(import.meta.url));
 const CHAT_ROOT = join(here, "..", "..");
