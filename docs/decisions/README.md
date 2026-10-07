@@ -685,5 +685,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0688](./0688-merged-0917-450-outbox-concurrent-claim-postgres-recheck-teeth.md) | 09/17 にマージされた #450（outbox の同時 claim の適合テスト）の Postgres 側の確かめ直しで見つかった穴に歯を足す（Issue #1812、まとまり G5 の Postgres 側） | 採用 (2026-10) |
 | [0689](./0689-recheck-0928-followups-cas-skipped-event-and-fake-provenance.md) | 確かめ直し（Issue #1827）のあとの手当て——CAS に弾かれた対象のイベント・Fake の `stated`/`inferred`・`searchMany` の TSDoc・包みの `additionalProperties` | 採用 (2026-10) |
 | [0690](./0690-merged-0916-recheck-teeth-core-recall-gates.md) | 09/16 にマージされた G2（core の recall ゲート・排他・型）12本の確かめ直しで見つかった穴に歯を足す（Issue #1815） | 採用 (2026-10) |
+| [0691](./0691-merged-0916-recheck-teeth-core-validat-decay-clock-half-life-recalls.md) | 09/16 にマージされた G3（core の validAt・減衰の時計・halfLifeRecalls）3本の確かめ直しで見つかった穴に歯を足す（Issue #1815） | 採用 (2026-10) |
 
 <!-- ADR-INDEX:GENERATED:END -->
