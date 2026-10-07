@@ -1,25 +1,8 @@
 #!/usr/bin/env node
 /**
- * Release の tag の版を、publish 対象パッケージの `package.json` へ**書き込む**段（ADR 0070）。
- *
- * **これがこの repo の版の決め方である。**`v0.1.2` の Release を作れば、この段が
- * publish 対象（`PUBLISH_TARGETS`。件数はそちらが唯一の定義）の `package.json` を `0.1.2` に書き換えてから `pnpm pack` が走る。
- * ⟹ **版上げのコミットは要らない。**
- *
- * **⚠ だから `packages/<pkg>/package.json` の `version` は、権威ある値ではない。**
- * git に入っている値は「最後に誰かが書いた値」であって、**npm 上の最新版とは限らない。**
- * 権威は **Release の tag** にある。確かめたいときは registry に訊くこと:
- *
- *     npm view @mnemora/core version
- *
- * **なぜ書き込む側と決める側を分けたか**: 判定（tag → 版・dist-tag）は
- * `./release-version.mjs` の純関数が持ち、歯はそちらを直接測る（ADR 0067 と同じ形）。
- * ここは「決まった値をファイルへ書く」ことと「書けたことを確かめる」ことだけをする。
- *
- * 使い方（workflow から）:
- *   RELEASE_TAG=v0.1.2 GITHUB_PRERELEASE=false node scripts/apply-release-version.mjs
- *
- * `$GITHUB_OUTPUT` へ `version=` と `npm_tag=` を書く。tag が semver でなければ EXIT=1。
+ * ⚠ `packages/<pkg>/package.json` の `version` は権威ある値ではない。権威は Release の tag。
+ * 確かめるときは registry に訊く(`npm view @mnemora/core version`)。
+ * 判定(tag → 版・dist-tag)は `./release-version.mjs` の純関数が持つ。ここは書くことと書けたことの確認だけをする。
  */
 import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -42,24 +25,14 @@ const { version } = parsed;
 const { npmTag, warnings } = distTagFor({ version, githubPrerelease });
 for (const w of warnings) console.log(`::warning::${w}`);
 
-/** 正規表現に埋め込む文字列を無害化する。 */
 function escapeRegExp(s) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 /**
- * publish 対象すべての `package.json` の **`version` の行だけ**を差し替える。
- *
- * **⚠ JSON として読んで `JSON.stringify` で書き戻してはならない。**実測した:
- * `JSON.stringify(manifest, null, 2)` は短い配列も必ず展開するが、prettier は
- * `"files": ["dist"]` を1行に畳む。⟹ 書き戻すと**このリポジトリの
- * `pnpm run format:check` が赤くなり、workflow はこの段の直後に門を通すので publish が止まる。**
- * （この食い違いは `scripts/__tests__/apply-release-version.test.mjs` の
- * 「書き換えた package.json が prettier の整形と一致する」歯が実際に捕まえた。）
- *
- * ⟹ **他の1文字も動かさない**形で `version` の行だけを差し替える。
- * 先頭2スペースに錨を打つのは、入れ子（`dependencies` の中など）の `"version"` を
- * 掴まないためである。書けたことは**読み直して JSON として検算する**。
+ * ⚠ JSON として読んで `JSON.stringify` で書き戻さない。prettier は `"files": ["dist"]` を1行に畳むが、
+ * `JSON.stringify` は展開するので `format:check` が赤くなり、直後の門で publish が止まる。
+ * `version` の行だけを差し替える。先頭2スペースに錨を打つのは、入れ子の `"version"` を掴まないため。
  */
 const changed = [];
 for (const target of PUBLISH_TARGETS) {
@@ -87,7 +60,7 @@ for (const target of PUBLISH_TARGETS) {
   changed.push({ name: target.name, before, after: version });
 }
 
-// 書けたことを、書いた値ではなく**読み直した値**で確かめる。
+// 書けたことは、書いた値ではなく読み直した値で確かめる。
 for (const target of PUBLISH_TARGETS) {
   const path = join(repoRoot, target.dir, "package.json");
   const actual = JSON.parse(readFileSync(path, "utf8")).version;
