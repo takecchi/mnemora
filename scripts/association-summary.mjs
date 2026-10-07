@@ -1,37 +1,9 @@
 #!/usr/bin/env node
 /**
- * `examples/chat` の `association-probes` サブコマンド(`MNEMORA_ASSOCIATION_JSON` が
- * 吐く JSON)を人が読める Markdown へ変換し、CI の Job Summary
- * (`$GITHUB_STEP_SUMMARY`)へ載せる CLI(Issue #291)。連想枠(ADR 0151)が
- * 想起の質を動かすかを4本の arm(off / on:maxCount=3 / on:maxCount=5 / on:maxCount=10)で比べる。
- *
- * 組み立ては `./association-summary-lib.mjs` の純関数に委ねる
- * (`identifier-probe-summary.mjs`/`-lib.mjs` と同じ分担)。ここは
- *
- * 1. `--measured <path>`(必須)・`--baseline <path>`(任意)を読む
- * 2. ファイルを読んで JSON.parse する(壊れていたら理由を stderr に出して非0で終わる)
- * 3. 形を検査する(`validateMeasured`/`validateBaseline`。壊れていたら同様に非0)
- * 4. Markdown を stdout に出す
- *
- * だけを行う。
- *
- * 使い方:
- *   node scripts/association-summary.mjs --measured <path> [--baseline <path>]
- *
- * 🔴 **基準値ファイルと相違しても exit 0 のままである。**これは意図した設計であり、
- * バグではない——`identifier-probe-summary.mjs`/ADR 0088「決めたこと」4番・§2.1 と
- * 同じ形(「⛔ 門にしない」と「⛔ 基準値と比べない」は別のこと)。**このスクリプトは
- * 門ではない。**非0になるのは、
- * 入力そのものが壊れているとき(measured の JSON が読めない・parse できない・必須項目が
- * 無い・型が違う・参照整合性が壊れている。`--baseline` を指定していて、それが読めない/
- * 壊れている場合も含む)だけである。probe は12件しかなく、
- * [ADR 0033](../docs/decisions/0033-what-decided-the-rank-in-the-retrieval-bench.md)
- * §3 の規律に照らして閾値の門を置くには足りない標本である。
- *
- * `examples/chat/association-baseline.json`(ADR 0385。CI `ubuntu-latest` での実測から
- * 手作業で置いた)を `--baseline` として渡すのが既定の使い方(`ci.yml` 参照)。
- * `--baseline` を渡さなければ、基準値なしで Markdown を組み立てる
- * (`./association-summary-lib.mjs` 参照)——手元実行や単体テストではこちらでよい。
+ * 🔴 基準値ファイルと相違しても exit 0 のままなのは意図した設計(ADR 0088「決めたこと」4番・§2.1)。
+ * ⛔ このスクリプトは門ではない。非0になるのは、入力そのものが壊れているとき(measured が読めない・
+ * parse できない・必須項目が無い・型が違う・参照整合性が壊れている。`--baseline` を指定していて、
+ * それが読めない/壊れている場合も含む)だけ。probe は12件しかなく、閾値の門を置くには足りない標本(ADR 0033 §3)。
  */
 import { readFileSync } from "node:fs";
 import {
@@ -61,9 +33,7 @@ if (!measuredPath) {
 }
 
 /**
- * ファイルを読んで JSON.parse する。**読めない/parse できない理由をそのまま返す**
- * ——「壊れている」と一括りにせず、次に来る人がどこを見ればいいか分かるようにする
- * (`identifier-probe-summary.mjs` の `readJson` と同じ形)。
+ * 読めない/parse できない理由をそのまま返す。「壊れている」と一括りにしない。
  *
  * @param {string} path
  * @param {string} label
@@ -114,7 +84,5 @@ console.log(
     ...(baselineValidated ? { baseline: baselineValidated.value } : {}),
   }),
 );
-// **明示的に 0 を宣言する**——`--baseline` が相違を含んでいても、warmup が失敗していても、
-// ここまで来たら入力は壊れていない。門ではない、という設計の要をコード上で目に見える
-// 形にする(`identifier-probe-summary.mjs` と同じ)。
+// 明示的に 0 を宣言する。`--baseline` が相違を含んでいても、warmup が失敗していても、入力は壊れていない。
 process.exit(0);
