@@ -277,4 +277,43 @@ describe("planConsumerProjects（パッケージごとに別のプロジェク�
     const realPlan = planConsumerProjects(real, EXPECTED_ENTRY_POINTS);
     expect(realPlan.flatMap((p) => p.entries).sort()).toEqual([...EXPECTED_ENTRY_POINTS].sort());
   });
+
+  // 再確かめ（2026-10-07 マージ分、#1904）。上の歯は、peerDependencies を持つ manifest・名前が前方一致する
+  // 兄弟・dependencies の無い manifest を渡さないので、次の3つの変異は素通りした。
+  it("peerDependencies に挙げた兄弟の tarball は入れない（ADR 0694 決定2・3。頼る tarball は dependencies のものだけ）", () => {
+    const withPeer = planConsumerProjects(
+      [
+        { name: "@m/core", tarball: "/p/core.tgz", dependencies: { zod: "^4" } },
+        {
+          name: "@m/peer-user",
+          tarball: "/p/peer-user.tgz",
+          dependencies: { zod: "^4" },
+          peerDependencies: { "@m/core": "^1" },
+        },
+      ],
+      ["@m/core", "@m/peer-user"],
+    );
+    expect(withPeer.find((p) => p.name === "@m/peer-user").installTarballs).toEqual([
+      "/p/peer-user.tgz",
+    ]);
+  });
+
+  it("名前が前方一致するだけの兄弟の入口は、割り当てない（@m/core に @m/core-extra を混ぜない）", () => {
+    const prefixed = planConsumerProjects(
+      [
+        { name: "@m/core", tarball: "/p/core.tgz", dependencies: {} },
+        { name: "@m/core-extra", tarball: "/p/core-extra.tgz", dependencies: {} },
+      ],
+      ["@m/core", "@m/core/sub", "@m/core-extra"],
+    );
+    expect(prefixed.find((p) => p.name === "@m/core").entries).toEqual(["@m/core", "@m/core/sub"]);
+    expect(prefixed.find((p) => p.name === "@m/core-extra").entries).toEqual(["@m/core-extra"]);
+  });
+
+  it("dependencies の無い manifest でも、自分の tarball だけを入れて投げない", () => {
+    const noDeps = planConsumerProjects([{ name: "@m/solo", tarball: "/p/solo.tgz" }], ["@m/solo"]);
+    expect(noDeps).toEqual([
+      { name: "@m/solo", installTarballs: ["/p/solo.tgz"], entries: ["@m/solo"] },
+    ]);
+  });
 });
