@@ -5,17 +5,6 @@ import { parseMemoryLine, parseMnemoraPromptBody } from "../answer-trials-materi
 import type { CaseMaterial } from "../answer-trials-material.js";
 import { recordedRenderer } from "../answer-trials-render.js";
 
-/**
- * Issue #972: `[根拠:失われた]`（`RecalledMemory.basisLost`、ADR 0342）の欄を、
- * answer-trials の材料パーサ（`parseMemoryLine`）と描き直し（`recordedRenderer`）が
- * 取りこぼさないことを見る。
- *
- * ⚠ パーサは知らない欄を例外にせず、digest の一部として黙って飲み込む形だった
- * （欄を順に取り、残りを digest にする）。描画だけを足すと、材料の digest に
- * `[根拠:失われた]` が紛れ込み、描き直した別の描画（`digest-only` など）にもそのまま
- * 漏れる。だから描画と同時に、ここでパーサ・描き直しの往復を固定する。
- */
-
 const SCORE = { decay: 1, tagMatch: 1, freshness: 1, strength: 1, total: 1 };
 
 function recallWith(memories: RecallResult["memories"]): RecallResult {
@@ -97,8 +86,6 @@ describe("[根拠:失われた] の欄（Issue #972）", () => {
   });
 });
 
-// Issue #1776 の #698 のコメント（ADR 0665）: `basisLost: false`（根拠が残っている）を与える歯が無く、
-// `=== true` を外して「`false` でも出す」変異が緑だった。
 describe("[根拠:失われた] は basisLost が true のときだけ出る（#698）", () => {
   const base = {
     memoryId: "m-1",
