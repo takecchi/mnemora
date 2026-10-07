@@ -99,6 +99,31 @@ describe("restoreSupersededBy の at が Invalid Date", () => {
       }
     });
 
+    it(`${name}: 別の anchor の群が在っても、この anchor の群が無ければ、例外にせず空で返り、別の群は superseded のまま`, async () => {
+      const store = await makeStore();
+      const { group } = await anchorWithGroup(store, 2);
+      const { anchor: emptyAnchor } = await anchorWithGroup(store, 0);
+
+      const result = await store.restoreSupersededBy!(ctx, emptyAnchor.id, { at: INVALID });
+
+      expect(result).toEqual({ restored: [] });
+      for (const id of group) {
+        expect((await store.get(ctx, id))?.status).toBe("superseded");
+      }
+    });
+
+    it(`${name}: 戻す対象が無ければ、reason に NUL が在っても Invalid Date の at は空で返る`, async () => {
+      const store = await makeStore();
+      const { anchor: emptyAnchor } = await anchorWithGroup(store, 0);
+
+      const result = await store.restoreSupersededBy!(ctx, emptyAnchor.id, {
+        at: INVALID,
+        reason: "re\u0000ason",
+      });
+
+      expect(result).toEqual({ restored: [] });
+    });
+
     it(`${name}: 戻す対象が在るときは今どおり例外で、1件も戻さない`, async () => {
       const store = await makeStore();
       const { anchor, group } = await anchorWithGroup(store, 2);
