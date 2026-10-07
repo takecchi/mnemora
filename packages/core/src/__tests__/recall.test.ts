@@ -12,9 +12,6 @@ import type { FilteredOmission } from "../recall.js";
 import { FILTERED_CONDITION_SCOPE_RELATION } from "../recall.js";
 
 describe("OmissionSchema — 10 の kind すべて", () => {
-  // ⚠ 題は以前「7つの kind すべて」だった。ann_unreached（ADR 0026）が入った時点で 8 に
-  // なっていたのに直っておらず、score_not_comparable（ADR 0044）で 9、
-  // unit_assembly_dropped（ADR 0043）で 10 になる。**名乗りは実測に合わせる。**
   it("accepts 'stage_skipped'", () => {
     const result = OmissionSchema.safeParse({
       kind: "stage_skipped",
@@ -55,27 +52,7 @@ describe("OmissionSchema — 10 の kind すべて", () => {
     expect(result.success).toBe(false);
   });
 
-  // ---------------------------------------------------------------------
-  // Issue #280（Issue #202 第2弾、ADR 0164）の変異試験「変異D」で見つけた穴を塞ぐ歯。
-  //
-  // `FilteredOmissionSchema` の `condition` の zod enum から値を1つ落としても、
-  // `tsc`（`satisfies z.ZodType<...>` は片方向の代入可能性しか見ないため）も
-  // 既存のテスト（`OmissionSchema` の網羅テストは `kind` の10種類だけを見ており、
-  // `condition` の全値までは検査していなかった）も、どちらも気づけなかった
-  // ——ADR 0164「変異試験」節に実測を記録した。
-  //
-  // ここでは `FilteredOmission["condition"]` の**型側の全メンバー**を
-  // `Record<FilteredOmission["condition"], true>` のキーとして列挙する
-  // ——このオブジェクト自体がコンパイル時の網羅性チェックになる:
-  // `FilteredOmission.condition` に新しい値が増えたのにここへ足し忘れると
-  // `tsc` が「キーが足りない」と落ち、逆に存在しない値を足すと「余分なキー」で
-  // 落ちる。**この配列を手で数え直さない**という規約を、型システムに強制させる形。
-  //
-  // その上で、各値が実際に `OmissionSchema`（＝ `FilteredOmissionSchema` の zod enum）
-  // を通ることを検査する。zod enum から値を落とす変異が入ると、ここが
-  // `success: false` になって落ちる——変異Dが実際に赤くなることを、この歯自体を
-  // 変異させて確認済み（ADR 0164「変異試験」節）。
-  // ---------------------------------------------------------------------
+  // `Record<FilteredOmission["condition"], true>` のキーとして型側の全メンバーを列挙する。新しい値の足し忘れ・余分な値を tsc の網羅性チェックにし、配列を手で数え直さないため。
   const ALL_FILTERED_CONDITIONS: Record<FilteredOmission["condition"], true> = {
     tenant: true,
     superseded: true,
@@ -235,8 +212,6 @@ describe("OmissionSchema — 10 の kind すべて", () => {
     expect(result.success).toBe(false);
   });
 
-  // **'provably_safe' は omission としては存在しない**——証明できたら札は積まれない
-  // （沈黙は「値」ではなく「不在」で表す。ADR 0069）。
   it("rejects 'ann_truncated' の certainty が 'provably_safe'（ADR 0069）", () => {
     const result = OmissionSchema.safeParse({
       kind: "ann_truncated",
@@ -255,9 +230,6 @@ describe("OmissionSchema — 10 の kind すべて", () => {
     expect(result.success).toBe(false);
   });
 
-  // ADR 0288 / Issue #361: `severity` は任意欄として足した（既存の必須フィールドは
-  // 1つも増やしていない——非破壊。docs/migration-v1.md 項目9・10 は必須フィールドの
-  // 追加だけを破壊的変更に数えている）。
   it("accepts 'ann_unreached' without severity（後方互換: 省略できる）", () => {
     const result = OmissionSchema.safeParse({ kind: "ann_unreached", countKind: "unknown" });
     expect(result.success).toBe(true);
@@ -617,8 +589,6 @@ describe("RecalledMemorySchema — speaker/subjectId（Issue #579 案D、ADR 028
 });
 
 describe("RecalledMemorySchema — recordedAt/occurredAt（Issue #691 の子、Issue #702、ADR 0298）", () => {
-  // ADR 0289 と同じ規律: 「無い（null）」と「頼まなかった／入れ忘れた（undefined/欠落）」を
-  // 混ぜない。toEqual ではなく safeParse の success/data を直接見る。
   const base = {
     memoryId: "mem-1",
     digest: "digest",
@@ -726,18 +696,7 @@ describe("RecallUsageSchema — share は非負の値だけを受け付ける（
     expect(RecallUsageSchema.safeParse({ ...base, share: 1 }).success).toBe(true);
   });
 
-  /**
-   * **⚠ 以前はここで `.max(1)` により弾いていたが、ADR 0097 で外した。**
-   * 「割合として成立しない値」を型で弾く、という以前の意図は誠実だったが、
-   * 前提（段4の切り詰めが `share` の分子の予算内を保証する）が現物では成り立っていなかった
-   * ——強制側（段4の `unitTokens`。digest ごとに ceil）と `share` の分子
-   * （連結して ceil 1回）は数え方が違うため、`share` は実際に 1 を超える
-   * （`recall-pipeline.test.ts` の `usage.budgetExceeded` 節で実測。非CJK20字の digest2件・
-   * `maxMemoryTokens: 10` で `share = 1.1`）。
-   * ⟹ **1 を超える値を弾くのは、実在する正しい値を「不正」と誤診断することになる。**
-   * 弾くのをやめ、`share > 1` のときは `budgetExceeded: true` が伴うことを別の歯
-   * （`recall-pipeline.test.ts`）で保証する形に変えた。
-   */
+  /** `share` は強制側（digest ごとに ceil）と数え方が違い、実際に 1 を超えうる。1 を超える値を弾くと実在する正しい値を不正と誤診断するので受け付け、超過は `budgetExceeded` が示す。 */
   it("share が 1 を超える形も、いまは受け付ける（超過は budgetExceeded が示す）", () => {
     expect(RecallUsageSchema.safeParse({ ...base, share: 2.483 }).success).toBe(true);
   });

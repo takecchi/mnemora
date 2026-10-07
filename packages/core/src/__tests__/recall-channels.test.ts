@@ -13,16 +13,7 @@ import {
 import type { RecallChannel } from "../recall.js";
 import { assertAffinityMeasured, createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * Issue #106（recall に語彙候補生成チャンネルを足す）の**歯**。
- *
- * `packages/core` 側の実装（`recall.ts` / `recall-runtime.ts` / `strategies/scoring.ts`）は
- * 既に着地している——このファイルは実装を変えず、契約を歯として固定する。
- *
- * `@mnemora/testkit` には依存しない（`runtime-fakes.ts` 冒頭のコメントと同じ理由）。
- * `InMemoryLexicalStore`（testkit 側）はまだ書かれている最中のため使わない——
- * ここでは `runtime-fakes.ts` に足した `FakeLexicalStore` を使う。
- */
+/** `@mnemora/testkit` には依存しない（`runtime-fakes.ts` 冒頭と同じ理由）。語彙 store は `runtime-fakes.ts` の `FakeLexicalStore` を使う。 */
 
 const ctx: Ctx = { tenantId: "tenant-1" };
 const NOW = new Date("2026-06-01T00:00:00.000Z");
@@ -58,10 +49,7 @@ function newMemory(overrides: Partial<NewMemory> = {}): NewMemory {
   };
 }
 
-/**
- * `buildRuntime()` は `recall-pipeline.test.ts` と同じ配線パターンだが、
- * `lexicalStore` を配線するかどうかを呼び出し側が選べる（歯④が「配線しない」側を要る）。
- */
+/** `lexicalStore` を配線するかどうかを呼び出し側が選べる（「配線しない」側を使う歯がある）。 */
 function buildRuntime(
   opts: { wireLexicalStore?: boolean; embeddingProvider?: EmbeddingProvider } = {},
 ) {
@@ -90,7 +78,6 @@ function buildRuntime(
   return { runtime, stores };
 }
 
-/** 埋め込み済みの Memory を1件用意する（vectorStore への upsert も行う）。 */
 async function createEmbeddedMemory(
   stores: ReturnType<typeof createFakeRuntimeStores>,
   vector: number[],
@@ -104,32 +91,13 @@ async function createEmbeddedMemory(
   return memory;
 }
 
-// ---------------------------------------------------------------------------
-// 歯①: 固有名詞・識別子が ann では引けず lexical では引ける
-// ---------------------------------------------------------------------------
-
 describe("recall() — 歯①: 固有名詞・識別子は ann では引けず lexical では引ける（ADR 0084、Issue #106）", () => {
-  /**
-   * 🔴 これは「実際の埋め込みの性能」を測る歯ではない。**機構の歯**である。
-   *
-   * `FakeVectorStore` に渡すベクタを、gold（`PROJ-1234` を含む記憶）と
-   * distractor（`PROJ-5678` を含む記憶）で**あえて区別しない**（同一ベクタを渡す）。
-   * これは「この2つの記憶は、埋め込みだけでは絶対に見分けられない」という
-   * 人工的な最悪ケースを作っているのであって、AGENTS.md が禁じている
-   * 「擬似 provider の ✅ を性能と読む」ことはしていない——
-   * ここでの `FakeVectorStore` はむしろ **ANN が識別子を引けない状況を意図的に固定する**
-   * ために使っている。測っているのは「語彙チャンネルという別経路が存在することで、
-   * ANN 単独では原理的に落ちる候補を拾えるようになるか」という**配線・機構**の話であり、
-   * 実 embedding モデルが識別子をどれだけ引けるかについては、この歯は何も言っていない。
-   */
+  /** gold と distractor に同一ベクタを渡す。埋め込みだけでは見分けられない状況を意図的に固定し、語彙チャンネルという別経路の機構を検査する（実 embedding の性能を測る歯ではない）。 */
   const V = [1, 0];
 
   async function seedFixture(stores: ReturnType<typeof createFakeRuntimeStores>) {
-    // 挿入順を明示的に制御する: distractor → irrelevant → gold の順。
-    // kPrime=1（下記 limit=1, overFetchFactor=1）の ANN 窓は、同着（同一ベクタ）のとき
-    // 挿入順の先頭だけを残す（`FakeVectorStore.search` の安定ソート）。
-    // ⟹ gold は最後に挿れることで、ANN 窓から構造的に必ず押し出される
-    //    （スコアで負けたのではなく、窓の外に居るから返らない、という状況を作る）。
+    // 挿入順を distractor → irrelevant → gold にする。同着のとき ANN 窓（kPrime=1）は挿入順の先頭だけを残すので、
+    // gold を最後に挿れると、スコアで負けるのではなく窓の外に構造的に押し出される。
     const distractor = await createEmbeddedMemory(stores, V, {
       digest: "対応メモ",
       content: "PROJ-5678 の障害対応メモ。対応者は山田。",
@@ -142,21 +110,14 @@ describe("recall() — 歯①: 固有名詞・識別子は ann では引けず l
     });
     const gold = await createEmbeddedMemory(stores, V, {
       digest: "対応メモ",
-      // ⚠ 偽陽性の点検(下記 it を参照): "PROJ-1234" が現れるのは content だけである。
-      // digest / tags / tenantId / subjectId のどこにも識別子を書いていない
-      // ——マッチが content 起点であることを保証するため。
+      // 識別子 "PROJ-1234" は content だけに書く（digest / tags 等には書かない）。マッチが content 起点であることを保証するため。
       content: "PROJ-1234 の障害対応メモ。対応者は鈴木。",
-      // クエリタグで gold を後押しする（歯①の後半・ann+lexical サブケースで使う。
-      // ann のみのサブケースでは query に tags を渡さないので効かない）。
       tags: ["gold-tag"],
     });
     return { distractor, irrelevant, gold };
   }
 
   it("偽陽性の点検: FakeLexicalStore.search('PROJ-1234', ...) は gold だけを返す（全件返しではない）", async () => {
-    // この歯自体は「PROJ-1234 で検索したら gold だけが返る」という FakeLexicalStore の
-    // 挙動そのものを直接検査する——recall() 経由のスコアリングの綾に紛れずに、
-    // 「たまたま全件返す実装になっていないか」を単独で確かめるための歯。
     const stores = createFakeRuntimeStores();
     const { distractor, irrelevant, gold } = await seedFixture(stores);
 
@@ -196,46 +157,24 @@ describe("recall() — 歯①: 固有名詞・識別子は ann では引けず l
       channels: ["ann", "lexical"],
       limit: 1,
       overFetchFactor: 1, // kPrime = 1
-      // association: null — 連想枠は既定 on（ADR 0337）だが、この歯は語彙チャンネルの
-      // 効果だけを検査する。limit の外に押し出された distractor はアンカー（gold）との
-      // 類似度が高いままなので、連想の対象になりうる。この歯の対象外の効果を
-      // 持ち込まないよう明示的に止める。
+      // association: null は、語彙チャンネルの効果だけを見るため。limit の外に押し出された distractor はアンカーに近く、連想の対象になりうる。
       association: null,
     });
 
     const ids = result.memories.map((m) => m.memoryId);
     expect(ids).toContain(gold.id);
     expect(ids).not.toContain(irrelevant.id);
-    // limit=1 の1枠は gold が取る——タグで底上げされた gold の total が、
-    // ann 経由のみの distractor の total を上回るため（下のコメント参照）。
     expect(ids).not.toContain(distractor.id);
 
     const returnedGold = result.memories.find((m) => m.memoryId === gold.id);
     expect(returnedGold).toBeDefined();
-    // 🔴 「語彙経路から来た」ことを、retrievedVia と score.lexicalMatch の両方が名乗る
-    // （recall-runtime.ts の ScoredCandidate.retrievedVia の doc: 単一の値でチャンネルの
-    // 集合を表そうとしない、という契約の帰結）。
     expect(returnedGold?.retrievedVia).toBe("lexical");
-    // クエリは単一語("PROJ-1234")なので、一致すれば coverage は 1（= 一致語彙数1 ÷ クエリ語彙数1）。
-    // ⚠ 定数 LEXICAL_MATCH_VALUE は ADR 0092 で廃止された——ここでの 1 は
-    // 「常にそうなる値」ではなく、このクエリが単一語であることの帰結として書く。
-    // Issue #548 方向2 / ADR 0352: score は判別可能な union になった。ここは lexical 経由
-    // （affinityMeasured: true）と分かっているので、型を ScoreBreakdown へ絞り込む
-    // （`?.` は narrowing を運ばないので、絞り込んだ後は非 optional で読む）。
+    // クエリは単一語なので coverage は 1。定数の期待ではなく、単一語であることの帰結として書く。
     if (returnedGold === undefined) throw new Error("returnedGold not found");
     assertAffinityMeasured(returnedGold.score);
     expect(returnedGold.score.lexicalMatch).toBe(1);
-
-    // distractor は ann の窓（kPrime=1）に入っていたかもしれないが、gold は
-    // クエリタグで底上げされているので総合スコアで gold が limit=1 の座を取る。
-    // （scoring.ts: affinity は similarity と lexicalMatch のうち強い方。この歯は
-    // どちらが窓に残るかという ANN 側の偶然ではなく、gold が実際に返ることだけを見る。）
   });
 });
-
-// ---------------------------------------------------------------------------
-// 歯⑨: 被覆率（ADR 0092）— score.lexicalMatch は adapter が返した coverage そのもの
-// ---------------------------------------------------------------------------
 
 describe("recall() — 歯⑨: score.lexicalMatch は adapter が返した coverage そのもの（ADR 0092）", () => {
   it("2語のクエリのうち1語しか含まない記憶は、score.lexicalMatch が 0.5 になる（定数 1 ではない）", async () => {
@@ -252,9 +191,7 @@ describe("recall() — 歯⑨: score.lexicalMatch は adapter が返した cover
     });
 
     expect(result.memories).toHaveLength(1);
-    // ⛔ 定数 1 を期待しない（旧 LEXICAL_MATCH_VALUE は ADR 0092 で廃止された）。
-    // 一致語彙数(1: alpha) ÷ クエリ語彙数(2: alpha, beta) = 0.5。
-    // Issue #548 方向2 / ADR 0352: lexical 経由（affinityMeasured: true）と分かっているので絞り込む。
+    // 定数 1 を期待しない: 一致語彙数1 ÷ クエリ語彙数2 = 0.5。
     assertAffinityMeasured(result.memories[0]!.score);
     expect(result.memories[0]?.score.lexicalMatch).toBeCloseTo(0.5);
   });
@@ -278,7 +215,6 @@ describe("recall() — 歯⑨: score.lexicalMatch は adapter が返した cover
 
     const ids = result.memories.map((m) => m.memoryId);
     expect(ids).toEqual([full.id, half.id]);
-    // Issue #548 方向2 / ADR 0352: どちらも lexical 経由（affinityMeasured: true）。
     assertAffinityMeasured(result.memories[0]!.score);
     assertAffinityMeasured(result.memories[1]!.score);
     expect(result.memories[0]?.score.lexicalMatch).toBe(1);
@@ -288,8 +224,6 @@ describe("recall() — 歯⑨: score.lexicalMatch は adapter が返した cover
 
   it("similarity との max の関係は変わっていない: coverage(0.5) < similarity(1) のとき similarity が勝つ", async () => {
     const { runtime, stores } = buildRuntime();
-    // ANN と語彙の両方が同じ Memory を当てる: ANN は similarity=1（同一ベクタ）、
-    // 語彙は「alpha beta」のうち「alpha」だけを含むので coverage=0.5。
     const memory = await createEmbeddedMemory(stores, [1, 0], {
       content: "alpha だけを含み、もう一方の語は現れない記録",
       digest: "both-channels",
@@ -305,40 +239,17 @@ describe("recall() — 歯⑨: score.lexicalMatch は adapter が返した cover
 
     const hit = result.memories.find((m) => m.memoryId === memory.id);
     expect(hit).toBeDefined();
-    // Issue #548 方向2 / ADR 0352: ann 経由（affinityMeasured: true）と分かっているので絞り込む。
     assertAffinityMeasured(hit!.score);
     expect(hit?.score.similarity).toBe(1);
     expect(hit?.score.lexicalMatch).toBeCloseTo(0.5);
-    // affinity = max(1, 0.5) = 1 -> total は decay=freshness=tagMatch=strength=1 の
-    // フィクスチャなので 1 になる（similarity のみのときと1バイトも変わらない）。
     expect(hit?.score.total).toBe(1);
   });
 });
 
-// ---------------------------------------------------------------------------
-// 歯②: 既定（channels 未指定）の挙動が1文字も変わっていない
-// ---------------------------------------------------------------------------
-
 describe("recall() — 歯②: 既定(channels 未指定)は ADR 0084 以前と1バイトも変わらない", () => {
-  // 🔴 この repo では、この種の歯が過去に2度無力化されている:
-  //   (a) in-memory 実装が Map の行への「生きた参照」を返し、テストが期待値を
-  //       「あとから読んだ同じオブジェクト」から作っていたため、実装のバグと期待値が
-  //       同時に動いて赤くならなかった。
-  //   (b) `updatedAt` 等が壁時計（`new Date()`、注入した Clock ではない）由来だったため、
-  //       期待値を実行のたびに動く値で書くしかなく、意味のある比較にならなかった。
-  //
-  // 対策:
-  //   (a) 期待値の literal を「フィクスチャ作成時に自分で書いた定数」からだけ組み立てる
-  //       （`stores`/`memory` オブジェクトを後から読み返さない。例外は `memory.id` —
-  //       これは生成後に書き換わらない不透明な識別子なので、生きた参照の問題が起きない）。
-  //       さらに、recall() の直後に**別の書き込み**（reinforce）で同じ Memory オブジェクトを
-  //       意図的に変異させ、それでも先に取った結果の期待値が変わらないことまで確かめる——
-  //       もし実装が RecalledMemory の中に Memory オブジェクトへの生きた参照を混ぜていたら、
-  //       この変異で歯が落ちる。
-  //   (b) `updatedAt`/`createdAt` は `RecalledMemory` に一切現れない欄なので、壁時計が
-  //       この歯を偽陽性にする経路は無い。念のため `Clock` は固定注入し（`NOW` 固定）、
-  //       decay/freshness の起点はすべてフィクスチャの `recordedAt`（= NOW）から計算する
-  //       ——壁時計の値が紛れ込む式を一切使わない。
+  // 期待値は、フィクスチャ作成時に自分で書いた定数からだけ組み立てる（`stores`/`memory` を後から読み返さない。`memory.id` だけは例外）。
+  // in-memory 実装が返す Map の行への生きた参照から期待値を作ると、実装のバグと期待値が同時に動いて赤くならないため。
+  // `Clock` は固定注入し、decay/freshness の起点はすべてフィクスチャの `recordedAt`（= NOW）から計算する（壁時計を紛れ込ませない）。
 
   it("②-a 全体の一致: RecallResult 全体を JSON 直列化してリテラルと突き合わせる", async () => {
     const { runtime, stores } = buildRuntime();
@@ -354,14 +265,10 @@ describe("recall() — 歯②: 既定(channels 未指定)は ADR 0084 以前と1
     expect(typeof result.recallId).toBe("string");
     expect(result.recallId.length).toBeGreaterThan(0);
 
-    // (a) への対策の後半: recall() が終わったあとで、同じ Memory を指す別の書き込みを行う。
-    // RecalledMemory が Memory オブジェクトへの生きた参照を保持していたら、
-    // ここでの変異が下の比較に漏れて歯が赤くなる。
+    // recall() の後に同じ Memory を別の書き込みで変異させる。RecalledMemory が生きた参照を保持していたら、比較に漏れて赤くなる。
     await stores.memoryStore.reinforce(ctx, memory.id, new Date("2030-01-01T00:00:00.000Z"));
     await stores.memoryStore.updateStatus(ctx, memory.id, "active");
 
-    // index / usage は「フィクスチャからここで独立に組み立てた」リテラル。
-    // `result` を読み返して作っていない——(a) の対策そのもの。
     const expectedIndexBand = {
       groups: [{ axis: "subject", key: null, count: 1, countKind: "exact" }],
       totalInScope: 1,
@@ -382,9 +289,6 @@ describe("recall() — 歯②: 既定(channels 未指定)は ADR 0084 以前と1
           digest: "D",
           retrievedVia: "ann",
           provenanceKind: "imported",
-          // affinityMeasured: Issue #548 方向1 / ADR 0282 で足した欄。この歯と同じ形の
-          // 「増えたのはこの1欄だけであることをリテラルで固定し直す」規律（すぐ上の
-          // outputValidation のコメント参照）——similarity が在るので true。
           score: {
             similarity: 1,
             decay: 1,
@@ -394,19 +298,10 @@ describe("recall() — 歯②: 既定(channels 未指定)は ADR 0084 以前と1
             total: 1,
             affinityMeasured: true,
           },
-          // speaker/subjectId: Issue #579 案D / ADR 0289 で足した欄。同じ「増えたのは
-          // この2欄だけであることをリテラルで固定し直す」規律——imported provenance には
-          // speaker が無く、fixture は subjectId を指定していないので両方 null。
           speaker: null,
           subjectId: null,
-          // recordedAt/occurredAt: Issue #691 の子 / Issue #702 / ADR 0298 で足した欄。
-          // 同じ「増えたのはこの2欄だけであることをリテラルで固定し直す」規律——
-          // fixture の recordedAt は既定 NOW、occurredAt は既定 null。
           recordedAt: NOW.toISOString(),
           occurredAt: null,
-          // attributes: Issue #152/#153 / ADR 0312 で足した欄。同じ「増えたのはこの1欄だけで
-          // あることをリテラルで固定し直す」規律——fixture は attributes を指定していない
-          // ので `{}`（runtime は常に `{}` 以上の値を書く。省略しない）。
           attributes: {},
         },
       ],
@@ -416,11 +311,6 @@ describe("recall() — 歯②: 既定(channels 未指定)は ADR 0084 以前と1
         chars: digestChars + indexChars,
         estimatedTokens: tokenCount.tokens,
         counter: "heuristic",
-        // association: 0 — 連想枠は既定 on（ADR 0337）。このテストにはアンカー以外の
-        // 候補が無いため収穫0件だが、走った以上 byTier.association 欄は在る。この歯の
-        // 対象（channels 既定は ADR 0084 以前と1バイトも変わらない）とは無関係な欄の
-        // 増加であり、期待値を黙って緩めるのではなくリテラルで固定し直す
-        // （直下の outputValidation と同じ扱い）。
         byTier: { full: 0, digest: digestChars, index: indexChars, association: 0 },
         indexChars,
       },
@@ -429,32 +319,18 @@ describe("recall() — 歯②: 既定(channels 未指定)は ADR 0084 以前と1
           {
             stage: "scope",
             executed: true,
-            // Issue #280: validAt ゲートは既定で有効（マネージャー決定1）——省略時は
-            // NOW が基準時刻になる。この歯自体は「channels 未指定の既定動作」を
-            // 検査するものであり、validAt ゲートの導入そのものは対象外の変更である
-            // （decayGate と同じ扱い。この行の直下のコメント参照）。
             detail: {
               subjectId: null,
               occurredAfter: null,
               occurredBefore: null,
               validAt: NOW.toISOString(),
-              // attributes: Issue #152/#153 / ADR 0312 で足した欄。fixture は
-              // `RecallQuery.attributes` を渡していないので `null`（絞り込み無し）。
               attributes: null,
-              // labels: Issue #201 PR-B / ADR 0323 で足した欄。fixture は
-              // `RecallQuery.labels` を渡していないので `null`（絞り込み無し）。
               labels: null,
             },
           },
           {
             stage: "candidate_generation",
             executed: true,
-            // decayGate: ADR 0153（Issue #196）以降、既定で忘却ゲートが段1へ押し下げられる
-            // ——ここは②の「1バイトも変わらない」歯の対象外(この PR で意図的に破壊的変更した
-            // 箇所そのもの。PR 本文参照)。
-            // clock: ADR 0165 決めたこと1・12(北極星の問い3)で足した欄。テナント設定行が
-            // 無ければ既定 'wall' を名乗る(この歯のテナントには設定が無いので 'wall')。
-            // validityGate: Issue #280 で足した欄。
             detail: {
               channel: "ann",
               kPrime: 40,
@@ -470,9 +346,6 @@ describe("recall() — 歯②: 既定(channels 未指定)は ADR 0084 以前と1
             detail: { scored: 1, passedThreshold: 1, notComparable: 0, withinLimit: 1 },
           },
           { stage: "contradiction_resolution", executed: true, detail: { companionsAdded: 0 } },
-          // association: Issue #865（2026-09-29）。連想枠は既定 on（ADR 0337）——アンカーは
-          // 1件在るが、他に候補が無いので hits/selected は0件のまま `executed: true`
-          // （探して0件、`rescore` と同じ区別。上の usage.byTier.association のコメント参照）。
           {
             stage: "association",
             executed: true,
@@ -487,12 +360,6 @@ describe("recall() — 歯②: 既定(channels 未指定)は ADR 0084 以前と1
           { stage: "record", executed: true },
         ],
       },
-      // ⚠ ADR 0098（Issue #131）で足した欄。**この歯が実際に拾ったのがこの変化である**
-      // ——出力検証の報告を戻り値に載せたことで、`RecallResult` を JSON 直列化した姿は
-      // もう「ADR 0084 以前と1バイトも同じ」ではない（既存欄はどれも変わっていないが、
-      // 欄が1つ増えた）。⛔ 期待値を黙って緩めるのではなく、**増えたのがこの1欄だけで
-      // あることをリテラルで固定し直す。** 既定モードは `"report"` なので、正しい出力に
-      // 対しては必ず `{ ok: true, issues: [] }` になる。
       outputValidation: { ok: true, issues: [] },
     };
 
@@ -511,7 +378,6 @@ describe("recall() — 歯②: 既定(channels 未指定)は ADR 0084 以前と1
     // shouldThrow によって例外が飛び、この await が reject して歯が落ちる。
     const result = await runtime.recall(ctx, { vector: [1, 0] });
     expect(result.memories.length).toBeGreaterThan(0);
-    // ⟹ 構造的な根拠: 既定が語彙 store を一度も呼んでいないこと自体も直接検査する。
     expect(stores.lexicalStore.calls.length).toBe(0);
   });
 
@@ -524,9 +390,6 @@ describe("recall() — 歯②: 既定(channels 未指定)は ADR 0084 以前と1
 
     const candidateTraces = result.explain.stages.filter((s) => s.stage === "candidate_generation");
     expect(candidateTraces).toHaveLength(1);
-    // detail が過不足なく { channel, kPrime, hits, decayGate, clock, validityGate } であること
-    // (toEqual は多すぎず少なすぎずを見る。decayGate は ADR 0153、clock は ADR 0165、
-    // validityGate は Issue #280 で増えた欄)。
     expect(candidateTraces[0]?.detail).toEqual({
       channel: "ann",
       kPrime: 40,
@@ -546,10 +409,6 @@ describe("recall() — 歯②: 既定(channels 未指定)は ADR 0084 以前と1
   });
 });
 
-// ---------------------------------------------------------------------------
-// 歯③: explain にチャンネルの出どころが出る
-// ---------------------------------------------------------------------------
-
 describe("recall() — 歯③: explain にチャンネルの出どころが出る（ADR 0084 §6）", () => {
   it("channels: ['ann','lexical'] のとき candidate_generation の trace が2つ、channel が 'ann'/'lexical'", async () => {
     const { runtime, stores } = buildRuntime();
@@ -567,10 +426,6 @@ describe("recall() — 歯③: explain にチャンネルの出どころが出�
     expect(channels).toEqual(["ann", "lexical"]);
   });
 });
-
-// ---------------------------------------------------------------------------
-// 歯④〜⑦: 挙動の契約
-// ---------------------------------------------------------------------------
 
 describe("recall() — 歯④: lexicalStore が配線されていないのに channels: ['lexical'] を渡すと投げる", () => {
   it("エラーメッセージは LEXICAL_STORE_UNAVAILABLE_ERROR_PREFIX を名乗る（書き写さない）", async () => {
@@ -660,14 +515,9 @@ describe("recall() — 歯⑦: 語彙チャンネルが走った run では ann_
   });
 });
 
-// ---------------------------------------------------------------------------
-// 歯⑧: RecallQuerySchema が channels: ["recent"] を拒否する
-// ---------------------------------------------------------------------------
-
 describe("recall() — 歯⑧: RecallQuerySchema は channels の未知の値を拒否する（RECALL_CHANNELS が唯一の出所）", () => {
   it("channels: ['recent'] は拒否される", () => {
     // `safeParse` は `unknown` を受けるので型検査では弾けない——実行時に zod が弾くことを見る歯。
-    // Issue #106 の提案にあった 'recent' は RECALL_CHANNELS ユニオンに無い。
     const parsed = RecallQuerySchema.safeParse({ channels: ["recent"] });
     expect(parsed.success).toBe(false);
   });

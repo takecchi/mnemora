@@ -10,21 +10,7 @@ import type { Memory, NewMemory } from "../memory.js";
 import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * `RecallQuery.labels`/`RecallQuery.taxonomyGroups`（Issue #201 PR-B、
- * [ADR 0323](../../../docs/decisions/0323-taxonomy-recall-filter.md)）の歯。
- *
- * `recall-attributes-filter.test.ts`（ADR 0312）と同型の構え:
- * 1. 配線の歯——段1（ANN・語彙）と段3.5（連想枠）の filter に `labels` が渡ること。
- * 2. 本命の歯——OR の集合絞り込み、`taxonomy_mode` の参加資格。
- * 3. `filteredTaxonomy`/`omitted.condition: 'taxonomy'`。
- * 4. adapter が `labels` を無視しても安全（後置フィルタ）。
- * 5. 連想枠にも同じ絞りが掛かる。
- * 6. `taxonomyGroups` — 呼び手が明示したときだけ `axis: 'taxonomy'` の群が載る。
- * 7. `listLabels?` を実装しない adapter では静かに無効化される。
- *
- * `packages/core` 自身のテストなので `@mnemora/testkit` には依存しない。
- */
+/** `@mnemora/testkit` には依存しない。 */
 
 const NOW = new Date("2026-06-01T00:00:00.000Z");
 const ctx: Ctx = { tenantId: "tenant-1" };
@@ -122,10 +108,6 @@ async function createEmbeddedMemory(
   return memory;
 }
 
-// ---------------------------------------------------------------------------
-// 1. 配線の歯。
-// ---------------------------------------------------------------------------
-
 describe("recall() — 段1の filter に labels が載ること（配線の歯、Issue #201 PR-B）", () => {
   it("RecallQuery.labels が VectorStore.search / LexicalStore.search の opts.filter.labels に渡る", async () => {
     const { runtime, stores } = buildRuntime();
@@ -162,10 +144,6 @@ describe("recall() — 段1の filter に labels が載ること（配線の歯�
     expect(vectorFilters[0]?.labels).toBeUndefined();
   });
 });
-
-// ---------------------------------------------------------------------------
-// 2. 本命の歯: OR の集合絞り込みと taxonomy_mode の参加資格。
-// ---------------------------------------------------------------------------
 
 describe("recall() — labels が実際に候補を落とす（OR、Issue #201 PR-B）", () => {
   it("渡した名前のいずれかを tags に持つ Memory だけが返る", async () => {
@@ -238,10 +216,7 @@ describe("recall() — labels が実際に候補を落とす（OR、Issue #201 P
 
     const result = await runtime.recall(ctx, { vector: [1, 0], limit: 10, labels: ["alpha"] });
 
-    // ADR 0323「決定2」訂正・docs/memory-model.md §8: 参加資格の無い名前しか渡して
-    // いないので、絞り込みは「何にも一致しない」述語になる——`proposedOnly` 自身も
-    // 通らない（`alpha` が strict で参加資格を持たないため）。`other`（`beta`）は
-    // そもそも `alpha` を持たないので当然通らない。
+    // 参加資格の無い名前しか渡していないので、絞り込みは「何にも一致しない」述語になる（`proposedOnly` 自身も通らない）。
     expect(result.memories).toHaveLength(0);
     expect(result.omitted).toContainEqual({
       kind: "filtered",
@@ -326,10 +301,6 @@ describe("recall() — labels で落ちた分は filteredTaxonomy として報�
   });
 });
 
-// ---------------------------------------------------------------------------
-// 3. adapter がこの欄を無視しても安全である（取りこぼしはあるが、混入は無い）。
-// ---------------------------------------------------------------------------
-
 class LabelsFilterStrippingVectorStore implements VectorStore {
   constructor(private readonly inner: VectorStore) {}
 
@@ -385,10 +356,6 @@ describe("recall() — 後置フィルタ（survivesLabelsFilter）が段1の絞
   });
 });
 
-// ---------------------------------------------------------------------------
-// 4. 連想枠（段3.5）にも同じ絞りが掛かる。
-// ---------------------------------------------------------------------------
-
 const ANCHOR_VECTOR = [0.70710678, 0.70710678];
 const ASSOCIATED_VECTOR = [0, 1];
 const ASSOCIATION = { maxCount: 5, anchorCount: 1 } as const;
@@ -410,14 +377,9 @@ describe("recall() — 連想枠（段3.5）にも labels が掛かる（Issue #
       association: ASSOCIATION,
     });
 
-    // vectorFilters[0] は段1（ANN）、以降が連想用の search()。
     expect(vectorFilters.slice(1).every((f) => f.labels?.includes("alpha"))).toBe(true);
   });
 });
-
-// ---------------------------------------------------------------------------
-// 5. GroupCount.axis: 'taxonomy' — 呼び手が明示したときだけ。
-// ---------------------------------------------------------------------------
 
 describe("recall() — RecallQuery.taxonomyGroups（Issue #201 PR-B、ADR 0323「決定5」）", () => {
   it("既定（省略）では axis: 'taxonomy' の群は1件も載らない", async () => {
@@ -460,7 +422,6 @@ describe("recall() — RecallQuery.taxonomyGroups（Issue #201 PR-B、ADR 0323�
       count: 1,
       countKind: "exact",
     });
-    // `axis: 'subject'` の被覆不変条件（合計 = totalInScope）は taxonomy を足しても崩れない。
     const subjectSum = result.index.groups
       .filter((g) => g.axis === "subject")
       .reduce((sum, g) => sum + g.count, 0);
@@ -469,8 +430,7 @@ describe("recall() — RecallQuery.taxonomyGroups（Issue #201 PR-B、ADR 0323�
 
   it("strict では registered のみが群になり、proposed しか持たない Memory は残差に数えられる", async () => {
     const { runtime, stores } = buildRuntime();
-    // `registerLabel` は「まだ誰も tags に使っていない名前」も直接 registered として作れる
-    // （ADR 0318「決定3」）——ここでは種になる proposed の Memory を作らずに済む。
+    // `registerLabel` は未使用の名前も直接 registered にできる（種になる proposed の Memory を作らずに済む）。
     await stores.memoryStore.registerLabel(ctx, "alpha");
     await stores.tenantSettingsStore.setTaxonomyMode(ctx, "strict");
     await createEmbeddedMemory(stores, [1, 0], { digest: "registered", tags: ["alpha"] });
@@ -489,7 +449,6 @@ describe("recall() — RecallQuery.taxonomyGroups（Issue #201 PR-B、ADR 0323�
       count: 1,
       countKind: "exact",
     });
-    // "beta" は proposed のまま——strict では群にならず、残差に数えられる。
     expect(taxonomyGroups.some((g) => g.key === "beta")).toBe(false);
     expect(taxonomyGroups).toContainEqual({
       axis: "taxonomy",
@@ -500,14 +459,8 @@ describe("recall() — RecallQuery.taxonomyGroups（Issue #201 PR-B、ADR 0323�
   });
 });
 
-// ---------------------------------------------------------------------------
-// 6. `listLabels?` を実装しない adapter では静かに無効化される（ADR 0318 の規律）。
-// ---------------------------------------------------------------------------
-
 describe("recall() — MemoryStore.listLabels? を実装しない adapter（Issue #201 PR-B、ADR 0323「決定2」訂正）", () => {
-  // `listLabels` を持たない MemoryStore を装う——透過的な Proxy で1つのプロパティだけ
-  // `undefined` に見せる（class インスタンスをそのまま spread すると prototype 上の
-  // メソッドが1つも複製されない）。
+  // `listLabels` を持たない MemoryStore を装う。透過的な Proxy で1つのプロパティだけ `undefined` に見せる（class インスタンスを spread すると prototype 上のメソッドが複製されない）。
   function withoutListLabels(stores: ReturnType<typeof createFakeRuntimeStores>) {
     return new Proxy(stores.memoryStore, {
       get(target, prop, receiver) {
@@ -574,9 +527,7 @@ describe("recall() — MemoryStore.listLabels? を実装しない adapter（Issu
       labels: ["alpha"],
     });
 
-    // 「絞り込みが丸ごと無効化される」のではない——`alpha` を持たない `other` は
-    // 通らない。状態（registered/proposed）が引けなくても open は状態を見ないため、
-    // 渡した名前をそのまま使ってよい。
+    // 絞り込みが丸ごと無効化されるのではない: `alpha` を持たない `other` は通らない。
     const ids = result.memories.map((m) => m.memoryId);
     expect(ids).toContain(matching.id);
     expect(ids).not.toContain(other.id);
@@ -601,10 +552,6 @@ describe("recall() — MemoryStore.listLabels? を実装しない adapter（Issu
     expect(ids).not.toContain(memory.id);
   });
 });
-
-// ---------------------------------------------------------------------------
-// 8. 後置フィルタ・同伴・目次帯・群の追加の歯（Issue #1775 の #743 の変異8・13・14・15・17）。
-// ---------------------------------------------------------------------------
 
 describe("recall() — labels の追加の歯（#743）", () => {
   it("連想枠: 連想用の search() だけが labels を無視して外の記憶を返しても、連想枠に乗らない（変異13）", async () => {

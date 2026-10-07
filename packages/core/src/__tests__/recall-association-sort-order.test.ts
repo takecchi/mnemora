@@ -7,19 +7,6 @@ import type { ScoreBreakdown } from "../recall.js";
 import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * 段2の並べ替え（`compareScoredCandidates`）で `total` が `NaN` の候補が有限の候補より
- * 後ろに回ること、と、段3.5（連想枠）の2つの並べ替えの歯。
- *
- * - アンカー類似度の降順（`associationHits.sort`）: 同点のとき、`recall-runtime.ts` 自身は
- *   `memoryId` などで並べ直さず、vectorStore が返した順をそのまま保つ。
- * - 順位キー（`rankKey = similarity × score.total`）の降順（`rankedCandidates.sort`）:
- *   `total` が `NaN` の候補は、有限の候補より後ろに回る。
- *
- * `score-sort-nan.test.ts` は段3.5の2箇所を、非 export の比較関数の複製で確かめている。
- * 本物の `recall-runtime.ts` の2か所は、ここで `runtime.recall()` を通して確かめる。
- */
-
 const T0 = new Date("2026-06-01T00:00:00.000Z");
 const ctx: Ctx = { tenantId: "tenant-1" };
 const HALF_LIFE_HOURS = 24 * 365 * 10;
@@ -141,7 +128,6 @@ describe("recall() — 連想枠の並べ替え（段3.5）", () => {
     for (const digest of ["A", "B", "C"]) {
       created.push(await createEmbeddedMemory(stores, CANDIDATE_VECTOR, { digest }));
     }
-    // vectorStore は同点を memoryId の降順で返す。席の先頭に着くのは最大の memoryId。
     const idsDescending = created.map((m) => m.id).sort((a, b) => (a < b ? 1 : a > b ? -1 : 0));
 
     const result = await runtime.recall(ctx, {

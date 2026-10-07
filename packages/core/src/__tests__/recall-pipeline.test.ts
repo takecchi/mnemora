@@ -14,18 +14,7 @@ import type { RecallOutputValidationMode } from "../recall-output-validation.js"
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 import { createObservedMemory } from "./observed-memory.js";
 
-/**
- * roadmap.md 段階4「想起」・段階5「説明」の完了条件そのものを検査する。
- *
- * - omitted の各 kind（stage_skipped/filtered/below_threshold/over_limit/budget_dropped/
- *   not_indexed/ann_truncated）が実際に発生する条件下で返せること。
- * - 段3（矛盾の解決）の mandatory companion retrieval と隣接性。
- * - 段4（予算切り詰め）が同伴ペアを分割しないこと。
- * - 被覆不変条件（groups の総和 == totalInScope）。
- * - explain.stages が実際に走った/走らなかった段を反映すること。
- *
- * `@mnemora/testkit` には依存しない（`runtime-fakes.ts` 冒頭のコメントと同じ理由）。
- */
+/** `@mnemora/testkit` には依存しない（`runtime-fakes.ts` 冒頭と同じ理由）。 */
 
 const ctx: Ctx = { tenantId: "tenant-1" };
 const NOW = new Date("2026-06-01T00:00:00.000Z");
@@ -61,10 +50,6 @@ function newMemory(overrides: Partial<NewMemory> = {}): NewMemory {
   };
 }
 
-/**
- * `overrides.tokenCounter` / `overrides.outputValidation` は Issue #131（ADR 0098）の歯のため
- * に足した——既存の呼び出し（引数無しの `buildRuntime()`）は1バイトも変わらない。
- */
 function buildRuntime(
   overrides: { tokenCounter?: TokenCounter; outputValidation?: RecallOutputValidationMode } = {},
 ) {
@@ -92,16 +77,7 @@ function buildRuntime(
   return { runtime, stores };
 }
 
-/**
- * `ann_unreached`（ADR 0026）の歯のためだけの、`VectorStore` の薄いラッパー。
- *
- * `FakeVectorStore`（`runtime-fakes.ts`）は「本物同様に status/decayFloor でフィルタしつつ
- * cosine 距離で ANN を模する」ことはできるが、「scope にもっと候補があるのに、ANN が
- * それより少ない件数しか返さない」——近似索引が届かなかった、という状況そのものは
- * 作れない（`limit` まで律儀に返してしまう）。この状況を作るのに `runtime-fakes.ts`
- * 自体を変える必要は無く、`search` の返り件数を後から切り詰めるだけで足りるので、
- * ここに局所的なラッパーとして置く（`runtime-fakes.ts` は変更しない）。
- */
+/** `ann_unreached` の歯のための `VectorStore` の薄いラッパー。`FakeVectorStore` は `limit` まで律儀に返すので、「scope にもっと候補があるのに ANN が少ない件数しか返さない」状況を、`search` の返り件数を後から切り詰めて作る。 */
 class CappedVectorStore implements VectorStore {
   constructor(
     private readonly inner: VectorStore,
@@ -128,7 +104,6 @@ class CappedVectorStore implements VectorStore {
   }
 }
 
-/** `buildRuntime()` と同じ配線だが、`vectorStore` だけ `CappedVectorStore` に差し替える。 */
 function buildRuntimeWithCappedAnn(cap: number) {
   const stores = createFakeRuntimeStores();
   const runtime = createRuntime({
@@ -154,7 +129,6 @@ function buildRuntimeWithCappedAnn(cap: number) {
   return { runtime, stores };
 }
 
-/** 埋め込み済みの Memory を1件用意する（vectorStore への upsert も行う）。 */
 async function createEmbeddedMemory(
   stores: ReturnType<typeof createFakeRuntimeStores>,
   vector: number[],
@@ -326,9 +300,7 @@ describe("recall() — omitted.kind = 'over_limit'（docs/recall.md §2 段2）"
     await createEmbeddedMemory(stores, [1, 0]);
     await createEmbeddedMemory(stores, [1, 0.001]);
 
-    // association: null — 連想枠は既定 on（ADR 0337）だが、この歯は over_limit だけを
-    // 検査する。limit の外に落ちた候補は連想の対象にもなりうる（アンカーとの類似度が
-    // 高いため）ので、この歯の対象外の効果を持ち込まないよう明示的に止める。
+    // association: null: この歯は over_limit だけを検査する。limit の外に落ちた候補は連想の対象にもなりうるので止める。
     const result = await runtime.recall(ctx, {
       vector: [1, 0],
       limit: 1,
@@ -346,24 +318,13 @@ describe("recall() — omitted.kind = 'over_limit'（docs/recall.md §2 段2）"
 });
 
 describe("recall() — omitted.kind = 'ann_truncated'（docs/recall.md §3、ADR 0069）", () => {
-  // 🔴 **この describe の契約は ADR 0069 で変わった。**
-  //
-  // かつては「ANN の返り件数が k' に達したら ann_truncated が付く」だった。いまは
-  // **「k' に達し、かつ *損失が起こりえた* ときだけ付く」** である——窓が埋まったことは
-  // 「スコープが k' 以上ある」としか言っておらず、損したかどうかを一切言っていなかった
-  // （実測でスコープ 75件・k'=40 のとき 7 probe すべてが鳴り、実損は 0/7 だった）。
-  //
-  // **⚠ 下の1本目は、以前の歯と同じ状況をそのまま作って「鳴らなくなったこと」を測る。**
-  // 歯を消して逃げるのではなく、**契約が変わった向きをそのまま固定する。**
+  // この describe の契約: ann_truncated は「k' に達し、かつ損失が起こりえたとき」だけ付く（窓が埋まっただけでは損したかを言えない、ADR 0069）。1本目は以前の歯と同じ状況を作って鳴らないことを固定する。
   it("k' に達しても、窓の外が top-k へ入れないと証明できたら鳴らない（ADR 0069）", async () => {
     const { runtime, stores } = buildRuntime();
     await createEmbeddedMemory(stores, [1, 0]);
     await createEmbeddedMemory(stores, [1, 0.001]);
 
-    // limit=1, overFetchFactor=1 -> k'=1。候補が2件あるのに1件しか返らない（＝窓は埋まった）。
-    // ただし返った1件は similarity=1.0 で、非 similarity 項は全部が上界に張り付いている
-    // （clock 固定なので decay=freshness=1、クエリタグ無しで tagMatch=1、strength=1）。
-    // ⟹ R = 1 / (1 × 1) = 1 ⟹ 窓の外は原理的に抜けない ⟹ 沈黙。
+    // 返った1件は similarity=1.0 で非 similarity 項が全部上界に張り付いている（R = 1 / (1 × 1) = 1）ので、窓の外は原理的に抜けず沈黙する。
     const result = await runtime.recall(ctx, { vector: [1, 0], limit: 1, overFetchFactor: 1 });
     expect(result.omitted.some((o) => o.kind === "ann_truncated")).toBe(false);
   });
@@ -373,10 +334,7 @@ describe("recall() — omitted.kind = 'ann_truncated'（docs/recall.md §3、ADR
     await createEmbeddedMemory(stores, [1, 0]);
     await createEmbeddedMemory(stores, [1, 0.001]);
 
-    // 上とまったく同じ状況に、**どの候補も持っていないタグ**をクエリへ足すだけ。
-    // ⟹ 上界 M_max は 1 + 0.1 = 1.1 へ上がるが、返った1件の実際の tagMatch は 1.0 のまま。
-    // ⟹ R = 1.0 / (1.0 × 1.1) ≈ 0.909 < 1
-    // ⟹ **「窓の外にこのタグを持つ記憶が居たら、抜かれていた」**——これがこの札の意味である。
+    // どの候補も持たないタグをクエリへ足すと上界が 1.1 に上がり R ≈ 0.909 < 1: 窓の外にこのタグを持つ記憶が居たら抜かれていた、という札になる。
     const result = await runtime.recall(ctx, {
       vector: [1, 0],
       limit: 1,
@@ -391,7 +349,6 @@ describe("recall() — omitted.kind = 'ann_truncated'（docs/recall.md §3、ADR
     expect(found.countKind).toBe("unknown");
     expect(found.safetyRatio).toBeLessThan(1);
     expect(found.safetyRatio).toBeCloseTo(1 / 1.1, 6);
-    // **前提を名乗っていること。**コメントではなく戻り値で（ADR 0069 §6）。
     expect(found.assumptions?.join(" ")).toContain("decay");
     expect(found.assumptions?.join(" ")).toContain("strength");
   });
@@ -417,17 +374,11 @@ describe("recall() — omitted.kind = 'ann_truncated'（docs/recall.md §3、ADR
 describe("recall() — omitted.kind = 'ann_unreached'（ADR 0025 の実測、ADR 0026 の決定、ADR 0193 が発火条件を拡張）", () => {
   it("歯A（鳴る側）: scope に候補が多くあるのに ANN が eligible 未満しか返さないと ann_unreached が付く", async () => {
     const { runtime, stores } = buildRuntimeWithCappedAnn(2);
-    // 5件が scope 内・embeddingStatus='ready'（= eligible = 5）だが、ANN は2件しか返さない
-    // （CappedVectorStore が模する「近似索引が届かなかった」状況。2 < kPrime(=40) かつ
-    // 2 < eligible(=5) なので発火するはず）。
     for (let i = 0; i < 5; i += 1) {
       await createEmbeddedMemory(stores, [1, 0]);
     }
 
     const result = await runtime.recall(ctx, { vector: [1, 0] });
-    // ADR 0288: eligible(5) - filteredDecayed(0) = reachableLowerBound(5) に対して
-    // hits(2) < min(kPrime(40), 5) なので severity は "warning"（ANN 窓が実際に
-    // 到達可能な下限に届かなかった）。
     expect(result.omitted).toContainEqual({
       kind: "ann_unreached",
       countKind: "unknown",
@@ -452,14 +403,7 @@ describe("recall() — omitted.kind = 'ann_unreached'（ADR 0025 の実測、ADR
     await createEmbeddedMemory(stores, [1, 0]);
     await createEmbeddedMemory(stores, [1, 0.001]);
 
-    // limit=1, overFetchFactor=1 -> k'=1。候補2件のうち1件しか返らない（＝窓が埋まる）。
-    // eligible=2 > hits=1 ⟹ scope にまだ見えていない候補（もう1件）が残っている。
-    // **ADR 0069 以降、この状況で ann_truncated が鳴るかは「損しえたか」次第**なので、
-    // 鳴る側になる形（どの候補も持たないタグをクエリへ足す）で作る。
-    // **この歯の主題**: ADR 0193 より前はここで ann_unreached が鳴らなかった
-    // （旧条件 `annHits.length < kPrime` が窓の満杯を理由に除外していた）。
-    // いまは鳴る——`ann_truncated`（窓の外は証明できるか）と `ann_unreached`
-    // （近似索引は scope を拾いきったか）は別の問いに答えるので、同時に立ってよい。
+    // 鳴る側になる形（どの候補も持たないタグをクエリへ足す）で作る。ann_truncated（窓の外は証明できるか）と ann_unreached（索引は scope を拾いきったか）は別の問いなので、同時に立ってよい。
     const result = await runtime.recall(ctx, {
       vector: [1, 0],
       limit: 1,
@@ -468,9 +412,6 @@ describe("recall() — omitted.kind = 'ann_unreached'（ADR 0025 の実測、ADR
     });
     expect(result.omitted.some((o) => o.kind === "ann_truncated")).toBe(true);
     expect(result.omitted.some((o) => o.kind === "ann_unreached")).toBe(true);
-    // ADR 0288: 窓は満杯（hits(1) == kPrime(1)）なので、reachableLowerBound(2) との
-    // min は kPrime(1) 側になり、hits(1) < 1 は偽——severity は "info"（実損の兆候では
-    // なく、eligible(2) > kPrime(1) という構造だけで鳴っている）。
     expect(result.omitted).toContainEqual({
       kind: "ann_unreached",
       countKind: "unknown",
@@ -482,12 +423,7 @@ describe("recall() — omitted.kind = 'ann_unreached'（ADR 0025 の実測、ADR
     const { runtime, stores } = buildRuntime();
     await createEmbeddedMemory(stores, [1, 0]);
 
-    // limit=1, overFetchFactor=1 -> k'=1。候補1件だけで hits=1（＝窓が埋まる）。
-    // eligible=1 == hits=1 ⟹ scope にまだ見えていない候補は無い——「窓が満杯なら常に鳴る」
-    // 側へ倒れていないことを確かめる歯（歯Bの「窓が満杯」版）。
-    // ann_truncated は鳴る側になる形（どの候補も持たないタグ）で作り、
-    // **この歯の主題が「ann_truncated の鳴り方」ではなく「ann_unreached が鳴らないこと」**
-    // だと分かるようにする。
+    // eligible=1 == hits=1 なので scope に見えていない候補は無い。主題は ann_unreached が鳴らないことなので、ann_truncated は鳴る側の形で作る。
     const result = await runtime.recall(ctx, {
       vector: [1, 0],
       limit: 1,
@@ -498,23 +434,8 @@ describe("recall() — omitted.kind = 'ann_unreached'（ADR 0025 の実測、ADR
     expect(result.omitted.some((o) => o.kind === "ann_unreached")).toBe(false);
   });
 
-  // ---------------------------------------------------------------------
-  // ADR 0288 / Issue #361: `AnnUnreachedOmission.severity`（任意欄）。
-  //
-  // 値は ADR 0285 追記が定義する `annReturnedFewerThanReachable`（stage detail の
-  // 診断キー）と**同じ式**から引く——2箇所に条件を書き写さない
-  // （`recall-runtime.ts` 該当コメント参照）。
-  //   - "warning": 同じ recall で ANN 窓が到達可能な下限（reachableLowerBound）に
-  //     届かなかった。
-  //   - "info": それ以外（窓は満杯で、eligible > kPrime という構造だけで鳴っている）。
-  // ---------------------------------------------------------------------
   it("歯E（severity: 'info'）: 窓が満杯（hits == kPrime）で、eligible > kPrime という構造だけで鳴っているときは info", async () => {
     const { runtime, stores } = buildRuntime();
-    // kPrime = limit(10) * overFetchFactor(4) = 40。候補41件（全件 embeddingStatus='ready'・
-    // 非 decayed）を作ると、既定の FakeVectorStore は search の limit（=kPrime=40）まで
-    // 律儀に返す ⟹ hits=40=kPrime（窓は満杯）。eligible=41、
-    // reachableLowerBound = 41 - filteredDecayed(0) = 41。
-    // hits(40) < min(kPrime(40), reachableLowerBound(41)) = 40 → 偽 ⟹ info。
     for (let i = 0; i < 41; i += 1) {
       await createEmbeddedMemory(stores, [1, 0]);
     }
@@ -529,10 +450,6 @@ describe("recall() — omitted.kind = 'ann_unreached'（ADR 0025 の実測、ADR
 
   it("歯F（severity: 'warning'）: ANN 窓が到達可能な下限に届かなかったときは warning", async () => {
     const { runtime, stores } = buildRuntimeWithCappedAnn(3);
-    // 10件が scope 内・embeddingStatus='ready'・非 decayed（= eligible = 10）だが、
-    // CappedVectorStore(cap=3) で ANN の返り件数を3件に切り詰める。
-    // reachableLowerBound = 10 - filteredDecayed(0) = 10。
-    // hits(3) < min(kPrime(40), reachableLowerBound(10)) = 10 → 真 ⟹ warning。
     for (let i = 0; i < 10; i += 1) {
       await createEmbeddedMemory(stores, [1, 0]);
     }
@@ -547,49 +464,9 @@ describe("recall() — omitted.kind = 'ann_unreached'（ADR 0025 の実測、ADR
 });
 
 describe("recall() — explain.stages[candidate_generation(ann)].detail.annReturnedFewerThanReachable（ADR 0285 / Issue #671 続報）", () => {
-  // Issue #671: 他テナントの near-duplicate が HNSW の候補枠（k'）を埋めると、ANN は
-  // scope 内の候補を1件も返さずに0件になる。既存の `ann_unreached`（上の describe）は
-  // 「scope 内にまだ見られていない候補が残っている」という同じ条件（annHits.length <
-  // eligible）で正常時にも鳴るため、この全滅状態と正常時を区別できない
-  // （北極星33行目「『見つからなかった』と『探していない』を、同じ顔で返さない」）。
-  //
-  // 公開型の `Omission` union は変えず（`kind` を増やさない。理由は ADR 0285 §2.2、
-  // および #541 の判断待ち）、`explain.stages` の ann チャンネルの trace に
-  // 診断用の detail キーを足す。ここではその detail キーだけを検査する
-  // ——`ann_unreached` 自体の挙動（上の歯A〜D）は1つも変えていない。詳細は ADR 0285。
-  //
-  // 🔴 ADR 0285 追記（本 describe、Issue #671 続報）: 初版（PR #672）が足した
-  // `annWindowHadNoInScopeCandidates`（条件 `eligible > 0 && annHits.length === 0`）には
-  // **偽陽性があった**——`eligible` は忘却ゲート（ADR 0173）を知らないため、scope 内で
-  // 埋め込みのある行が全て decayed で ANN が「正しく」0件を返した場合にも、この条件は
-  // 真になっていた（下の「偽陽性の対照」がこれを赤で確かめる）。
-  //
-  // 🔴 追記その2（本 describe、コーディネーターのレビューを受けた訂正）: 追記その1が
-  // 採った「decayed 行が1件でもあれば判定しない」は、本番のテナントではほぼ常に
-  // 真になり（古い記憶が decayed なのは正常運用）、診断が恒久的に沈黙してしまう
-  // ——過剰な保守化だった。⟹ **「判定しない」ではなく「下限（lower bound）で
-  // 判定する」に直した**:
-  //   `reachableLowerBound = max(0, eligible - aggregate.filteredDecayed.count)`
-  // `aggregate.filteredDecayed` は「埋め込みあり かつ decayed」の真の件数の**上界**
-  // なので（embedding_status を問わず数えるため）、この引き算は**下から丸める**
-  // ——`reachableLowerBound <= 真の母数` が構造的に保証される（証明は
-  // `recall-runtime.ts` の同キー周辺のコメント）。⟹ `annHits.length <
-  // min(kPrime, reachableLowerBound)` で判定する限り**偽陽性は出ない**。
-  // `excludeProvenanceKinds` はこの不等式の外に居る（下限の保証が崩れる）ため、
-  // 指定されているときは引き続き判定しない。
-  //
-  // 条件を `annHits.length === 0` から `annHits.length < min(kPrime,
-  // reachableLowerBound)` に一般化した——天井（`hnsw.max_scan_tuples` 等）で
-  // `kPrime` 未満・下限未満の件数に打ち切られた場合も「索引が在る候補を返しきれ
-  // なかった」という同じ事象である。キー名を `annReturnedFewerThanReachable` に
-  // 変えた——「0件だった」を主張する旧名は、0件とは限らない一般化した条件の下では
-  // 中身と食い違う。値は引き続き条件が真のときだけ足す（ADR 0084 §6 の歯②との
-  // 衝突を避けるため）。あわせて `annReachableLowerBound`（その時点の下限——
-  // 「正確な母数」ではなく「下限」であることを名前自体で示す）も足す。
-  //
-  // **引き受けた負債**: 下限は「未索引かつ decayed」の分だけ真の母数より小さく
-  // なりうるため、索引が実際には取りこぼしていても `annHits.length` がたまたま
-  // 下限以上に収まると鳴らない——「見逃しの対照」がこの境界を固定する。
+  // 他テナントの near-duplicate が HNSW の候補枠 k' を埋めると、ANN は scope 内の候補を1件も返さず、`ann_unreached` だけでは全滅と正常時を区別できない。`Omission` union は変えず、`explain.stages` の ann trace の detail キーだけを検査する。
+  // 判定は `annHits.length < min(kPrime, reachableLowerBound)`（`reachableLowerBound = max(0, eligible - filteredDecayed.count)`）。decayed が1件でもあれば判定しない形は本番で恒久的に沈黙するので、下限で判定する。
+  // 引き受けた負債: 下限は「未索引かつ decayed」の分だけ真の母数より小さくなりうるので、その分の取りこぼしは見逃す（「見逃しの対照」が固定する）。`excludeProvenanceKinds` 指定時は下限の保証が崩れるので判定しない。
 
   function findAnnDetail(result: RecallResult) {
     const trace = result.explain.stages.find(
@@ -600,18 +477,12 @@ describe("recall() — explain.stages[candidate_generation(ann)].detail.annRetur
 
   it("陽性1（他テナント占拠を模す）: ANN が0件を返し、分母が0件より多いとき、annReturnedFewerThanReachable: true が付く", async () => {
     const { runtime, stores } = buildRuntimeWithCappedAnn(0);
-    // 3件が scope 内・embeddingStatus='ready'・非 decayed（= 分母 = 3）だが、
-    // ANN は0件しか返さない（CappedVectorStore(cap=0) が「候補枠が他 scope の行だけで
-    // 埋まった」状況を模する）。
     for (let i = 0; i < 3; i += 1) {
       await createEmbeddedMemory(stores, [1, 0]);
     }
 
     const result = await runtime.recall(ctx, { vector: [1, 0] });
     expect(result.memories).toEqual([]);
-    // 既存の ann_unreached は変わらず鳴る（対照——この歯の主題ではない）。
-    // ADR 0288: ここは annReturnedFewerThanReachable も真になる同じ状況なので、
-    // severity は "warning"。
     expect(result.omitted).toContainEqual({
       kind: "ann_unreached",
       countKind: "unknown",
@@ -625,10 +496,6 @@ describe("recall() — explain.stages[candidate_generation(ann)].detail.annRetur
 
   it("陽性2（天井打ち切りを模す）: ANN が kPrime 未満・分母未満の件数で打ち切られたとき、annReturnedFewerThanReachable: true が付く", async () => {
     const { runtime, stores } = buildRuntimeWithCappedAnn(2);
-    // 5件が scope 内・embeddingStatus='ready'・非 decayed（= 分母 = 5）。
-    // CappedVectorStore(cap=2) が「索引は本当は5件届くのに、天井で2件しか返さない」
-    // ——`hits === 0` ではない——状況を模する。旧条件（`annHits.length === 0`）では
-    // ここは鳴らなかった（この歯が一般化そのものを検査する）。
     for (let i = 0; i < 5; i += 1) {
       await createEmbeddedMemory(stores, [1, 0]);
     }
@@ -644,13 +511,7 @@ describe("recall() — explain.stages[candidate_generation(ann)].detail.annRetur
 
   it("陽性3（decayed が一部あっても下限で名乗る）: ready 10件中3件が decayed でも、下限(7) > hits なら annReturnedFewerThanReachable: true が付く", async () => {
     const { runtime, stores } = buildRuntimeWithCappedAnn(2);
-    // ready 10件のうち3件を decayed にする（7件は生存）。
-    //   eligible = 10（全件 ready）、filteredDecayed = 3（embedding_status を問わず
-    //   decayed を数えるが、ここでは decayed 行はどれも ready なので過大には
-    //   ならない）⟹ reachableLowerBound = max(0, 10 - 3) = 7。
-    // CappedVectorStore(cap=2) で ANN の返り件数を2件に切り詰める——
-    // 「decayed が1件でもあれば判定しない」という追記その1の旧い形では、ここは
-    // 恒久的に鳴らなかった（本番のテナントで実際に起きていた過剰な保守化そのもの）。
+    // ready 10件のうち3件を decayed にする: reachableLowerBound = 10 - 3 = 7。
     for (let i = 0; i < 7; i += 1) {
       await createEmbeddedMemory(stores, [1, 0]);
     }
@@ -671,10 +532,7 @@ describe("recall() — explain.stages[candidate_generation(ann)].detail.annRetur
 
   it("偽陽性の対照（鳴ってはいけない側）: scope 内の埋め込みがある行が全て decayed のとき、annReturnedFewerThanReachable は付かない", async () => {
     const { runtime, stores } = buildRuntime();
-    // 3件とも embeddingStatus='ready' だが decayFloorAt が過去（NOW より前）——
-    // 忘却ゲートで ANN からも aggregate の filteredDecayed からも同じ述語で落ちる
-    // （ADR 0173）。ANN は「正しく」0件を返す——探していないのではなく、探して
-    // 何も無かった（すべて遠ざかった）。下限 = max(0, 3 - 3) = 0 なので鳴らない。
+    // ANN は正しく0件を返す（探して何も無かった）。下限は 0 なので鳴らない。
     for (let i = 0; i < 3; i += 1) {
       await createEmbeddedMemory(stores, [1, 0], {
         decayFloorAt: new Date("2020-01-01T00:00:00.000Z"),
@@ -690,24 +548,7 @@ describe("recall() — explain.stages[candidate_generation(ann)].detail.annRetur
 
   it("見逃しの対照（既知の限界。鳴らないことを固定する）: 未索引かつ decayed の行があると、下限が真の母数より小さくなり、実際の取りこぼしを見逃しうる", async () => {
     const { runtime, stores } = buildRuntimeWithCappedAnn(2);
-    // 1件: embeddingStatus='pending'（未索引）かつ decayed（vectorStore へは
-    // upsert しない——未索引の Memory は現実の DB でも埋め込みを持たない）。
-    // 4件: embeddingStatus='ready'。うち1件は decayed、3件は生存。
-    //
-    //   totalInScope = 5、notIndexed.pending = 1 ⟹ eligible = 4。
-    //   filteredDecayed は embedding_status を問わず数えるので
-    //   1（pending かつ decayed）+ 1（ready かつ decayed）= 2。
-    //   ⟹ reachableLowerBound = max(0, 4 - 2) = 2。
-    //   真の母数（ready かつ生存）は3——下限は真の値より1小さい
-    //   （「未索引かつ decayed」の1件を二重に引いた分）。
-    //
-    // CappedVectorStore(cap=2) で ANN の返り件数を2件に切り詰める——
-    // 索引は本当は3件（生存する ready 全件）に届くはずが2件しか返せていない
-    // ＝ 実際の取りこぼしがある。だが下限もちょうど2なので
-    // `annHits.length(2) < min(kPrime, reachableLowerBound=2)` は偽——
-    // **この診断は鳴らない。** これは ADR 0285 追記その3が引き受けた負債
-    // （下限による判定は、未索引かつ decayed の分だけ見逃しうる）そのものであり、
-    // 偶然の赤ではなく既知の限界として固定する。
+    // pending かつ decayed の1件は vectorStore へ upsert しない。下限（2）は真の母数（3）より1小さく、取りこぼし（返せたのは2件）があっても鳴らない。偶然の赤ではなく、下限判定が引き受けた既知の限界として固定する。
     await stores.memoryStore.createMemory(
       ctx,
       newMemory({ decayFloorAt: new Date("2020-01-01T00:00:00.000Z") }),
@@ -728,10 +569,7 @@ describe("recall() — explain.stages[candidate_generation(ann)].detail.annRetur
 
   it("揃っていない次元の対照（鳴ってはいけない側）: excludeProvenanceKinds が指定されているとき、annReturnedFewerThanReachable は付かない", async () => {
     const { runtime, stores } = buildRuntime();
-    // 3件とも embeddingStatus='ready'・非 decayed だが、provenance kind 'imported'
-    // （`newMemory` の既定）を丸ごと除外するクエリ——ANN は「正しく」0件を返すが、
-    // `excludeProvenanceKinds` は `aggregateScope`/`ScopeAggregate` に届いていない
-    // ため、集約側からはこの絞りが見えない（本 describe 冒頭のコメント参照）。
+    // imported を丸ごと除外するクエリ: ANN は正しく0件を返すが、`excludeProvenanceKinds` は `ScopeAggregate` に届かず、集約側からは絞りが見えない。
     for (let i = 0; i < 3; i += 1) {
       await createEmbeddedMemory(stores, [1, 0]);
     }
@@ -752,17 +590,13 @@ describe("recall() — explain.stages[candidate_generation(ann)].detail.annRetur
     const result = await runtime.recall(ctx, { vector: [1, 0] });
     expect(result.memories).toHaveLength(1);
     const detail = findAnnDetail(result);
-    // `false` を確かめるのではなく、キーそのものの不在を確かめる——
-    // `{ annReturnedFewerThanReachable: undefined, ... }` という壊れた実装も
-    // 後者でなければ通ってしまう（②-c の `lexicalMatch` の歯と同じ形）。
+    // `false` ではなくキーの不在を確かめる: `{ annReturnedFewerThanReachable: undefined }` という壊れた実装も通ってしまうため。
     expect(Object.keys(detail ?? {})).not.toContain("annReturnedFewerThanReachable");
     expect(Object.keys(detail ?? {})).not.toContain("annReachableLowerBound");
   });
 
   it("やりすぎの対照B（鳴ってはいけない側）: 分母が0件（scope が空）のときもキー自体が付かない", async () => {
     const { runtime } = buildRuntime();
-    // scope に Memory を1件も作らない ⟹ 分母 = 0。ANN も0件を返すが、
-    // 「探していない」ではなく「探す対象自体が無い」なので対象外——鳴ってはいけない。
     const result = await runtime.recall(ctx, { vector: [1, 0] });
     expect(result.memories).toEqual([]);
     const detail = findAnnDetail(result);
@@ -771,23 +605,9 @@ describe("recall() — explain.stages[candidate_generation(ann)].detail.annRetur
 });
 
 describe("recall() — omitted.kind = 'unit_assembly_dropped'（ADR 0043）", () => {
-  // **⚠ この歯は Phase 1 では一度も本番経路を通らない。**
-  // `Runtime`（observe/tick/recall/reextract）は `contested` も `contestedWithId` も書かないため、
-  // 一対一が破れた状態を作れない（`docs/memory-model.md`「関係グラフ本体は Phase 2」）。
-  // ⟹ ここで測っているのは「いま壊れているもの」ではなく、
-  //    **`contested` を作る主体が入ったときに機構が黙らない**という契約である。
-  //
-  // ⚠ この歯は「候補が単位から漏れること」を*正しい振る舞いとして固定しない*。
-  //    固定するのは「漏れたときに黙らないこと」だけである。
+  // ここで測るのは、`contested` を作る主体が入ったときに機構が黙らないという契約。「候補が単位から漏れること」を正しい振る舞いとして固定せず、漏れたときに黙らないことだけを固定する。
 
-  /**
-   * 一対一が破れた `contested` の鎖 A→B→C を作る。
-   * `contestedWithId` は一対一と定められているので、これは**壊れたデータ**である。
-   *
-   * 単位を組む繰り返しは A から始まり、A の対向として B を消費してペア [A,B] を作る。
-   * 次の B は消費済みなので飛ばされ、**B の同伴として取られた C はどの単位にも入らない。**
-   * ⟹ 候補3件に対して単位が覆うのは2件。
-   */
+  /** 一対一が破れた壊れたデータ（contested の鎖 A→B→C）を作る。B が消費済みになり、B の同伴として取られた C はどの単位にも入らない。 */
   async function seedBrokenChain(stores: ReturnType<typeof createFakeRuntimeStores>) {
     const c = await stores.memoryStore.createMemory(
       ctx,
@@ -812,9 +632,7 @@ describe("recall() — omitted.kind = 'unit_assembly_dropped'（ADR 0043）", ()
 
     const result = await runtime.recall(ctx, { vector: [1, 0], limit: 10 });
 
-    // 前提: C は返っていない（返っているなら「消えた」は成り立たない）。
     expect(result.memories.map((m) => m.memoryId)).not.toContain(c.id);
-    // 本題: 消えたことが omitted に出る。**直す前はここに何も出なかった。**
     expect(result.omitted).toContainEqual({
       kind: "unit_assembly_dropped",
       count: 1,
@@ -823,8 +641,7 @@ describe("recall() — omitted.kind = 'unit_assembly_dropped'（ADR 0043）", ()
   });
 
   it("⚠ 鳴ってはいけない側: 一対一が破れていなければ出ない（対向ペア）", async () => {
-    // ⚠ 件数を 2 対 1 と違える（ペア1組＋単独1件 = 候補3件）。
-    //    同じ件数で作ると、単位の取り違えが出力を変えない。
+    // 件数を 2 対 1 と違える: 同じ件数で作ると単位の取り違えが出力を変えない。
     const { runtime, stores } = buildRuntime();
     const b = await stores.memoryStore.createMemory(
       ctx,
@@ -854,18 +671,7 @@ describe("recall() — omitted.kind = 'unit_assembly_dropped'（ADR 0043）", ()
 
 describe("recall() — budget_dropped の countKind は単位の網羅性から決まる（ADR 0045）", () => {
   it("🔴 単位が候補を網羅していないとき、budget_dropped は 'exact' を名乗らない", async () => {
-    // **⚠ この歯は「候補が単位から漏れること」を*正しい振る舞いとして固定するものではない*。**
-    // 固定しているのは「漏れているときに `'exact'` と名乗らないこと」——つまり**正直さ**である。
-    // 漏れること自体は別の欠陥として報告してある（下記）。
-    //
-    // 作り方: contested の鎖 A→B→C を作る。`contestedWithId` は
-    // `docs/memory-model.md` §5 が**一対一の対向関係**と定めているので、この鎖は**壊れたデータ**である。
-    // ⟹ 機構はそれを拒まないので、こう並ぶ:
-    //   - withinLimit = [A, B]（C は埋め込みが無いので候補にならない）
-    //   - A の対向 B は withinLimit に居るので、同伴取得の対象は B の対向 C だけ
-    //   - 単位を組む繰り返しは A から始まり、A の対向として B を消費してペア [A,B] を作る
-    //   - 次の B は消費済みなので飛ばされ、**C はどの単位にも入らない**
-    // ⟹ 候補3件に対して単位が覆うのは2件。**`countKindForUnits` が `'unknown'` へ落とす。**
+    // contested の鎖 A→B→C（一対一が破れた壊れたデータ）。C は埋め込みが無く候補にならず、単位は A から始まって B を消費するので C はどの単位にも入らない。固定するのは、漏れているときに 'exact' と名乗らない正直さであり、漏れること自体を正しい振る舞いとして固定するものではない。
     const { runtime, stores } = buildRuntime();
     const c = await stores.memoryStore.createMemory(
       ctx,
@@ -889,14 +695,11 @@ describe("recall() — budget_dropped の countKind は単位の網羅性から�
     });
     const dropped = result.omitted.find((o) => o.kind === "budget_dropped");
     expect(dropped).toBeDefined();
-    // 件数そのものは出す（数えられた分は数えられている）。
     expect(dropped).toMatchObject({ count: 2 });
-    // **本題**: 覆えていないので `'exact'` とは名乗らない。
     expect(dropped).toMatchObject({ countKind: "unknown" });
   });
 
   it("⚠ 鳴ってはいけない側: 単位が候補を網羅していれば 'exact' のまま", async () => {
-    // 対向関係を持たない普通の候補だけ。単位は1候補1つずつになり、必ず網羅する。
     const { runtime, stores } = buildRuntime();
     await createEmbeddedMemory(stores, [1, 0], { digest: "A".repeat(30) });
     await createEmbeddedMemory(stores, [0.9, 0.1], { digest: "B".repeat(30) });
@@ -915,39 +718,16 @@ describe("recall() — budget_dropped の countKind は単位の網羅性から�
 });
 
 describe("recall() — omitted.kind = 'score_not_comparable'（ADR 0044）", () => {
-  // 段2の閾値比較がどちらにも決まらなかった候補が、`omitted` に出ること。
-  //
-  // **⚠ NaN を作る経路の選び方**: ゼロベクトル（`similarity = NaN`）は本命の経路である。
-  // ⚠ **2026-09-13 訂正**: ここには以前「`FakeVectorStore` はゼロベクトルに 1 を返すので
-  // ここでは作れない」と書いてあったが、**それは古い。**`runtime-fakes.ts` の
-  // `cosineDistance` は ADR 0040 に追随して **`NaN` を返す**（下の
-  // 「⭐ ゼロベクトルの記憶が混ざると score_not_comparable が出る」の歯が、
-  // まさにその経路で NaN を作っている）。
-  // ここでは `halfLifeHours = 0` かつ経過時間ちょうど 0 を使う——
-  // `0.5 ** (0 / 0)` が `NaN` になる（実測: +1ms なら 0、−1ms なら +Infinity）。
-  // この歯の時計は `NOW` に固定してあり、`recordedAt` も `NOW` なので経過時間は厳密に 0。
-  //
-  // ⚠ 2026-09（ADR 0153・Issue #196）追記: `halfLifeHours: 0` は `defaultDecayStrategy.floorAt`
-  // の `hours = 0 * log2(...)  = 0` により `decayFloorAt === recordedAt === NOW` になる——
-  // 忘却ゲートの境界（狭義の `>`）にちょうど乗り、**既定では段1にすら候補として現れなくなる**
-  // （score_not_comparable に届く前に、忘却ゲートが「decayed」として先に落とす）。
-  // これはこの describe が検査したい対象（段2の NaN 三分割）とは別の関心事なので、
-  // `includeFullyDecayed: true` でゲートを明示的に無効化し、以前と同じ経路（段2まで届かせる）
-  // を保つ。
+  // NaN を作る経路は2通りある。ここでは `halfLifeHours = 0` かつ経過時間ちょうど 0（`0.5 ** (0 / 0)` が NaN）を使う。`halfLifeHours: 0` は `decayFloorAt === recordedAt === NOW` になり、既定では忘却ゲートが先に落とすので、`includeFullyDecayed: true` でゲートを無効化して段2まで届かせる。
 
   it("比較が決まらない候補は score_not_comparable に出る（件数と countKind つき）", async () => {
     const { runtime, stores } = buildRuntime();
-    // ⚠ 件数を 1 対 2 と違える。同数だと取り違えが観測できない。
+    // 件数を 1 対 2 と違える: 同数だと取り違えが観測できない。
     await createEmbeddedMemory(stores, [1, 0], { digest: "壊れた", halfLifeHours: 0 });
     await createEmbeddedMemory(stores, [1, 0], { digest: "正常1" });
     await createEmbeddedMemory(stores, [0.9, 0.1], { digest: "正常2" });
 
-    // association: null — 連想枠は既定 on（ADR 0337）だが、この歯は段2の
-    // score_not_comparable（NaN 三分割）だけを検査する。「壊れた」記憶は段2で除外
-    // されても、アンカー（正常1/正常2）との生のコサイン類似度は高いままなので、
-    // 連想枠の対象になりうる（連想の候補選定は score_not_comparable を経由しない
-    // ——引き受けた負債として ADR 0337 に記録した既知のギャップ）。この歯の対象外の
-    // 効果を持ち込まないよう明示的に止める。
+    // association: null: 連想の候補選定は score_not_comparable を経由しないので、この歯の対象外の効果を持ち込まないよう止める。
     const result = await runtime.recall(ctx, {
       vector: [1, 0],
       limit: 10,
@@ -967,17 +747,11 @@ describe("recall() — omitted.kind = 'score_not_comparable'（ADR 0044）", () 
   });
 
   it("🔴 三分割は網羅である: scored = passed + below_threshold + score_not_comparable", async () => {
-    // これが本 PR の不変条件である。**直す前は偽だったので書けなかった。**
     const { runtime, stores } = buildRuntime();
     await createEmbeddedMemory(stores, [1, 0], { digest: "壊れた", halfLifeHours: 0 });
     await createEmbeddedMemory(stores, [1, 0], { digest: "正常" });
 
-    // includeFullyDecayed: true の理由は上の describe 冒頭コメント（ADR 0153）を参照。
-    // association: null の理由: 連想枠（既定 on、ADR 0337）は、段2で score_not_comparable に
-    // 数えた「壊れた」記憶を拾い直して返しうる。そのとき ADR 0203「決めたこと」1 により
-    // score_not_comparable からは取り下げられるので、omitted の件数は段2の三分割と一致しなく
-    // なる（recall-score-not-comparable-promotion.test.ts）。この歯が測るのは段2の三分割そのもの
-    // なので、後の段が何も拾い直さない形で測る。
+    // includeFullyDecayed: true の理由は上の describe 冒頭を参照。association: null は、連想が「壊れた」記憶を拾い直すと score_not_comparable から取り下げられ、段2の三分割と件数が一致しなくなるため。
     const result = await runtime.recall(ctx, {
       vector: [1, 0],
       limit: 10,
@@ -997,25 +771,14 @@ describe("recall() — omitted.kind = 'score_not_comparable'（ADR 0044）", () 
   });
 
   it("⭐ ゼロベクトルの記憶が混ざると score_not_comparable が出る（ADR 0040 と繋がる端）", async () => {
-    // **これが端から端まで繋がる唯一の場所である。**
-    //
-    // [ADR 0040](../../../../docs/decisions/0040-zero-vector-never-returned.md) は
-    // 「ゼロベクトルが絡む候補は recall() の結果に出ない」を契約にし、
-    // `FakeVectorStore` もゼロベクトルに `NaN` を返すようになった（ADR 0042 の PR で追随）。
-    // **⟹ Fake が NaN を作り、本 PR の三分割がそれを omitted に出す。**
-    // その組み合わせをここで一度だけ通しで測る。
-    //
-    // ⚠ 上の歯が `halfLifeHours = 0` で NaN を作っているのは、
-    // **本物の pgvector と同じ経路ではないから**である（Fake が NaN を返すようになる前に書いた）。
-    // どちらも残す——**NaN の作られ方が2通りあることを、歯の側でも示しておく。**
+    // Fake がゼロベクトルに NaN を返す、本物の pgvector と同じ経路。上の歯の `halfLifeHours = 0` とは別の NaN の作られ方で、どちらも残す。
     const { runtime, stores } = buildRuntime();
     // ⚠ 件数を 1 対 2 と違える。
     await createEmbeddedMemory(stores, [0, 0], { digest: "ゼロベクトル" });
     await createEmbeddedMemory(stores, [1, 0], { digest: "正常1" });
     await createEmbeddedMemory(stores, [0.9, 0.1], { digest: "正常2" });
 
-    // ⚠ scoreThreshold: 0 で測る。既定の 0.1 では、Fake が 1 を返していた頃でも
-    // 「返らない」ところまでは同じだったので差が観測できない。
+    // scoreThreshold: 0 で測る: 既定の 0.1 では差が観測できない。
     const result = await runtime.recall(ctx, { vector: [1, 0], limit: 10, scoreThreshold: 0 });
     const digests = result.memories.map((m) => m.digest);
     expect(digests).toContain("正常1");
@@ -1047,21 +810,11 @@ describe("recall() — omitted.kind = 'score_not_comparable'（ADR 0044）", () 
 });
 
 describe("recall() — 次元の違うクエリベクトルは比較不能として扱う（Issue #867 / 案B）", () => {
-  // 【実測 Issue #867、pgvector 0.8.2 / PostgreSQL 17.9、3次元の空間、保存 `[1,0,0]`】
-  // 直す前は、`FakeVectorStore.cosineDistance`（`runtime-fakes.ts`）が足りない側を `0` で
-  // zero-pad して計算を続けていたため、`[1,2]`（短い）・`[1,2,3,4]`（長い）のどちらも
-  // 「普通のヒット」として `memories` に出て `omitted` は空のままだった——Postgres は
-  // 同じ入力で pgvector の「different vector dimensions」の未捕捉 `DrizzleQueryError` に
-  // なっており、adapter 間で挙動が割れていた。
-  //
-  // 直した後は、長さの不一致を「比較不能」として扱う（案B）——`FakeVectorStore` は
-  // 長さが違う2本に `NaN` を返し、段2の三分割（ADR 0044）がそれを
-  // `omitted.score_not_comparable` に数える。`memories` には出ない。
+  // 長さの不一致は「比較不能」として扱う: `FakeVectorStore` は長さが違う2本に NaN を返し、段2の三分割が `omitted.score_not_comparable` に数える（Postgres は pgvector のエラーになるため、adapter 間で挙動を揃える）。
 
   it("短いクエリ（[1,2]）は score_not_comparable に数えられ、memories は空", async () => {
     const { runtime, stores } = buildRuntime();
-    // Issue #867 本文の保存データと同じ長さ3のベクトル。空間の宣言（dimensions: 2）とは
-    // 別に、保存側と問い合わせ側の「長さの不一致」そのものを再現する。
+    // 空間の宣言（dimensions: 2）とは別に、保存側と問い合わせ側の長さの不一致そのものを再現する。
     await createEmbeddedMemory(stores, [1, 0, 0], { digest: "保存データ" });
 
     const result = await runtime.recall(ctx, { vector: [1, 2], limit: 10, scoreThreshold: 0 });
@@ -1101,14 +854,7 @@ describe("recall() — 次元の違うクエリベクトルは比較不能とし
 });
 
 describe("recall() — provenanceKind（roadmap.md §5.5 のオーナー回答の条件）", () => {
-  // オーナーの回答は条件付きだった——「既定の recall に含める。**ただし provenance.kind で
-  // 区別して返す**」。前半（既定で含める）は元から満たされていたが、後半は
-  // `RecalledMemory` が provenance を一切持たないため満たされていなかった。
-  //
-  // ⚠ ここでの fixture は **kind をすべて違える**。同じ kind を並べると、
-  // 「その Memory の kind」ではなく「どれか1つの kind」を全件に配ってしまう実装を
-  // この検査が通してしまう。newMemory() の既定は 'imported' なので、
-  // 'stated' / 'inferred' はどちらも既定と異なる。
+  // fixture は kind をすべて違える: 同じ kind を並べると、その Memory の kind ではなくどれか1つの kind を全件に配る実装を通してしまう。
 
   it("ANN 経由の候補は、その Memory 自身の provenance.kind を名乗る（候補ごとに違う値になる）", async () => {
     const { runtime, stores } = buildRuntime();
@@ -1172,9 +918,6 @@ describe("recall() — provenanceKind（roadmap.md §5.5 のオーナー回答�
   });
 
   it("usage は provenanceKind を数に入れない（測るのは digest と目次帯だけ）", async () => {
-    // 北極星の物差しは「毎回プロンプトへ積む量」である。provenanceKind は
-    // score/retrievedVia/companionOf と同じ**付加情報**であり、digest tier には入らない。
-    // ⟹ 欄が1つ増えても usage.chars は動かない、という不変条件をここで押さえる。
     const { runtime, stores } = buildRuntime();
     await createEmbeddedMemory(stores, [1, 0], {
       digest: "digest-1",
@@ -1191,9 +934,7 @@ describe("recall() — provenanceKind（roadmap.md §5.5 のオーナー回答�
 });
 
 describe("recall() — speaker/subjectId（Issue #579 案D、ADR 0289）", () => {
-  // 常に値か null を入れる——キー自体が無い/undefined になる経路が無いことを
-  // Object.hasOwn と not.toBeUndefined() で固定する（toEqual は undefined のキーと
-  // 無いキーを同じに扱うので使わない）。
+  // 常に値か null を入れる: キー自体が無い/undefined になる経路が無いことを `Object.hasOwn` と `not.toBeUndefined()` で固定する（`toEqual` は undefined のキーと無いキーを同じに扱う）。
 
   it("stated かつ speaker が在れば、その値をそのまま名乗る（ANN 経由）", async () => {
     const { runtime, stores } = buildRuntime();
@@ -1265,10 +1006,7 @@ describe("recall() — speaker/subjectId（Issue #579 案D、ADR 0289）", () =>
   });
 
   it("kind !== 'stated' の provenance がたまたま speaker という名のプロパティを持っていても無視する（kind を見ずに provenance.speaker を読む実装を拒む）", async () => {
-    // ⚠ StatedProvenance 以外は今日 speaker という名の欄を持たない——それだけでは
-    // 「kind を見ずに provenance から speaker を読む」実装は検出できない（挙動が同じに
-    // 見えてしまう）。将来どこかの provenance 枝が偶然 speaker という名を持ったときにも
-    // 正しく null を返すことを、型を迂回して構築した fixture で先取りして固定する。
+    // 将来どこかの provenance 枝が偶然 speaker という名を持っても null を返すことを、型を迂回して構築した fixture で先取りして固定する（今日は StatedProvenance 以外は speaker を持たず、kind を見ずに読む実装を検出できない）。
     const { runtime, stores } = buildRuntime();
     const leaked = await createEmbeddedMemory(stores, [1, 0], {
       digest: "imported だが speaker という名の余計なプロパティを持つ",
@@ -1299,15 +1037,9 @@ describe("recall() — speaker/subjectId（Issue #579 案D、ADR 0289）", () =>
     const undefinedSubject = await createEmbeddedMemory(stores, [0.98, 0.02], {
       digest: "subject undefined",
     });
-    // ⚠ `FakeMemoryStore.createMemory` 自身が `input.subjectId ?? null` で正規化するため
-    // （`runtime-fakes.ts`）、`{ subjectId: undefined }` を渡すだけでは
-    // `recall-runtime.ts` 側の `?? null` 防御を通らない（保存済みの Memory は既に `null`）。
-    // store の中の行そのもの（`liveRowForTest`）を直接書き換えて、Memory.subjectId が本当に `undefined` の
-    // 状態を作る。⚠ `createMemory` の返り値を書き換えても store には届かない（ADR 0562 で返り値は写しになった。
-    // 以前の「返り値を書き換える」手口は届かないまま緑になっていた——ADR 0578）。
+    // `FakeMemoryStore.createMemory` は subjectId を null に正規化するので、渡すだけでは `recall-runtime.ts` の `?? null` 防御を通らない。store の行そのもの（`liveRowForTest`）を書き換える（`createMemory` の返り値は写しで、書き換えても届かない）。
     stores.memoryStore.liveRowForTest(ctx, undefinedSubject.id)!.subjectId = undefined;
-    // 前提の明示（ADR 0588）: Fake が `get` で undefined を null に揃えていると、下の recall は
-    // `recall-runtime.ts` の `?? null` を通らずに緑になる。読み直した Memory が本当に undefined であることを縛る。
+    // 前提の明示: Fake が `get` で undefined を null に揃えていないこと。
     expect((await stores.memoryStore.get(ctx, undefinedSubject.id))!.subjectId).toBeUndefined();
 
     const result = await runtime.recall(ctx, { vector: [1, 0], limit: 10 });
@@ -1377,9 +1109,6 @@ describe("recall() — speaker/subjectId（Issue #579 案D、ADR 0289）", () =>
   });
 
   it("usage.chars は speaker/subjectId を数に入れない（ADR 0035 §2 の実測を踏襲）", async () => {
-    // speaker/subjectId は score/retrievedVia/companionOf と同じ**付加情報**であり、
-    // digest tier には入らない。⟹ 欄を2つ増やしても usage.chars は動かない、
-    // という不変条件をここで押さえる（プロンプトへ積む量は北極星の物差し）。
     const { runtime, stores } = buildRuntime();
     await createEmbeddedMemory(stores, [1, 0], {
       digest: "digest-1",
@@ -1402,9 +1131,7 @@ describe("recall() — speaker/subjectId（Issue #579 案D、ADR 0289）", () =>
 });
 
 describe("recall() — recordedAt/occurredAt（Issue #691 の子、Issue #702、ADR 0298）", () => {
-  // 常に値か null を入れる——キー自体が無い/undefined になる経路が無いことを
-  // Object.hasOwn と not.toBeUndefined() で固定する（ADR 0289 の speaker/subjectId と
-  // 同じ規律。toEqual は undefined のキーと無いキーを同じに扱うので使わない）。
+  // 常に値か null を入れる: キー自体が無い/undefined になる経路が無いことを `Object.hasOwn` と `not.toBeUndefined()` で固定する（`toEqual` は undefined のキーと無いキーを同じに扱う）。
 
   it("recordedAt は Memory.recordedAt をそのまま名乗る（Memory 側は必須なので常に値）", async () => {
     const { runtime, stores } = buildRuntime();
@@ -1452,13 +1179,9 @@ describe("recall() — recordedAt/occurredAt（Issue #691 の子、Issue #702、
   it("Memory.occurredAt が undefined でも null に揃える（subjectId と同じ防御）", async () => {
     const { runtime, stores } = buildRuntime();
     const memory = await createEmbeddedMemory(stores, [1, 0], { digest: "occurredAt undefined" });
-    // ⚠ `FakeMemoryStore` 自身が `occurredAt` を `?? null` で正規化するため（`subjectId` と同じ）、渡すだけでは
-    // `recall-runtime.ts` 側の防御を通らない。直接書き換えて Memory.occurredAt を本当に
-    // `undefined` にする。store の中の行そのもの（`liveRowForTest`）を書き換える——`createMemory` の
-    // 返り値は写しなので、書き換えても store には届かない（ADR 0562・0578）。ADR 0289 の subjectId
-    // undefined テストと同じ手口。
+    // `occurredAt` も同じ手口: `liveRowForTest` で行そのものを書き換えて本当に undefined にする。
     stores.memoryStore.liveRowForTest(ctx, memory.id)!.occurredAt = undefined;
-    // 前提の明示（ADR 0588）: 上の subjectId の歯と同じ。Fake が undefined を null に揃えていないこと。
+    // 前提の明示: Fake が undefined を null に揃えていないこと。
     expect((await stores.memoryStore.get(ctx, memory.id))!.occurredAt).toBeUndefined();
 
     const result = await runtime.recall(ctx, { vector: [1, 0] });
@@ -1552,9 +1275,7 @@ describe("recall() — recordedAt/occurredAt（Issue #691 の子、Issue #702、
 
 describe("recall() — 段3: 矛盾の解決と必須の同伴取得（docs/recall.md §8）", () => {
   async function setupContestedPair(stores: ReturnType<typeof createFakeRuntimeStores>) {
-    // b を先に作り、a から b を指す(一対一の対向関係。docs/memory-model.md §5)。
-    // このテストが必要とするのは a.contestedWithId -> b の一方向だけ
-    // (段3の実装は「候補として見つかった側」から対向を辿るため)。
+    // a から b を指す一方向だけでよい（段3の実装は候補として見つかった側から対向を辿る）。
     const b = await stores.memoryStore.createMemory(
       ctx,
       newMemory({ status: "contested", digest: "B".repeat(20) }),
@@ -1584,19 +1305,13 @@ describe("recall() — 段3: 矛盾の解決と必須の同伴取得（docs/reca
   it("同伴取得された Memory は提示順で必ず隣接する", async () => {
     const { runtime, stores } = buildRuntime();
     const { a, b } = await setupContestedPair(stores);
-    // 無関係な候補をもう1件混ぜて、隣接性が並び替えで崩れないことを確認する。
     await createEmbeddedMemory(stores, [0.9, 0.1], { digest: "C" });
 
     const result = await runtime.recall(ctx, { vector: [1, 0], limit: 5 });
     const ids = result.memories.map((m) => m.memoryId);
     const indexA = ids.indexOf(a.id);
     const indexB = ids.indexOf(b.id);
-    // ⚠ Issue #293: `indexOf` は見つからないとき `-1` を返すため、片方だけが結果から
-    // 完全に消えた世界でも `Math.abs(indexA - indexB) === 1` が偶然成立しうる
-    // （例: a だけ残り b が消えると `Math.abs(0 - (-1)) === 1`）。この歯には
-    // （mark-contested.test.ts と違い）事前の `toContain` チェックも無いため、
-    // 隣接性の assert 単独が「両方本当に返ってきたか」の唯一の砦になっている。
-    // ⟹ 両方が実際に結果に含まれていること（`index >= 0`）を先に assert する。
+    // `indexOf` は見つからないとき -1 を返し、片方だけ消えても `Math.abs(indexA - indexB) === 1` が偶然成立しうるので、両方が結果に含まれること（index >= 0）を先に assert する。
     expect(indexA).toBeGreaterThanOrEqual(0);
     expect(indexB).toBeGreaterThanOrEqual(0);
     expect(Math.abs(indexA - indexB)).toBe(1);
@@ -1632,14 +1347,7 @@ describe("recall() — 段3: 矛盾の解決と必須の同伴取得（docs/reca
 });
 
 describe("recall() — 段3: contestedWith（互いに contested な記憶が、同伴取得ではなく両方とも自然に候補に入った場合の印、Issue #691 続き）", () => {
-  /**
-   * `runtime.markContested` で相互に `contestedWithId` を持つ対を作り、**両方**を
-   * クエリベクトルに近い位置へ置く——段3のユニット組み立て（`recall-runtime.ts` の
-   * 「両側とも独立に withinLimit に含まれていたケース」、`else if (companion)` 分岐）を
-   * 通し、mandatory companion 経路（`retrievedVia: "mandatory_companion"`）を通さない。
-   * `setupContestedPair`（上）との違いは、対向側 `b` も embedding を持ち、スコアだけで
-   * 候補に入る点——`companionOf` が付く前提そのものを崩す fixture である。
-   */
+  /** 対向側 b も embedding を持ち、スコアだけで候補に入る fixture。mandatory companion 経路を通さず、`companionOf` が付く前提を崩す。 */
   async function setupNaturallyPairedContestedPair(
     runtimeAndStores: ReturnType<typeof buildRuntime>,
   ) {
@@ -1668,14 +1376,12 @@ describe("recall() — 段3: contestedWith（互いに contested な記憶が、
     const returnedA = result.memories.find((m) => m.memoryId === a.id)!;
     const returnedB = result.memories.find((m) => m.memoryId === b.id)!;
 
-    // 前提の確認: 段3の mandatory companion 経路を通していない
-    // （通っていたら、この歯は既存の companionOf の歯と区別が付かない）。
+    // 前提の確認: 通っていたら既存の companionOf の歯と区別が付かない。
     expect(returnedA.retrievedVia).not.toBe("mandatory_companion");
     expect(returnedB.retrievedVia).not.toBe("mandatory_companion");
     expect(returnedA.companionOf).toBeUndefined();
     expect(returnedB.companionOf).toBeUndefined();
 
-    // 本体: companionOf が付かない代わりに、両側に contestedWith が付く。
     expect(returnedA.contestedWith).toBe(b.id);
     expect(returnedB.contestedWith).toBe(a.id);
   });
@@ -1692,10 +1398,8 @@ describe("recall() — 段3: contestedWith（互いに contested な記憶が、
     const returnedA = result.memories.find((m) => m.memoryId === a.id)!;
     const returnedB = result.memories.find((m) => m.memoryId === b.id)!;
 
-    // 前提: b は同伴取得で来ている。
     expect(returnedB.retrievedVia).toBe("mandatory_companion");
     expect(returnedB.companionOf).toBe(a.id);
-    // 本体: 同伴取得で来た側にも、そちらを取った側にも contestedWith が付く。
     expect(returnedB.contestedWith).toBe(a.id);
     expect(returnedA.contestedWith).toBe(b.id);
   });
@@ -1711,13 +1415,7 @@ describe("recall() — 段3: contestedWith（互いに contested な記憶が、
   });
 
   it("🔴 status が active のまま contestedWithId だけが（不整合に）設定されている記憶には contestedWith が付かない（status 検査そのものの歯）", async () => {
-    // `Runtime` の公開口（markContested/resolveContested）はこの組み合わせを作らない
-    // ——CAS が status と contestedWithId を一緒に動かすため。ここでは
-    // `MemoryStore` を直接叩き、「status='active' なのに contestedWithId が生き残る」
-    // という不整合な状態（ADR 0046/0087 が扱う一対一の破れの隣接ケース）を意図的に作る。
-    // 段3のユニット組み立てはこのケースでも `companionOf` 抜きで2件をペアにするが
-    // （unit 組み立て自体は候補の status を見ない）、`contestedWith` は
-    // `member.memory.status === "contested"` を見るので、a には付かないはずである。
+    // Runtime の公開口は CAS で status と contestedWithId を一緒に動かすので、この組み合わせ（active なのに contestedWithId が生き残る）を作れない。MemoryStore を直接叩く。`contestedWith` は `member.memory.status === "contested"` を見るので、a には付かない。
     const { runtime, stores } = buildRuntime();
     const b = await createEmbeddedMemory(stores, [0.99, 0.01], { digest: "後から見ると無関係" });
     const a = await createEmbeddedMemory(stores, [1, 0], {
@@ -1733,35 +1431,16 @@ describe("recall() — 段3: contestedWith（互いに contested な記憶が、
   });
 
   it("🔴→✅ 2026-09-27 更新（Issue #959）: 連想枠経由の contested は、対向が取れなければ単独では返らず Unit ごと落ちる", async () => {
-    // このテストはもともと「連想枠経由で単独候補になり、対向は recall にそもそも
-    // 掛からない場合は contestedWith が付かない」という、ADR 0335 が観測した
-    // “穴” をそのまま固定していた——`contestedAlone` が対向なしの単独で
-    // `result.memories` に返ることを「正しい」前提として assert していた。
-    //
-    // Issue #959 はこの穴を、原則1（`docs/architecture.md` §0）・`MemoryStore` の契約
-    // （`status: 'contested'` を単独で返してはならない）と食い違うものとして扱い、
-    // 案 (B) で塞いだ——段3.5（連想枠）が選んだ contested にも、段3と同じ必須の
-    // 同伴取得規則をかける。対向（`phantomPartner`）は forgotten で取得できないため、
-    // 段3の「forget した対向は companion として使わない」（ADR 0087 決定6）と同じ
-    // 判断で、`contestedAlone` は Unit ごと落ちるようになった——単独では二度と返らない。
-    // 歯の本体は `recall-association-contested-companion.test.ts` に集約してあり、
-    // ここでは「このファイルの既存の歯が新しい挙動と食い違わない」ことだけを保つ。
+    // 対向（phantomPartner）は forgotten なので段3.5 の必須同伴取得で取れず、contestedAlone は Unit ごと落ちる（単独では返らない）。歯の本体は `recall-association-contested-companion.test.ts` に在る。
     const { runtime, stores } = buildRuntime();
-    // 対向側: 実在はするが forgotten（status が active/contested のどちらでもないため、
-    // 段1の候補生成にも段3の同伴取得にも一切掛からない——`FakeMemoryStore` の外部キー
-    // 相当の検査（ADR 0047）を満たすため、実在する id を使う）。
+    // 対向は外部キー相当の検査（ADR 0047）のため、forgotten でも実在する id を使う。
     const phantomPartner = await stores.memoryStore.createMemory(
       ctx,
       newMemory({ status: "forgotten", digest: "存在はするが二度と返らない" }),
     );
-    // Q = [1,0]。アンカーはクエリに強く当たる。
     const anchor = await createEmbeddedMemory(stores, [0.70710678, 0.70710678], {
       digest: "アンカー本文",
     });
-    // 連想で拾われる側はクエリには当たらない（below_threshold）が、アンカーとは近い。
-    // contested だが、contestedWithId が指す相手（phantomPartner）は forgotten なので
-    // 段3.5 の必須同伴取得（Issue #959、段3と同じ `fetchMandatoryCompanions`）を
-    // 一切通らず、最終的な結果集合に一度も現れない。
     const contestedAlone = await createEmbeddedMemory(stores, [0, 1], {
       digest: "対向が居ない矛盾",
       status: "contested",
@@ -1774,8 +1453,6 @@ describe("recall() — 段3: contestedWith（互いに contested な記憶が、
     });
 
     expect(result.memories.some((m) => m.memoryId === phantomPartner.id)).toBe(false);
-    // Issue #959 以前はここが `toBeDefined()`（単独で返る）だった——いまは Unit ごと
-    // 落ちるので `undefined`。
     const returned = result.memories.find((m) => m.memoryId === contestedAlone.id);
     expect(returned).toBeUndefined();
     expect(result.omitted.some((o) => o.kind === "unit_assembly_dropped" && o.count >= 1)).toBe(
@@ -1786,24 +1463,7 @@ describe("recall() — 段3: contestedWith（互いに contested な記憶が、
 });
 
 describe("recall() — 段3: contestedWith の条件(c)「相手が返却集合に居る」の歯（Issue #1786、ADR 0335 決定2）", () => {
-  /**
-   * 条件(a)(b) が真（`status === "contested"` かつ `contestedWithId` が truthy）で、条件(c)
-   * だけが偽になる入力を作る。**鎖** a→b→c（b の `contestedWithId` が a ではなく c を指す）である。
-   *
-   * - a は query に当たる。a の対向 b は段3の必須の同伴取得で引かれ、[a, b] の Unit になる。
-   * - b は自分の `contestedWithId`（c）を辿られない——`fetchMandatoryCompanions` は owner 側
-   *   （a）の `contestedWithId` だけを辿り、`contestedWithId` の相互参照は検査しない
-   *   （同関数の doc コメント。ADR 0136 と同じ設計）。
-   *
-   * ⟹ b は (a)(b) が真で、相手 c は返却集合に居ないので、`contestedWith` は付かない。
-   *
-   * `Runtime.markContested` は両側 active の CAS で相互参照を書くので、この鎖を作らない。
-   * 既存の歯（上の「active のまま contestedWithId だけが設定されている」）と同じく、
-   * `MemoryStore` を直接叩いて組む。
-   *
-   * ADR 0335 負債3は「budget により片方だけ落ちる状態は作れなかった」と書いていたが、
-   * 「相手が budget で落ちる」以外に、「相手がそもそも返却集合に入らない」経路がこの鎖で在る。
-   */
+  /** 条件(a)(b)が真で(c)だけが偽になる入力: 鎖 a→b→c。`fetchMandatoryCompanions` は owner 側（a）の `contestedWithId` だけを辿り相互参照を検査しないので、b は同伴で返るが c は返却集合に居ず、`contestedWith` は付かない。`Runtime.markContested` はこの鎖を作らないので MemoryStore を直接叩いて組む。 */
   it("🔴 鎖 a→b→c: b は (a)(b) が真でも、相手 c が返却集合に居なければ contestedWith が付かない（条件(c) そのものの歯）", async () => {
     const { runtime, stores } = buildRuntime();
     const c = await stores.memoryStore.createMemory(ctx, newMemory({ digest: "C" }));
@@ -1821,22 +1481,15 @@ describe("recall() — 段3: contestedWith の条件(c)「相手が返却集合�
     const returnedA = result.memories.find((m) => m.memoryId === a.id)!;
     const returnedB = result.memories.find((m) => m.memoryId === b.id)!;
 
-    // 前提: b は同伴取得で返り、c は返っていない。
     expect(returnedB.retrievedVia).toBe("mandatory_companion");
     expect(returnedB.companionOf).toBe(a.id);
     expect(result.memories.some((m) => m.memoryId === c.id)).toBe(false);
 
-    // a→b は返却集合に b が居るので付く。b→c は c が居ないので付かない。
     expect(returnedA.contestedWith).toBe(b.id);
     expect(returnedB.contestedWith).toBeUndefined();
   });
 
-  /**
-   * 上の鎖の c を、query に当たる（ただし a・b より低スコアの）別の Unit として候補に入れ、
-   * budget の切り詰めで c の Unit だけを落とす。c は切り詰め**前**の Unit 集合には居るが、
-   * **後**の返却集合には居ない——条件(c) が見るのは後のほう、という契約そのものの歯。
-   * 対照として、budget が c も収める場合は b に contestedWith=c が付く（鳴ってはいけない側）。
-   */
+  /** c を a・b より低スコアの別 Unit として入れ、budget で c の Unit だけを落とす: 条件(c) が見るのは切り詰め後の返却集合である。対照として budget が c も収めるなら b に contestedWith=c が付く。 */
   it("🔴 鎖 a→b→c で c が budget で落ちた Unit に居るとき、b に contestedWith は付かない。budget が足りれば付く", async () => {
     const { runtime, stores } = buildRuntime();
     const c = await createEmbeddedMemory(stores, [0.8, 0.6], { digest: "C" });
@@ -1850,7 +1503,6 @@ describe("recall() — 段3: contestedWith の条件(c)「相手が返却集合�
       digest: "A",
     });
 
-    // 対照（予算なし）: c も返る。b→c は返却集合の中に在るので付く。
     const unlimited = await runtime.recall(ctx, { vector: [1, 0], association: null });
     expect(unlimited.memories.map((m) => m.memoryId).sort()).toEqual([a.id, b.id, c.id].sort());
     expect(unlimited.memories.find((m) => m.memoryId === b.id)!.contestedWith).toBe(c.id);
@@ -1870,12 +1522,7 @@ describe("recall() — 段3: contestedWith の条件(c)「相手が返却集合�
 
 describe("recall() — 片側だけの contested は単独で出さない（Issue #243 / ADR 0136）", () => {
   it("🔴 contestedWithId が null の contested Memory は recall() に単独で出ない。unit_assembly_dropped に計上される", async () => {
-    // `Runtime.markContested`（Issue #197 / ADR 0134）はこの状態を作らない（両側
-    // `status='active'` の CAS を課すため）。しかし
-    // `docs/decisions/0046-contested-pair-invariant-tooth.md` が実測したとおり、
-    // `MemoryStore.updateStatus(id, "contested")` を `Runtime` を経由せず直接呼べば
-    // 今日も作れる——ここではその直接呼び出しを `createMemory` で模して、recall 側の
-    // 防御（ADR 0136）が効くことを確認する。
+    // `Runtime.markContested` はこの状態を作らない（両側 active の CAS）が、`MemoryStore.updateStatus` を直接呼べば作れる。それを `createMemory` で模して、recall 側の防御（ADR 0136）を確認する。
     const { runtime, stores } = buildRuntime();
     const lone = await createEmbeddedMemory(stores, [1, 0], {
       status: "contested",
@@ -1885,9 +1532,7 @@ describe("recall() — 片側だけの contested は単独で出さない（Issu
 
     const result = await runtime.recall(ctx, { vector: [1, 0] });
     const ids = result.memories.map((m) => m.memoryId);
-    // ⟹ 争われていない顔で単独に出すくらいなら、何も出さない（docs/recall.md §8）。
     expect(ids).not.toContain(lone.id);
-    // 黙って消えたのではなく、既存の unit_assembly_dropped（ADR 0043）に計上される。
     expect(result.omitted).toContainEqual({
       kind: "unit_assembly_dropped",
       count: 1,
@@ -1896,7 +1541,6 @@ describe("recall() — 片側だけの contested は単独で出さない（Issu
   });
 
   it("⚠ 鳴ってはいけない側: 正しく相互参照が張られた contested ペアは両方とも出る", async () => {
-    // 上の歯が「contested を丸ごと消す」への過剰反応でないことを確かめる対照実験。
     const { runtime, stores } = buildRuntime();
     const b = await stores.memoryStore.createMemory(
       ctx,
@@ -1917,22 +1561,7 @@ describe("recall() — 片側だけの contested は単独で出さない（Issu
 });
 
 describe("recall() — 段4: トークン予算による切り詰め（Issue #108。maxMemoryChars 以外の経路に歯が無かった）", () => {
-  /**
-   * `maxMemoryTokens` / `promptBudgetTokens` を実際に行使する経路
-   * （`recall-runtime.ts` の `effectiveTokenBudget` / `unitTokens` / 段4）には、
-   * このテストを書く前はリポジトリ全体で歯が0本だった——既存の予算の歯は全部
-   * `maxMemoryChars` を使っている。Issue #108（既定 `TokenCounter` が日本語を
-   * 過小評価し、`maxMemoryTokens` の判定が静かに緩む）が壊れると言っている当の経路に
-   * 歯が無かった、という穴をここで塞ぐ。
-   *
-   * 3件の日本語 digest を用意し、ベクトルの向きで優先順位（rankScore の大小）を
-   * 明示的に制御する——`units.sort((a,b) => b.rankScore - a.rankScore)` が
-   * どちらを先に残すかは、テストが安定して同じ結果を出すために自分で決めておく必要がある。
-   * digest はどれも "あ" x10（CJK のみ）= `heuristicTokenCounter` で 9 トークン
-   * （ceil(10 * 18 / 20) = ceil(9) = 9）。3件合計 27 トークンは
-   * `maxMemoryTokens: 20` に収まらないので、スコアの高い2件（18トークン）だけが残り、
-   * 3件目（9トークン）が `budget_dropped` に回るはずである。
-   */
+  /** 3件の日本語 digest をベクトルの向きで優先順位を制御する（`units.sort` の rankScore が決める）。digest は "あ" x10 = 9 トークン、3件 27 トークンは `maxMemoryTokens: 20` に収まらず、スコアの高い2件が残る。 */
   it("maxMemoryTokens は既定カウンタで数えた digest 合計を上限内に切り詰める", async () => {
     const { runtime, stores } = buildRuntime();
     const digest = "あ".repeat(10);
@@ -1959,7 +1588,6 @@ describe("recall() — 段4: トークン予算による切り詰め（Issue #10
     expect(returnedTokenSum).toBeLessThanOrEqual(20);
     expect(returnedTokenSum).toBe(18);
 
-    // 予算に入りきらなかった分は budget_dropped として出る（黙って消えない）。
     expect(result.omitted).toContainEqual({
       kind: "budget_dropped",
       count: 1,
@@ -1967,14 +1595,7 @@ describe("recall() — 段4: トークン予算による切り詰め（Issue #10
     });
   });
 
-  /**
-   * `effectiveTokenBudget` は `maxMemoryTokens` と `promptBudgetTokens` のうち
-   * **小さいほう**を採る（`recall-runtime.ts` のコメント「最も厳しい(小さい)ものを1本にまとめる」）。
-   * `maxMemoryTokens` だけなら2件とも残る大きさ（100）にしておき、
-   * `promptBudgetTokens: 10` を同時に渡す——1件なら9トークンで収まるが2件では18トークンに
-   * なり10を超えるので、`promptBudgetTokens` のほうが効いて1件しか残らないはずである。
-   * これが緩いほう（100）を採っていたら2件とも残ってしまうので、区別できる歯になっている。
-   */
+  /** `effectiveTokenBudget` は小さいほうを採る。`maxMemoryTokens` は2件残る大きさ（100）にし、`promptBudgetTokens: 10` を同時に渡す。緩いほうを採っていたら2件残ってしまうので区別できる。 */
   it("promptBudgetTokens は maxMemoryTokens より小さいほうが優先される", async () => {
     const { runtime, stores } = buildRuntime();
     const digest = "あ".repeat(10); // 9トークン/件
@@ -1999,22 +1620,7 @@ describe("recall() — 段4: トークン予算による切り詰め（Issue #10
 });
 
 describe("recall() — budget_truncation の detail.droppedFitsWhenConcatenated（Issue #829 / ADR 0097 追記）", () => {
-  /**
-   * Issue #829 の再現: 21文字（非CJK）の digest を4件、`maxMemoryTokens: 23` で渡す。
-   *
-   * - 段4の `fits`（強制側）: digest ごとに `heuristicTokenCounter.count()` を呼び ceil する
-   *   ——`ceil(21*5/20) = ceil(5.25) = 6` トークン/件、4件で `6*4 = 24 > 23`。
-   *   ⟹ 1件落ちて3件残る（`budget_dropped: 1`）。
-   * - 実際に積む量（連結して1回だけ数える。`usage.share` の分子と同じ数え方）:
-   *   4件を `"\n"` で連結すると `21*4 + 3 = 87` 文字、`ceil(87*5/20) = ceil(21.75) = 22`
-   *   トークン——`23` に収まる。
-   *
-   * ⟹ **4件とも予算内に収まるのに1件落ちる**。**ふるまい（落とす件数）はこの PR では
-   * 変えない**（ADR 0097 が「段4の強制を連結側へ寄せる」を明示的に却下しているため）。
-   * ここで検査するのは、その「予算に余りがあるのに落とした」ことが
-   * `explain.stages` の `budget_truncation` の `detail.droppedFitsWhenConcatenated` から
-   * 読めるようになったことだけである。
-   */
+  /** 21文字（非CJK）の digest を4件、`maxMemoryTokens: 23` で渡す。段4の強制側は digest ごとに ceil（6×4=24 > 23）で1件落とすが、連結して1回数えると 22 トークンで収まる。ふるまいは変えず（ADR 0097）、予算に余りがあるのに落としたことが `detail.droppedFitsWhenConcatenated` から読めることだけを検査する。 */
   const DIGEST_21_NON_CJK = "a".repeat(21);
 
   it("直す前は無かった欄: 4件とも収まるのに1件落ちるとき、detail.droppedFitsWhenConcatenated が true になる", async () => {
@@ -2034,7 +1640,6 @@ describe("recall() — budget_truncation の detail.droppedFitsWhenConcatenated�
       budget: { maxMemoryTokens: 23 },
     });
 
-    // ふるまいは変えない: 3件だけ残り、1件が budget_dropped になる。
     expect(result.memories).toHaveLength(3);
     expect(result.omitted).toContainEqual({
       kind: "budget_dropped",
@@ -2047,8 +1652,6 @@ describe("recall() — budget_truncation の detail.droppedFitsWhenConcatenated�
   });
 
   it("⚠ 鳴ってはいけない側: 連結しても本当に収まらないときは droppedFitsWhenConcatenated が false", async () => {
-    // 同じ4件・同じ digest だが、maxMemoryTokens を 20 に絞る——連結して測った量（22）も
-    // 予算を超えるので、今度は「本当に収まらない」側になるはずである。
     const { runtime, stores } = buildRuntime();
     for (let i = 0; i < 4; i += 1) {
       await createEmbeddedMemory(stores, [1, 0], { digest: DIGEST_21_NON_CJK });
@@ -2084,14 +1687,10 @@ describe("recall() — budget_truncation の detail.droppedFitsWhenConcatenated�
     expect(result.omitted.some((o) => o.kind === "budget_dropped")).toBe(false);
     const budgetTruncation = result.explain.stages.find((s) => s.stage === "budget_truncation");
     expect(budgetTruncation?.detail?.droppedFitsWhenConcatenated).toBeUndefined();
-    // 値が undefined なだけでなく、キー自体が無い。
     expect("droppedFitsWhenConcatenated" in (budgetTruncation?.detail ?? {})).toBe(false);
   });
 
-  /**
-   * 同じ4件（21文字×4。連結は "\n" 区切りで 87 文字・22 トークン、digest ごとの切り詰めは
-   * 6 トークン×件数）に、予算を変えて当てる。どれも1件落ちる（3件残る）。
-   */
+  /** 同じ4件（21文字×4）に予算を変えて当てる。どれも1件落ちる。 */
   async function recallWith(budget: { maxMemoryTokens?: number; maxMemoryChars?: number }) {
     const { runtime, stores } = buildRuntime();
     for (let i = 0; i < 4; i += 1) {
@@ -2173,7 +1772,6 @@ describe("recall() — digestBand（目次帯。docs/recall.md §5、本 PR）",
       shown: 0,
       eligible: 0,
       countKind: "exact",
-      // limitedBy は省略される（どの上限にも当たらなかった）。
     });
   });
 
@@ -2189,19 +1787,7 @@ describe("recall() — digestBand（目次帯。docs/recall.md §5、本 PR）",
     expect(result.index.digestBandCoverage?.limitedBy).toBe("entry_limit");
   });
 
-  /**
-   * 変異試験で見つかった穴を埋める歯（本 PR）。
-   *
-   * `shown <= eligible` は「帯に載せた件数が、載せる資格のあった件数を超えない」という
-   * 被覆の基本条件である。変異試験の時点では、この条件を破る変異（`eligible` を `shown` で
-   * 上書きする／store が `digestEligible` を実際より小さく申告する）を捕まえていたのが
-   * 上の `entry_limit` の歯の `eligible` の主張1行だけだった——**その1行が書き換われば
-   * 2つの変異が同時に素通りする。**条件そのものを主張する歯をここに独立して置く。
-   *
-   * `digestBandLimit` に巨大な値を渡すのは、**上限を緩めても資格件数を超えないこと**を
-   * 見るためである（`packDigestBand` の同名の歯は純関数の層で同じ条件を見ているが、
-   * store から段5までを通した経路ではここが唯一の歯になる）。
-   */
+  /** `digestBandLimit` に巨大な値を渡すのは、上限を緩めても資格件数を超えないことを store から段5までの経路で見るため（`packDigestBand` の同名の歯は純関数の層）。 */
   it("digestBandLimit に巨大な値を渡しても shown は eligible を超えない", async () => {
     const { runtime, stores } = buildRuntime();
     for (let i = 0; i < 5; i++) {
@@ -2214,20 +1800,10 @@ describe("recall() — digestBand（目次帯。docs/recall.md §5、本 PR）",
     expect(coverage!.eligible).toBe(5);
     expect(coverage!.shown).toBeLessThanOrEqual(coverage!.eligible);
     expect(coverage!.shown).toBe(5);
-    // 上限に当たっていないので limitedBy は付かない。
     expect(coverage!.limitedBy).toBeUndefined();
   });
 
-  /**
-   * 上と対になる歯（本 PR、変異試験で見つかった穴を埋めるもの）。
-   *
-   * 上の歯は「上限を緩めたとき `shown` が `eligible` を超えない」を見るが、そこでは
-   * 切り詰めが起きないため `eligible === shown` であり、**`eligible` を `shown` で
-   * 上書きしてしまう壊れ方は素通りする**（実際に変異で確かめた）。
-   * **切り詰めが起きている状態で `eligible` が `shown` より大きいこと**を、ここで独立に主張する。
-   * これが無いと「切ったのに、切っていない顔で報告する」が歯をすり抜ける——
-   * それは docs/recall.md §4 / ADR 0008 の「推定値を実測値の顔で出さない」の、この欄での破れである。
-   */
+  /** 上の歯は切り詰めが起きないので `eligible === shown` で、`eligible` を `shown` で上書きする壊れ方を通す。切り詰めが起きている状態で `eligible` が `shown` より大きいことを独立に主張する（推定値を実測値の顔で出さない、ADR 0008）。 */
   it("上限で切られたとき、eligible は shown より大きい（切ったことを隠さない）", async () => {
     const { runtime, stores } = buildRuntime();
     for (let i = 0; i < 5; i++) {
@@ -2290,8 +1866,6 @@ describe("recall() — usage（docs/recall.md §6: 計測と強制を混同し�
     await createEmbeddedMemory(stores, [1, 0]);
     const result = await runtime.recall(ctx, { vector: [1, 0], budget: { maxMemoryChars: 1000 } });
     expect(result.usage.share).toBeDefined();
-    // 分子は memories tier だけ = chars から目次帯を除いた分。
-    // （以前は chars 全体を分子にしていたため、目次帯のぶんだけ share が水増しされていた。）
     expect(result.usage.share).toBeCloseTo(
       (result.usage.chars - result.usage.indexChars) / 1000,
       10,
@@ -2299,50 +1873,25 @@ describe("recall() — usage（docs/recall.md §6: 計測と強制を混同し�
     expect(result.usage.indexChars).toBeGreaterThan(0);
   });
 
-  /**
-   * ⭐ 目次帯が budget の対象外であることと、share が割合として成立することの歯。
-   *
-   * 目次帯を budget の対象にしない理由は ADR 0008 の芯にある——「0件でも何が在るかは言える」
-   * という目次帯の唯一の存在理由が、呼び出し側の渡した数字ひとつで消えてはならない。
-   * その帰結として、**目次帯より小さい budget を渡しても目次帯は削られない**。
-   *
-   * このとき share の分子に目次帯を含めていると 1 を超える（実際に 248% が観測されていた）。
-   * 「予算の何割を使ったか」と「全体でいくらかかったか」は別の問いであり、
-   * 1つの数で両方に答えようとするとどちらかが嘘になる。
-   */
+  /** 目次帯は budget の対象外（ADR 0008: 0件でも何が在るかは言える）なので、目次帯より小さい budget でも削られない。share の分子に目次帯を含めると 1 を超える（「予算の何割を使ったか」と「全体でいくらかかったか」は別の問い）。 */
   it("目次帯より小さい budget でも、目次帯は削られず、share は 1 を超えない", async () => {
     const { runtime, stores } = buildRuntime();
     await createEmbeddedMemory(stores, [1, 0]);
     const result = await runtime.recall(ctx, { vector: [1, 0], budget: { maxMemoryChars: 1 } });
 
-    // 目次帯は予算の外なので、予算が 1 文字でも残っている。
     expect(result.usage.indexChars).toBeGreaterThan(1);
-    // 全量は予算を超える（目次帯のぶん）——これは仕様どおりであり、隠さない。
     expect(result.usage.chars).toBeGreaterThan(1);
-    // だが share は「予算の対象がどれだけ使ったか」なので 1 を超えない。
     expect(result.usage.share).toBeLessThanOrEqual(1);
   });
 });
 
-/**
- * `usage.budgetExceeded`（Issue #108「案3」、PR #114/ADR 0083 が意図的に切り出した残件）。
- *
- * 3状態を区別する: 予算が1次元も申告されていない ⟹ 欄が無い（undefined）。
- * 申告されていて超えていない ⟹ false。申告されていて超えた ⟹ true。
- * 存在条件は `usage.share` と同じ（`recall-runtime.ts` の `usageShareDenominator`）。
- *
- * **`share` からは導出しない**——強制側（段4の `fits`/`unitTokens`）は digest ごとに
- * `tokenCounter.count()` を呼ぶため `Math.ceil` が件数ぶん掛かるのに対し、`share` の分子は
- * 連結した1本に対して `ceil` を1回だけ行う。両者は加法的に一致しない
- * （このファイル内の「非CJK20字×2件」の歯が、その不一致を実測で示す）。
- */
+/** `share` からは導出しない: 強制側（段4）は digest ごとに ceil するが、`share` の分子は連結した1本に対して ceil を1回だけ行い、両者は加法的に一致しない。 */
 describe("recall() — usage.budgetExceeded（Issue #108「案3」）", () => {
   it("budget を渡さない場合は budgetExceeded が無い（欄そのものが存在しない）", async () => {
     const { runtime, stores } = buildRuntime();
     await createEmbeddedMemory(stores, [1, 0]);
     const result = await runtime.recall(ctx, { vector: [1, 0] });
     expect(result.usage.budgetExceeded).toBeUndefined();
-    // 存在条件が share と一致することの歯——`share` も無いはず。
     expect(result.usage.share).toBeUndefined();
   });
 
@@ -2364,32 +1913,18 @@ describe("recall() — usage.budgetExceeded（Issue #108「案3」）", () => {
     expect(result.usage.budgetExceeded).toBe(false);
   });
 
-  /**
-   * 🔴🔴 実際に true になる入力（ADR 0083 / PR #114 が挙げている再現をここで作る）。
-   *
-   * 非CJK 20文字の digest を2件（各 `heuristicTokenCounter` で5トークン）用意し、
-   * `maxMemoryTokens: 10` を渡す。まず前提の数値そのものを自分で確かめる
-   * （書き写さない）: 段4の強制（`fits`/`unitTokens`）は digest ごとに ceil してから
-   * 合算するので `5+5=10 <= 10` となり両方残るが、実際に返した量（連結した41字）を
-   * 測り直すと `ceil(41/4) = 11 > 10` で超えている。
-   *
-   * 🔑 **歯1（ADR 0097）: `share` が 1 を超えることと `budgetExceeded` が `true` であることを、
-   * 同じケースで両方測る。**「`budgetExceeded` を見るだけ」の歯だと、分子の数え方が
-   * 変わって `share <= 1` に収まるようになっても気づけない——`share` 自体の値も固定する。
-   */
+  /** 非CJK 20字の digest 2件（各5トークン）に `maxMemoryTokens: 10`: 段4は digest ごとに ceil して 5+5=10 で両方残すが、連結（41字）で測り直すと 11 > 10。`share` が 1 を超えることと `budgetExceeded` を同じケースで両方測る（`budgetExceeded` だけだと分子の数え方が変わっても気づけない）。 */
   it("非CJK20字×2件・maxMemoryTokens:10 ⟹ 強制側は両方残すが、連結して測り直すと超えている（share>1 かつ budgetExceeded=true）", async () => {
     const digestA = "01234567890123456789"; // 20 chars, 全て非CJK
     const digestB = "abcdefghijklmnopqrst"; // 20 chars, 全て非CJK
     expect(digestA).toHaveLength(20);
     expect(digestB).toHaveLength(20);
 
-    // 前提1: 1件あたりのトークン数（段4の `unitTokens` と同じ計算: digest ごとに count()）。
     expect(heuristicTokenCounter.count(digestA).tokens).toBe(5);
     expect(heuristicTokenCounter.count(digestB).tokens).toBe(5);
     expect(
       heuristicTokenCounter.count(digestA).tokens + heuristicTokenCounter.count(digestB).tokens,
     ).toBe(10);
-    // 前提2: 連結して測った場合（usage の `memoryTokens` と同じ計算）。
     expect(heuristicTokenCounter.count(`${digestA}\n${digestB}`).tokens).toBe(11);
 
     const { runtime, stores } = buildRuntime();
@@ -2401,31 +1936,16 @@ describe("recall() — usage.budgetExceeded（Issue #108「案3」）", () => {
       budget: { maxMemoryTokens: 10 },
     });
 
-    // 強制側は両方残す——budget_dropped は起きていない。この歯が「常に false を返す欄」
-    // ではないことの証明であり、budget_dropped が起きた入力からの true では意味が無い。
+    // 強制側は両方残す: budget_dropped が起きた入力からの true では意味が無い。
     expect(result.memories).toHaveLength(2);
     expect(result.omitted.some((o) => o.kind === "budget_dropped")).toBe(false);
 
-    // share = memoryTokens(11) / maxMemoryTokens(10) = 1.1 > 1。
     expect(result.usage.share).toBeCloseTo(1.1, 10);
     expect(result.usage.share).toBeGreaterThan(1);
     expect(result.usage.budgetExceeded).toBe(true);
   });
 
-  /**
-   * 🔑 T3（Issue #131、ADR 0098。⭐最重要）: ADR 0097 が記録した欠陥（`share` が 1 を
-   * 超えうる）を、出力検証が**隠さない**ことを確かめる。
-   *
-   * 上の歯（歯1）と**まったく同じ入力**（非CJK20字の digest 2件・`maxMemoryTokens: 10`）で、
-   * 出力検証（既定 `"report"`）を通した後も `usage.share` が `1.1` のまま・`budgetExceeded` が
-   * `true` のまま・かつ `outputValidation.ok === true` であることを測る。
-   *
-   * **`ok === true` が肝である**——`share > 1` は ADR 0097 により合法な値であり、
-   * `RecallResultSchema`（`RecallUsageSchema.share` は `.max(1)` を持たない）はこれを
-   * 弾かない。この歯が無いと、「`share > 1` を誤って不正と判定する」実装（`.max(1)` を
-   * 戻す変異など）が緑のまま入り込む——ADR 0097 が直したはずの欠陥を、出力検証が
-   * こっそり再導入することになる。
-   */
+  /** 上と同じ入力で、出力検証（既定 report）を通しても `share` が 1.1・`budgetExceeded` が true のまま・`ok === true` であること。`share > 1` は合法な値なので、`.max(1)` を戻す変異が緑のまま入り込むのを防ぐ。 */
   it("T3: ADR 0097 の share>1（非CJK20字の digest 2件・maxMemoryTokens:10）は出力検証でも弾かれない", async () => {
     const digestA = "01234567890123456789";
     const digestB = "abcdefghijklmnopqrst";
@@ -2441,26 +1961,14 @@ describe("recall() — usage.budgetExceeded（Issue #108「案3」）", () => {
 
     expect(result.usage.share).toBeCloseTo(1.1, 10);
     expect(result.usage.budgetExceeded).toBe(true);
-    // 出力検証は既定 "report" で走っている——値は丸められていない。
     expect(result.outputValidation).toEqual({ ok: true, issues: [] });
   });
 
-  /**
-   * ⭐ 歯2（ADR 0097。対照・偽陽性を潰すため）: 歯1 と**まったく同じ digest 2件**を使い、
-   * `maxMemoryTokens` だけを 11（＝連結して測った量そのもの）に変える。
-   *
-   * これは歯3（境界の実測）で見つけた境界そのもの——`maxMemoryTokens` を 10→11 に
-   * 1つ動かすだけで `share` が 1.1 → 1.0 に落ち、`budgetExceeded` が true → false に
-   * 反転する。この歯が無いと、歯1 は「`budgetExceeded` を常に `true` と主張しているだけ」
-   * でも緑になってしまう——同じ入力・同じ2件の digest で `false` になる経路を
-   * 実際に踏んでおくことで、歯1 の `true` が「本当に超えたときだけ true」であることを保証する。
-   */
+  /** 対照: `maxMemoryTokens` だけを 11（連結した量ちょうど）に変える。10→11 の1つの動きで true → false に反転する。これが無いと、歯1 は `budgetExceeded` を常に true と主張するだけでも緑になる。 */
   it("同じ2件の digest でも maxMemoryTokens:11（＝連結した量ちょうど）なら share は1、budgetExceeded は false（対照）", async () => {
     const digestA = "01234567890123456789";
     const digestB = "abcdefghijklmnopqrst";
 
-    // 前提: 連結して測った量（11）そのものを予算にする——強制側（unitTokens 合計10）は
-    // 当然 11 以内で両方残る。
     expect(heuristicTokenCounter.count(`${digestA}\n${digestB}`).tokens).toBe(11);
 
     const { runtime, stores } = buildRuntime();
@@ -2479,19 +1987,7 @@ describe("recall() — usage.budgetExceeded（Issue #108「案3」）", () => {
     expect(result.usage.budgetExceeded).toBe(false);
   });
 
-  /**
-   * 歯3（ADR 0097。境界の実測。オーナー名指し）: 歯1・歯2 と同じ2件の digest を固定し、
-   * `maxMemoryTokens` だけを 10 / 11 / 12 と動かして、`share` が 1 をまたぐ境界を
-   * 数字で固定する。
-   *
-   * - `maxMemoryTokens: 10` → `share = 11/10 = 1.1`（>1） → `budgetExceeded = true`
-   * - `maxMemoryTokens: 11` → `share = 11/11 = 1`（境界ちょうど） → `budgetExceeded = false`
-   * - `maxMemoryTokens: 12` → `share = 11/12 ≈ 0.9167`（<1） → `budgetExceeded = false`
-   *
-   * 期待値（1.1 / 1 / 11/12）は実装のコードを読んで書き写したものではなく、
-   * `heuristicTokenCounter` を直接呼んで独立に導いた値（前提の expect を参照）。
-   * ⟹ `share` の計算式そのものが変わらない限り、この3点で境界は必ずここに在る。
-   */
+  /** 境界の実測: `maxMemoryTokens` を 10 / 11 / 12 と動かし、`share` が 1 をまたぐ境界を固定する。期待値は `heuristicTokenCounter` を直接呼んで独立に導いた値で、実装を読み写していない。 */
   it.each([
     { maxMemoryTokens: 10, expectedShare: 1.1, expectedExceeded: true },
     { maxMemoryTokens: 11, expectedShare: 1, expectedExceeded: false },
@@ -2511,8 +2007,7 @@ describe("recall() — usage.budgetExceeded（Issue #108「案3」）", () => {
         budget: { maxMemoryTokens },
       });
 
-      // 強制側は3点すべてで両方残す（unitTokens 合計は常に10で、10/11/12すべて以内）。
-      // 境界を作っているのは分子（連結して測った11）の側であり、強制側の落ちではない。
+      // 境界を作っているのは分子（連結して測った11）の側で、強制側の落ちではない。
       expect(result.memories).toHaveLength(2);
 
       expect(result.usage.share).toBeCloseTo(expectedShare, 10);
@@ -2520,10 +2015,7 @@ describe("recall() — usage.budgetExceeded（Issue #108「案3」）", () => {
     },
   );
 
-  // `promptBudgetTokens` 単独でも同じ再現が起きることを確かめる（`effectiveTokenBudget` は
-  // `maxMemoryTokens` と `promptBudgetTokens` の最小値を1本にまとめて強制側へ渡すため、
-  // enforcement 側の挙動は同一である）。この歯が無いと、`promptTokensExceeded` の項を
-  // 判定から落とす変異が検出できない（他の歯はどれも `promptBudgetTokens` を使わない）。
+  // `promptBudgetTokens` 単独でも同じ再現が起きる: 他の歯は `promptBudgetTokens` を使わず、`promptTokensExceeded` の項を判定から落とす変異を検出できない。
   it("promptBudgetTokens 単独でも、maxMemoryTokens と同じ再現で budgetExceeded が true になる", async () => {
     const digestA = "01234567890123456789";
     const digestB = "abcdefghijklmnopqrst";
@@ -2540,12 +2032,7 @@ describe("recall() — usage.budgetExceeded（Issue #108「案3」）", () => {
     expect(result.usage.budgetExceeded).toBe(true);
   });
 
-  // 境界値（ちょうど予算どおり）では false のままである。`>` を `>=` に変える変異は
-  // ここで初めて検出できる——ここまでの「実際に true になる」歯は測定値が予算を
-  // 上回っているため、`>` でも `>=` でも同じ true を返してしまい、この変異を見抜けない。
-  //
-  // 単一の memory を使う（結合の "\n" が挟まらないため、連結して測っても
-  // digest 単体の ceil と完全に一致し、この境界を厳密に作れる）。
+  // 境界値（ちょうど予算どおり）では false のまま: `>` を `>=` に変える変異は、測定値が予算を上回る歯では同じ true になり見抜けない。単一の memory を使う（結合の "\n" が挟まらず境界を厳密に作れる）。
   it("トークン予算にちょうど収まる境界値では budgetExceeded は false のまま（`>` と `>=` を区別する歯）", async () => {
     const digest = "01234567890123456789"; // 20 chars, non-CJK ⟹ ceil(20/4) = 5 トークン
     expect(heuristicTokenCounter.count(digest).tokens).toBe(5);
@@ -2571,9 +2058,6 @@ describe("recall() — usage.budgetExceeded（Issue #108「案3」）", () => {
 
     const result = await runtime.recall(ctx, {
       vector: [1, 0],
-      // maxMemoryChars は十分大きく、chars 次元では超えない。
-      // `share` の分母はトークン予算優先（`effectiveTokenBudget`）で maxMemoryChars を
-      // 無視するようになるが、budgetExceeded はそれとは独立に両方の次元を見ている。
       budget: { maxMemoryChars: 10_000, maxMemoryTokens: 10 },
     });
 
@@ -2581,15 +2065,7 @@ describe("recall() — usage.budgetExceeded（Issue #108「案3」）", () => {
     expect(result.usage.share).toBeDefined();
   });
 
-  /**
-   * `maxMemoryChars` は強制側（`unitChars`）と計測側（`digestChars`）が
-   * 「digest.length の単純な合計」という同じ式であり、連結の区切り文字も複数回の ceil も
-   * 無い。段4の `fits` は `maxMemoryChars` が申告されていれば必ずそれを満たしてから
-   * 候補を確定するので、切り詰め後に `digestChars > maxMemoryChars` になることは構造上
-   * 起こらない。**⟹ この経路では常に false のままである**（tokens の側と違って
-   * true になる入力は原理的に作れない——この非対称自体が本 PR の発見であり、
-   * PR 本文に明記する）。
-   */
+  /** `maxMemoryChars` は強制側と計測側が同じ式（digest.length の合計）で、連結の区切りも複数回の ceil も無いため、構造上この経路では常に false のまま（tokens と違って true になる入力は作れない）。 */
   it("maxMemoryChars のみの経路では budgetExceeded は false のままである", async () => {
     const { runtime, stores } = buildRuntime();
     await createEmbeddedMemory(stores, [1, 0], { digest: "0123456789" }); // 10 chars
@@ -2597,9 +2073,6 @@ describe("recall() — usage.budgetExceeded（Issue #108「案3」）", () => {
       vector: [1, 0],
       budget: { maxMemoryChars: 5 },
     });
-    // 予算に収まらないので候補ごと落ちる（budget_dropped）が、budgetExceeded は
-    // 「予算内に収まっていない」ことを示す欄ではなく「返した量が超えている」ことを示す欄
-    // ——落ちた結果 digestChars=0 になり、超えようがない。
     expect(result.usage.budgetExceeded).toBe(false);
   });
 });
@@ -2654,17 +2127,12 @@ describe("recall() — status ゲート（段1と同じ status IN ('active','con
 describe("recall() — RecallQuerySchema による入力検証", () => {
   it("limit が非正の場合は zod のエラーで拒否する", async () => {
     const { runtime } = buildRuntime();
-    // テスト名が「zod のエラーで」と失敗理由を明示している——別の理由（例: 実装側の
-    // typo によるモジュール解決エラー）で失敗しても緑になってはいけないため、
-    // 例外の型を zod の ZodError に固定する（RecallQuerySchema.parse が投げるのはこれ）。
+    // 例外の型を ZodError に固定する: 別の理由（モジュール解決エラーなど）で失敗しても緑になってはいけないため。
     await expect(runtime.recall(ctx, { limit: 0 })).rejects.toThrow(ZodError);
   });
 
   it("excludeProvenanceKinds に未知の値を渡すと拒否する", async () => {
     const { runtime } = buildRuntime();
-    // 上と同じ RecallQuerySchema.parse の呼び出しが投げる ZodError を検証する
-    // （describe が「RecallQuerySchema による入力検証」であり、このテストも同じ
-    // 検証経路を通る——契約は「zod によって拒否されること」である）。
     await expect(
       // @ts-expect-error 意図的に不正な値を渡す
       runtime.recall(ctx, { excludeProvenanceKinds: ["fabricated"] }),
@@ -2672,22 +2140,7 @@ describe("recall() — RecallQuerySchema による入力検証", () => {
   });
 });
 
-/**
- * `recall()` の**出力**検証（Issue #131、ADR 0098）。
- *
- * ここまでこのファイルが測ってきたのは入力側（`RecallQuerySchema`）だけだった——
- * `recall()` が返す `RecallResult` は、実行時には一度も自分自身のスキーマで検証されて
- * いなかった（fail-open）。ADR 0098 でその経路を足した。
- *
- * **🔴 壊れた出力の作り方に「実在する拡張点」を使う。** モンキーパッチではなく、
- * 呼び出し側が本当に差せる `RuntimeDeps.tokenCounter` に**非整数を返す実装**を渡す
- * ——`usage.estimatedTokens` は `z.number().int()` なので、これは呼び出し側が実際に
- * 踏める契約違反である（`TokenCounter` の戻り値が整数であることを強制する仕組みは
- * 実行時には無い。型はコンパイル時にしか効かない）。
- *
- * **⚠ `share > 1` はここでの「契約違反」ではない**——ADR 0097 が `.max(1)` を意図的に
- * 外している。そちらは上の `T3` が「弾かれないこと」の側で測っている。
- */
+/** 壊れた出力は、モンキーパッチではなく呼び出し側が実際に差せる `RuntimeDeps.tokenCounter` に非整数を返す実装を渡して作る（`usage.estimatedTokens` は `int()`）。`share > 1` は契約違反ではない（ADR 0097 が `.max(1)` を外した。上の T3 が測る）。 */
 describe("recall() — 出力検証（Issue #131、ADR 0098）", () => {
   /** 非整数のトークン数を返す `TokenCounter`。`usage.estimatedTokens` の `int()` を破る。 */
   const fractionalTokenCounter: TokenCounter = {
@@ -2700,7 +2153,6 @@ describe("recall() — 出力検証（Issue #131、ADR 0098）", () => {
 
     const result = await runtime.recall(ctx, { vector: [1, 0] });
 
-    // 値は書き換えられていない——検証は読むだけである（丸めない・捨てない）。
     expect(result.usage.estimatedTokens).toBe(2.5);
     expect(result.outputValidation?.ok).toBe(false);
     expect(result.outputValidation?.issues.map((issue) => issue.path)).toContain(
@@ -2708,9 +2160,7 @@ describe("recall() — 出力検証（Issue #131、ADR 0098）", () => {
     );
   });
 
-  /**
-   * ⭐ T2（対照。これが無いと「何でも弾く」実装が T1 だけで緑になる）。
-   */
+  /** T2（対照）: これが無いと「何でも弾く」実装が T1 だけで緑になる。 */
   it("T2: 正しい出力は素通りする（ok: true・issues は空）", async () => {
     const { runtime, stores } = buildRuntime();
     await createEmbeddedMemory(stores, [1, 0]);
@@ -2720,10 +2170,7 @@ describe("recall() — 出力検証（Issue #131、ADR 0098）", () => {
     expect(result.outputValidation).toEqual({ ok: true, issues: [] });
   });
 
-  /**
-   * 「検証していない」と「検証して通った」を潰さない（ADR 0008 の「無い」の分類の適用）。
-   * `"off"` では欄そのものが無い——`{ ok: true }` にはならない。
-   */
+  /** 「検証していない」と「検証して通った」を潰さない: "off" では欄そのものが無く、`{ ok: true }` にはならない。 */
   it('T4: "off" では欄そのものが無い（未検証と通過を潰さない）。値は素通りする', async () => {
     const { runtime, stores } = buildRuntime({
       tokenCounter: fractionalTokenCounter,
@@ -2734,7 +2181,6 @@ describe("recall() — 出力検証（Issue #131、ADR 0098）", () => {
     const result = await runtime.recall(ctx, { vector: [1, 0] });
 
     expect(result.outputValidation).toBeUndefined();
-    // 「検証していない」だけであって、壊れた値は依然としてそのまま返っている。
     expect(result.usage.estimatedTokens).toBe(2.5);
   });
 
@@ -2759,11 +2205,7 @@ describe("recall() — 出力検証（Issue #131、ADR 0098）", () => {
     expect(validationError.recallId).toBeTruthy();
   });
 
-  /**
-   * 🔴 倒れ方の決定そのものの歯（ADR 0098）: **既定は `"throw"` ではない。**
-   * `recall()` は使う側の主経路であり、既定を投げる形にすると
-   * 「いままで（誤った値のまま）動いていた呼び出しが例外になる」破壊的変更になる。
-   */
+  /** 既定は "throw" ではない: recall() は主経路で、投げる形にすると誤った値のまま動いていた呼び出しが例外になる破壊的変更になる。 */
   it("T6: モードを渡さないとき、検証に落ちても recall() は投げない（既定は report）", async () => {
     const { runtime, stores } = buildRuntime({ tokenCounter: fractionalTokenCounter });
     await createEmbeddedMemory(stores, [1, 0]);
@@ -2771,32 +2213,13 @@ describe("recall() — 出力検証（Issue #131、ADR 0098）", () => {
     const result = await runtime.recall(ctx, { vector: [1, 0] });
 
     expect(result.outputValidation?.ok).toBe(false);
-    // 「投げなかった」ことそのもの——ここへ到達している時点で resolve している。
     expect(result.memories).toHaveLength(1);
   });
 });
 
-// ---------------------------------------------------------------------------
-// ann_unreached × excludeProvenanceKinds（ADR 0390 の歯。ADR 0285 の引き受けた負債7）
-//
-// 今日の `eligible = aggregate.totalInScope - notIndexedTotal` は、`excludeProvenanceKinds`
-// で段1の ANN から除外した kind の行も数える（`aggregateScope` に除外が渡らない）。
-//   問い1（黙る）: 除外指定で ANN が取りこぼしても、`lowerBoundUsable=false` により
-//     severity は "info" のまま・診断キーも付かない。
-//   問い2（鳴りすぎ）: 除外しない候補を全部拾えても、`annHits.length < eligible`
-//     （除外行込み）で `ann_unreached` が鳴る。
-// 直し方（案2・非破壊）: `aggregateScope` が任意の欄 `excludedProvenanceIndexedCount`
-// （除外される kind で、索引済みの行の数）を返し、core がそれで eligible と下限を引き直す。
-// **欄を返さない adapter では今日と1バイトも変わらない**——下の「対照」がそれを固定する。
-// （欄名・オプション名は ADR 0390 で確定する。ここでは暫定の名前を使う。）
-// ---------------------------------------------------------------------------
+// 今日の `eligible = aggregate.totalInScope - notIndexedTotal` は `excludeProvenanceKinds` で除外した kind の行も数える。`aggregateScope` が任意の欄 `excludedProvenanceIndexedCount` を返し、core がそれで eligible と下限を引き直す。欄を返さない adapter では挙動を変えない（下の「対照」が固定する）。
 describe("recall() — ann_unreached × excludeProvenanceKinds（ADR 0390）", () => {
-  /**
-   * 「索引は近傍 `reach` 件しか見ず、`excludeProvenanceKinds` は後段（後置フィルタ）で落とす」
-   * VectorStore。段1が渡す filter から `excludeProvenanceKinds` を抜いて inner.search を呼び、
-   * `slice(0, reach)` のあとで除外 id を落とす——除外行が候補枠を占拠して、除外しない候補を
-   * 取りこぼす近似索引の形。
-   */
+  /** 索引は近傍 `reach` 件しか見ず、除外は後置フィルタで落とす VectorStore: 除外行が候補枠を占拠して、除外しない候補を取りこぼす近似索引の形。 */
   class ReachLimitedPostFilterVectorStore implements VectorStore {
     constructor(
       private readonly inner: VectorStore,
@@ -2826,10 +2249,6 @@ describe("recall() — ann_unreached × excludeProvenanceKinds（ADR 0390）", (
     }
   }
 
-  /**
-   * 新しい欄（`excludedProvenanceIndexedCount`）を返さない adapter を模す: `aggregateScope` の
-   * 返り値からその欄を落とす。それ以外は素通し。
-   */
   function withoutExcludedProvenanceField(
     memoryStore: ReturnType<typeof createFakeRuntimeStores>["memoryStore"],
   ) {
@@ -2929,7 +2348,6 @@ describe("recall() — ann_unreached × excludeProvenanceKinds（ADR 0390）", (
     });
 
     expect(result.memories).toEqual([]);
-    // eligible = 7 - 索引済みの除外行 4 = 3。hits(0) < min(kPrime, 3) ⟹ warning。
     expect(result.omitted).toContainEqual({
       kind: "ann_unreached",
       countKind: "unknown",
@@ -2950,7 +2368,6 @@ describe("recall() — ann_unreached × excludeProvenanceKinds（ADR 0390）", (
     });
 
     expect(result.memories).toHaveLength(3);
-    // eligible = 7 - 4 = 3 = hits ⟹ 鳴らない。
     expect(result.omitted.some((o) => o.kind === "ann_unreached")).toBe(false);
     expect(Object.keys(annDetail(result) ?? {})).not.toContain("annReturnedFewerThanReachable");
   });
@@ -3008,18 +2425,7 @@ describe("recall() — ann_unreached × excludeProvenanceKinds（ADR 0390）", (
     }
   });
 
-  // -------------------------------------------------------------------------
-  // scopeAggregate: "skip"（ADR 0384 案C の「決めたこと」7、ADR 0390 の続き）
-  //
-  // "skip" では `aggregateScope` が件数を数えない（`countKind: 'unknown'`・totalInScope 0）ので、
-  // `ann_unreached` の母数 `eligible` が 0 になり、ANN が scope の候補を取りこぼしていても
-  // 鳴らない——しかも「判定していない」と名乗る診断も出なかった。ANN の段が走っていて件数が
-  // 取れないときは、ANN の stage detail に `annReachability: "unknown"` を足して名乗る。
-  // 既定（"exact"）と、"skip" を無視して exact を返す adapter の出力は1バイトも変えない。
-  //
-  // core の Fake は `scopeAggregate` を実装していない（常に exact）ので、"skip" の返り値の形
-  // （ADR 0384: countKind 'unknown'、件数 0）をここで模す。
-  // -------------------------------------------------------------------------
+  // "skip" では件数を数えず eligible が 0 になるので、ANN の取りこぼしを `ann_unreached` が名乗れない。core の Fake は `scopeAggregate` を実装しない（常に exact）ので、"skip" の返り値の形（countKind 'unknown'、件数 0）をここで模す。
   function skippingAggregateScope(
     memoryStore: ReturnType<typeof createFakeRuntimeStores>["memoryStore"],
     honorSkip: boolean,
@@ -3078,7 +2484,6 @@ describe("recall() — ann_unreached × excludeProvenanceKinds（ADR 0390）", (
 
     expect(result.index.countKind).toBe("unknown");
     expect(annDetail(result)).toMatchObject({ channel: "ann", annReachability: "unknown" });
-    // 母数が無いので、鳴らない・下限の診断キーも立たない（従来どおり）。名乗るのは annReachability だけ。
     expect(result.omitted.some((o) => o.kind === "ann_unreached")).toBe(false);
     expect(Object.keys(annDetail(result) ?? {})).not.toContain("annReturnedFewerThanReachable");
   });
@@ -3088,7 +2493,6 @@ describe("recall() — ann_unreached × excludeProvenanceKinds（ADR 0390）", (
       const runtime = await seedSkipRuntime(true);
       const result = await runtime.recall(ctx, { vector: [1, 0], ...query });
       expect(Object.keys(annDetail(result) ?? {})).not.toContain("annReachability");
-      // exact なら従来どおり取りこぼしを名乗る（対照）。
       expect(annDetail(result)).toMatchObject({ annReturnedFewerThanReachable: true });
     }
   });
@@ -3113,10 +2517,6 @@ describe("recall() — ann_unreached × excludeProvenanceKinds（ADR 0390）", (
   });
 });
 
-/**
- * 差し替えた `TokenCounter` が約束（`tokens` は有限で 0 以上の number）を破る値を返したとき、
- * `recall()` は `RangeError` で断る（ADR 0497。ADR 0483 が書いた「予算を黙って外す」振る舞いを断る形に変えた）。
- */
 describe("recall() — TokenCounter が約束を破る値を返したとき（ADR 0497）", () => {
   const digests = ["aaaaaaaaaa", "bbbbbbbbbb", "cccccccccc"];
   async function run(
@@ -3290,24 +2690,13 @@ describe("recall() — usage.counter の印は連結の計測の印（ADR 0487�
       vector: [1, 0],
       budget: { maxMemoryTokens: 4 },
     });
-    // digest 1件（10文字）は "exact" で数えられ、3 <= 4 なので1件残る。
     expect(result.memories).toHaveLength(1);
-    // usage は連結 + 目次帯の JSON（10文字超）を1回数えた値なので "heuristic"。
     expect(result.usage.counter).toBe("heuristic");
     expect(result.outputValidation).toEqual({ ok: true, issues: [] });
   });
 });
 
-// ---------------------------------------------------------------------------
-// ANN が走っていない recall（空クエリ）では、診断キーを足さない（#672 / ADR 0285、約束3:
-// 条件は `candidateGenerationExecuted && kPrime > 0 && ...`）。
-//
-// `wantsAnn` はクエリの中身と関係なく真なので、空クエリ（text も vector も無い）でも ANN の trace は
-// `executed: false` で積まれる。`annWindowUnderfilled` から `candidateGenerationExecuted` を外すと、
-// scope に記憶があるとき `annHits.length (0) < min(kPrime, 下限)` が真になり、走っていない段に
-// `annReturnedFewerThanReachable: true` が付いた。歯は空クエリで `stage_skipped` が出ることしか
-// 見ていなかった（Issue #1776 の #672 のコメント、ADR 0665）。
-// ---------------------------------------------------------------------------
+// `wantsAnn` はクエリの中身と関係なく真なので、空クエリでも ANN の trace は `executed: false` で積まれる。`annWindowUnderfilled` から `candidateGenerationExecuted` を外すと、走っていない段に `annReturnedFewerThanReachable: true` が付く。
 describe("recall() — ANN が走っていない recall（空クエリ）には annReturnedFewerThanReachable を足さない（ADR 0285 約束3）", () => {
   it("scope に ready の記憶が3件あっても、空クエリの ANN の trace の detail にキーが無く、ann_unreached も出ない", async () => {
     const { runtime, stores } = buildRuntimeWithCappedAnn(0);

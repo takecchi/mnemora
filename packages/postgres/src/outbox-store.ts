@@ -26,86 +26,34 @@ import {
 } from "./mapping.js";
 
 /**
- * `OutboxStore` の Postgres 実装（roadmap.md 段階3、ADR 0005 の transactional outbox
- * 「運搬役」側）。
+ * `OutboxStore` の Postgres 実装（ADR 0005 の transactional outbox「運搬役」側）。
  *
- * `claimBatch` は `FOR UPDATE SKIP LOCKED` を使う。複数のワーカーが同時に `tick()` を
- * 呼んでも、同じ行を二重に claim しない。
+ * **`claimBatch` の `FOR UPDATE` と `SKIP LOCKED` は別々の仕事をしている。「`SKIP LOCKED` が在るから二重 claim は
+ * 安全」と読まないこと。**
  *
- * 🔴 **この2つの節は別々の仕事をしている。「`SKIP LOCKED` が在るから二重 claim は安全」と
- * 読まないこと。**
+ * - 二重 claim を止めているのは `FOR UPDATE` の行ロックである。READ COMMITTED 下では、ロック待ちで止まった側は
+ *   解放後に行を再フェッチして `WHERE` を再評価し、先に claim した側が書いた `claimed_at` が見えて候補から外れる。
+ *   `FOR UPDATE SKIP LOCKED` を丸ごと削ると、接続を温めた並行実行で二重 claim が起きる。
+ * - `SKIP LOCKED` が足すのは、他のワーカーが取ろうとしている行を待たずに次の行へ進む「詰まらないこと」だけで、
+ *   外しても正しさは壊れない（ADR 0208）。
  *
- * - **二重 claim を止めているのは `FOR UPDATE` の行ロックである。** READ COMMITTED 下では、
- *   ロック待ちで止まった側はロックの解放後に行を再フェッチして `WHERE` を再評価する。
- *   先に claim した側が書いた `claimed_at` がそこで見えるため、その行は候補から外れる。
- * - **`SKIP LOCKED` が足しているのは「詰まらないこと」だけである。** 既に他のワーカーが
- *   取ろうとしている行を待たずにスキップし、次の行を取りに行く。
+ * 行ロックは、この SQL 文の実行（コミット）が終わった瞬間に解放され、「claim した」ことは `claimed_at`/`claimed_by`
+ * の値としてしか残らない。そのため `claimBatch` の `WHERE` は `claimed_at IS NULL` だけでなく**リース**（ADR 0032。
+ * `claimed_at` が無いか `leaseMs` 以上前）で見る。`IS NULL` だけにすると、claim 後に止まったワーカーのジョブが
+ * 終端のどちらも付かないまま二度と claim されない。
  *
- * 【実測】2026-09-17、`main` = `cd4d812`。手元の Postgres 17 に対し、**接続を温めた**
- * `pg.Pool`（既定 `max=10`）上で「claim 可能なジョブ1本・`limit=1`・8並行」を10ラウンド撃った:
+ * **`complete`/`fail` は CAS（ADR 0142）**: `attempts` が呼び出し側の `expectedAttempts` と一致する行だけを更新する。
+ * リース切れで別のワーカーに再 claim された後に戻ってきた古いワーカーが、新しいワーカーの終端状態を上書きしない。
+ * 一致しなければ `OutboxLeaseConflictError` を投げる。
  *
- * - `FOR UPDATE SKIP LOCKED` を**丸ごと削る**と、**10ラウンド中8ラウンドで二重 claim**
- *   （8ワーカー全員が同じ job id を返した）。
- * - `SKIP LOCKED` **だけ**を外して `FOR UPDATE` にすると、**10ラウンドとも二重 claim なし。**
- *   ⟹ `SKIP LOCKED` を外しても正しさは壊れない。
+ * **`complete`/`fail` は互いに排他で、終端は先勝ちである（ADR 0440）**: `UPDATE` の `WHERE` は
+ * `completed_at IS NULL AND failed_at IS NULL` の両方を見る。`attempts` が一致しても、どちらかの終端が既に付いていれば
+ * 0行になり、後から来た呼び出しは行を変えず例外も投げない（無言の no-op）。同種の再呼び出しでも、2回目の
+ * `at`・`error` は捨てて1回目の `completed_at`／`failed_at`・`last_error` を保つ。
  *
- * ⚠ **`SKIP LOCKED` が実際に詰まりを減らすことは測っていない。** 上が見ているのは正しさ側
- * だけであり、「詰まらないこと」は機構からの推論である。
- *
- * 🔴 **上の ⚠ は ADR 0208 が埋めた。** `outbox-skip-locked-non-blocking.postgres.test.ts`
- * が、`claimBatch` を直接呼んで「詰まらないこと」を肯定側で検査する
- * ——外部トランザクションが唯一の候補行の行ロックを保持したまま、`lock_timeout=100ms`
- * を積んだ専用クライアントで撃ち、例外を投げずに0件で解決することを見る。
- * `SKIP LOCKED` を外すとこの歯は `55P03`（canceling statement due to lock timeout）
- * で赤くなる（変異試験は ADR 0208「測ったこと」参照）。
- * ⚠ ただし、この歯が測っているのは「ロックが在るときにブロックせず抜けられるか」という
- * *機構*であって、**実運用の throughput（単位時間あたりに何件捌けるか）そのものは、
- * この歯も含めていまだ測っていない。**
- * ⚠ **接続を温めていない `pg.Pool` に対しては、`FOR UPDATE SKIP LOCKED` を丸ごと削っても
- * 二重 claim が再現しない**【実測、同日】——遅延接続のため `Promise.all` の各呼び出しが接続
- * 確立でずれ、競争の窓が閉じる。⟹ **この振る舞いを検査する歯を書くときは、先に
- * `pool.query` を並行数ぶん撃って接続を張ること。**張らないと、歯が無くても緑になる。
- * ⚠ **10ラウンドで出なかったことは、起きないことの証明ではない。**
- *
- * 🔴 **ただし `FOR UPDATE SKIP LOCKED` の行ロックは、この SQL 文の実行（コミット）が
- * 終わった瞬間に解放される。** 「claim した」こと自体は `claimed_at`/`claimed_by` という
- * 列の値としてしか残らない。そのため `claimBatch` の `WHERE` は `claimed_at` を
- * 単に `IS NULL` で見るのではなく、**リース（ADR 0032）**——`claimed_at` が無いか、
- * `leaseMs` 以上前——で見る。`claimed_at IS NULL` だけにすると、claim 後に処理が
- * 終わらないまま止まったワーカーのジョブが `completed_at`/`failed_at` のどちらも
- * 付かないまま二度と claim されなくなる（「見えない停止」）。詳細は
- * `packages/core/src/interfaces/outbox-store.ts` の doc と ADR 0032。
- *
- * 🔴 **`complete`/`fail` は CAS（ADR 0142, Issue #233）**——`attempts` 列が呼び出し側の
- * `expectedAttempts` と一致する行だけを更新する。リースが切れて別のワーカーに再 claim
- * された後、遅れて戻ってきた古いワーカーが `complete`/`fail` を呼んでも、新しいワーカーが
- * 既に書いた終端状態を黙って上書きしない——`attempts` が一致しなければ
- * `OutboxLeaseConflictError` を投げる。詳細は `packages/core/src/interfaces/outbox-store.ts`
- * の doc と ADR 0142。
- *
- * 🔴 **`complete`/`fail` は互いに排他でもある（Issue #826）**——`attempts` が一致しても、
- * 相手側の終端列（`completed_at`/`failed_at`）が既に付いていれば `UPDATE` の `WHERE` は
- * 対象を0行にする。先に付いた終端が勝ち、後から来た呼び出しは行を変えず、例外も投げない
- * （無言の no-op）。同じ `attempts` のまま complete → fail（逐次でも並行でも）を呼んでも、
- * `completed_at`/`failed_at` の両方が付くことはない。
- *
- * 🔴 **終端は先勝ち（ADR 0440）**——同じ `attempts` のまま同種（complete → complete、fail → fail）を
- * 呼んでも、1回目の `completed_at`／`failed_at`・`last_error` を保つ（2回目の `at`・`error` は捨てる。
- * `purgeCompletedJobs` の `completed_at < olderThan` の境界も1回目で決まる）。`UPDATE` の `WHERE` は
- * `completed_at IS NULL AND failed_at IS NULL` の両方を見る。戻り値（`void`）と例外は変わらない
- * （`attempts` 不一致だけが `OutboxLeaseConflictError`、それ以外の再呼び出しは無言の no-op）。
- *
- * 🔴 **2026-09-29 追記（[Issue #1196](https://github.com/takecchi/mnemora/issues/1196)、
- * [ADR 0357](../../../docs/decisions/0357-outbox-reclaim-requeues-to-tail.md)。クローン miku
- * の判断であり、オーナーの判断ではない）: 取り直し（`claimed_at` が既に非 NULL の行を再び
- * claim する場合）は `available_at` を `opts.now` へ書き直す。** `claimBatch` の `UPDATE`
- * の `SET` は `available_at = CASE WHEN o.claimed_at IS NULL THEN o.available_at ELSE
- * ${now} END` という形で、初めての claim（`claimed_at IS NULL`）では `available_at` を
- * 変えず、取り直しでは `now` に進める。**`SET` 句の中の `o.claimed_at` は、この `UPDATE`
- * 自身が今まさに書こうとしている新しい値ではなく、この行の更新前の値である**
- * （PostgreSQL は同一 `UPDATE` 文の `SET` 内で他列を右辺に使うとき、常に更新前の値を見る）。
- * 詳細・狙い・採らなかった案は `packages/core/src/interfaces/outbox-store.ts` の同日付追記
- * と ADR 0357。
+ * **取り直し**（`claimed_at` が既に非 NULL の行を再び claim する場合）は `available_at` を `opts.now` へ書き直す
+ * （ADR 0357）。`claimBatch` の `SET` の `available_at = CASE WHEN o.claimed_at IS NULL ...` の `o.claimed_at` は、
+ * この `UPDATE` が書こうとしている新しい値でなく、更新前の値である。
  */
 export class PostgresOutboxStore implements OutboxStore {
   constructor(private readonly db: Db) {}
@@ -114,12 +62,10 @@ export class PostgresOutboxStore implements OutboxStore {
     assertWellFormedCtx(ctx);
     const kindsFilter =
       opts.kinds !== undefined ? sql`AND kind = ANY(${sql.param(opts.kinds)}::text[])` : sql``;
-    // リースが切れたとみなす境界時刻。`claimed_at <= leaseExpiresBefore` の行は
-    // 「十分前に claim されたまま完了していない」＝止まったワーカーの行とみなす。
-    // 境界は `available_at <= opts.now` と同じ `<=`（両端含む）に揃えてある。
+    // `claimed_at <= leaseExpiresBefore` の行を、止まったワーカーの行とみなす。境界は `available_at <= opts.now` と同じ `<=`。
     const leaseExpiresBefore = new Date(opts.now.getTime() - opts.leaseMs);
-    // ADR 0547: `now` と `now - leaseMs` は、`timestamptz` の下限より前でも落ちないよう、下限へ寄せてから比べる。
-    // 行に書く値（`claimed_at`・`available_at`）も同じ寄せた値にする——寄せずに書くと、比べる側が通した行の UPDATE が `22008` になる。
+    // `now` と `now - leaseMs` は、`timestamptz` の下限より前でも落ちないよう下限へ寄せてから比べる（ADR 0547）。
+    // 行に書く値も同じ寄せた値にする。寄せずに書くと、比べる側が通した行の UPDATE が `22008` になる。
     const nowParam = toPgTimestampClamped(opts.now);
 
     const result = await omittingParams(() =>
@@ -154,23 +100,16 @@ export class PostgresOutboxStore implements OutboxStore {
     opts?: { at?: Date | undefined },
   ): Promise<void> {
     assertWellFormedCtx(ctx);
-    // ADR 0594: `opts.at` の Invalid Date は、`jobId` の形・行の有無より先に断る（testkit の fixture・core の Fake と同じ順）。
-    // 下の `jobId` の形の検査は静かに返るので、先に見ないと、呼び手のバグが黙って通る。
+    // `opts.at` の不正な日時は、`jobId` の形・行の有無より先に断る（ADR 0594、ADR 0597）。
+    // 下の `jobId` の形の検査は静かに返るので、先に見ないと呼び手のバグが黙って通る。
     assertValidDate("complete", "opts.at", opts?.at);
-    // ADR 0597: 下限（`timestamptz` の紀元前4714年）より前も、同じく `jobId` の形より先に断る（`RangeError`。testkit の fixture と同じ型・文面）。
     assertNotBelowTimestamptzMin("complete", "opts.at", opts?.at);
-    // id 列は uuid 型。べき等な終端更新（存在しない/形式が不正な id でも例外を投げない）
-    // という契約のため、UUID の形をしていない入力はここで静かに無視する
-    // （実 DB 検査で判明: 素通しすると invalid input syntax for type uuid で例外になる）。
+    // べき等な終端更新（存在しない/形式が不正な id でも例外を投げない）という契約のため、UUID の形でない入力は静かに無視する。
     if (!isUuidLike(jobId)) {
       return;
     }
-    // Issue #1237: 省略時は壁時計。
     const completedAt = opts?.at ?? new Date();
-    // Issue #826: 相手側の終端（fail）が既に付いていたら、この UPDATE は0行のまま
-    // 何も書かない（`failed_at IS NULL` を WHERE に足す——先に付いた終端を勝たせる）。
-    // ADR 0440: 同種の終端（complete）が既に付いていても同じ（`completed_at IS NULL` ——先勝ち。
-    // 2回目の `at` で `completed_at` を上書きしない）。
+    // 相手側の終端が既に付いていたら、この UPDATE は0行のまま何も書かない（先に付いた終端を勝たせる）。
     const result = await omittingParams(() =>
       this.db.execute(sql`
       UPDATE outbox
@@ -194,25 +133,17 @@ export class PostgresOutboxStore implements OutboxStore {
     opts?: { at?: Date | undefined },
   ): Promise<void> {
     assertWellFormedCtx(ctx);
-    // ADR 0594: `complete` と同じ（`opts.at` の Invalid Date を、`jobId` の形より先に断る）。
+    // `complete` と同じ（`opts.at` の不正な日時を、`jobId` の形より先に断る）。
     assertValidDate("fail", "opts.at", opts?.at);
-    // ADR 0597: `complete` と同じ（下限より前を、`jobId` の形より先に断る）。
     assertNotBelowTimestamptzMin("fail", "opts.at", opts?.at);
     if (!isUuidLike(jobId)) {
       return;
     }
-    // Postgres の `text` は NUL（U+0000）を保存できない（22021）。`error` には失敗した
-    // クエリの params（利用者の本文）が入りうるので、LLM の出力に NUL が混ざると
-    // この UPDATE そのものが落ち、ジョブが終端に落ちないまま `tick()` が投げていた。
-    // 黙って消さず、目に見える6文字の `\u0000` に置き換えて書く。
-    // 歯は `__tests__/outbox-fail-nul-last-error.postgres.test.ts`。
+    // Postgres の `text` は NUL を保存できない（22021）。`error` には失敗したクエリの params（利用者の本文）が入りうるので、
+    // LLM の出力に NUL が混ざると、この UPDATE が落ちてジョブが終端に落ちない。黙って消さず、見える `\u0000` に置き換える。
     const storableError = error.replaceAll("\u0000", "\\u0000");
-    // Issue #1237: 省略時は壁時計。⚠ `available_at` は再計算しない（interface の doc 参照）。
+    // `available_at` は再計算しない（interface の doc 参照）。
     const failedAt = opts?.at ?? new Date();
-    // Issue #826: 相手側の終端（complete）が既に付いていたら、この UPDATE は0行のまま
-    // 何も書かない（`completed_at IS NULL` を WHERE に足す——先に付いた終端を勝たせる）。
-    // ADR 0440: 同種の終端（fail）が既に付いていても同じ（`failed_at IS NULL` ——先勝ち。
-    // 2回目の `at`・`error` で `failed_at`・`last_error` を上書きしない）。
     const result = await omittingParams(() =>
       this.db.execute(sql`
       UPDATE outbox
@@ -229,23 +160,15 @@ export class PostgresOutboxStore implements OutboxStore {
   }
 
   /**
-   * `complete`/`fail` の CAS な `UPDATE` が0行だったときに呼ぶ（ADR 0142, Issue #233、
-   * Issue #826）。**0行になる理由は3つあり、区別する**——(a) その id の行がそもそも
-   * 存在しない（べき等な no-op、既存契約）、(b) 行は存在するが `attempts` が一致しない
-   * （別のワーカーが既にこの行を再 claim している。{@link OutboxLeaseConflictError}）、
-   * (c) 行は存在し `attempts` も一致するが、相手側の終端列が既に付いている
-   * （Issue #826: 先に付いた終端が勝つ、無言の no-op、例外にしない）。
+   * `complete`/`fail` の CAS な `UPDATE` が0行だったときに呼ぶ。0行になる理由は3つあり、区別する。
+   * (a) 行が存在しない（べき等な no-op）、(b) `attempts` が一致しない（別のワーカーが再 claim している。
+   * {@link OutboxLeaseConflictError}）、(c) `attempts` は一致するが、相手側の終端列が既に付いている（無言の no-op）。
    *
-   * (b) と (c) の区別は、読み直した `attempts` が `expectedAttempts` と一致するかで
-   * 付く——`claimBatch` の `WHERE`（`completed_at IS NULL AND failed_at IS NULL`）は
-   * 一度終端化された行を二度と対象にしないため、終端化された行の `attempts` は
-   * その後永久に固定される（`packages/core/src/interfaces/outbox-store.ts` の doc
-   * 「理由」節と同じ論法）。したがって `attempts` が一致するのに0行だったなら、
-   * 唯一の残りの説明は「相手側の終端に弾かれた」（c）である。
+   * (b) と (c) は、読み直した `attempts` で区別する。`claimBatch` は終端化された行を二度と対象にしないので、
+   * 終端化された行の `attempts` は固定される。一致するのに0行なら、残る説明は (c) だけである。
    *
-   * 読み直しと実際に条件が破れた瞬間の間にも別の claim が割り込む余地があるため、
-   * (b) で投げる `observedAttempts` は「弾かれた瞬間の値」の保証ではない（ADR 0030 の
-   * `MemoryStatusConflictError` と同じ限界、doc コメント参照）。
+   * 読み直しと条件が破れた瞬間の間にも別の claim が割り込みうるので、(b) の `observedAttempts` は「弾かれた瞬間の値」の
+   * 保証ではない（ADR 0030 の `MemoryStatusConflictError` と同じ限界）。
    */
   private async raiseIfLeaseConflict(
     ctx: Ctx,
@@ -269,11 +192,8 @@ export class PostgresOutboxStore implements OutboxStore {
   }
 
   /**
-   * Issue #1207 / [ADR 0383](../../../docs/decisions/0383-erase-tenant.md):
-   * `OutboxStore.eraseTenant?` の実装。`outbox` には他のテーブルからの FK が無く、
-   * `outbox` 自身も他テーブルを参照しないので、`blocked_by_foreign_reference` 相当の
-   * 検査は不要（`MemoryStore.eraseTenant` とは違う点）。`opts.limit` を目安に、完了・
-   * 失敗・未処理を問わず削除する。
+   * `OutboxStore.eraseTenant?` の実装（ADR 0383）。`outbox` には他のテーブルからの FK が無く、自身も他テーブルを
+   * 参照しないので、`blocked_by_foreign_reference` 相当の検査は不要（`MemoryStore.eraseTenant` との違い）。
    */
   async eraseTenant(ctx: Ctx, opts: EraseTenantStoreOptions): Promise<EraseTenantResult> {
     assertWellFormedCtx(ctx);
@@ -288,7 +208,7 @@ export class PostgresOutboxStore implements OutboxStore {
       const deleted = (result.rows[0] as unknown as { count: number }).count;
       return { deleted, reachedLimit: deleted === opts.limit };
     }
-    // ADR 0430 決定2: 同じテナントへの同時呼び出しを直列にする（lock を取るためにトランザクションで包む）。
+    // 同じテナントへの同時呼び出しを直列にする（ADR 0430）。
     const deleted = await omittingParams(() =>
       this.db.transaction(async (tx) => {
         await lockTenantForErase(tx, ctx.tenantId);
@@ -308,12 +228,9 @@ export class PostgresOutboxStore implements OutboxStore {
   }
 
   /**
-   * [ADR 0404](../../../docs/decisions/0404-purge-expired-recalls-and-completed-outbox-jobs.md):
-   * `OutboxStore.purgeCompletedJobs?` の実装。`completed_at IS NOT NULL AND completed_at < olderThan`
-   * の行**だけ**を消す——claim 中・未処理・`failed_at` が付いた行は、述語に `completed_at` が
-   * 入っている限り対象にならない（`complete` と `fail` は互いに排他なので、`failed_at` の行に
-   * `completed_at` は付かない）。対象を先に確定し（`FOR UPDATE SKIP LOCKED`）、その id だけを
-   * 消す。
+   * `OutboxStore.purgeCompletedJobs?` の実装（ADR 0404）。`completed_at IS NOT NULL AND completed_at < olderThan` の行
+   * **だけ**を消す（claim 中・未処理・`failed_at` が付いた行は対象にならない）。対象を先に確定し
+   * （`FOR UPDATE SKIP LOCKED`）、その id だけを消す。
    */
   async purgeCompletedJobs(
     ctx: Ctx,
@@ -373,12 +290,9 @@ export class PostgresOutboxStore implements OutboxStore {
 }
 
 /**
- * `purgeCompletedJobs` が消す対象の `outbox` の行を選ぶ SELECT
- * （`completed_at IS NOT NULL AND completed_at < opts.olderThan`、古い順に `opts.limit + 1` 件
- * ——上限に届いたかを判定するために1件多く取る）。`lock` が真なら `FOR UPDATE SKIP LOCKED` で
- * 行を掴む（削除するとき）。EXPLAIN の歯（`outbox-purge-index.test.ts`）がこの関数の返り値を測る。
- * 述語を `idx_outbox_completed`（migration 0032、`WHERE completed_at IS NOT NULL` の部分索引）の
- * 述語と揃えてある——ここを変えるときは索引も見直すこと。
+ * `purgeCompletedJobs` が消す対象の行を選ぶ SELECT。古い順に `opts.limit + 1` 件取り（上限に届いたかを判定するため）、
+ * `lock` が真なら `FOR UPDATE SKIP LOCKED` で行を掴む。述語は `idx_outbox_completed`（`WHERE completed_at IS NOT NULL` の
+ * 部分索引）の述語と揃えてある。ここを変えるときは索引も見直すこと。
  */
 export function buildPurgeCompletedJobsTargetSelect(
   ctx: Ctx,

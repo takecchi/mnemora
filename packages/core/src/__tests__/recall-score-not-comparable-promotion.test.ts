@@ -6,17 +6,6 @@ import type { RecallResult } from "../recall.js";
 import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * 段2で `score_not_comparable`（total が NaN。ゼロベクトルの埋め込みなど、ADR 0040/0044）に
- * 数えられた候補が、段3（必須の同伴取得）や段3.5（連想）で候補集合に戻ると、同じ記憶が
- * `memories`（または段4の `budget_dropped`）と `score_not_comparable` の両方に数えられていた。
- *
- * ADR 0203「決めたこと」1（`omitted` は返さなかった記憶の集合）と、追記3〜6 の「1件の Memory は
- * `omitted` の中で、最後にそれを落とした段で1回だけ数える」を `score_not_comparable` にも当てる。
- * 段2の内部状態（`partition.notComparable`）は memoryId を持つので、below_threshold と同じ形で
- * 突き合わせられる。
- */
-
 const ctx: Ctx = { tenantId: "tenant-1" };
 const NOW = new Date("2026-06-01T00:00:00.000Z");
 
@@ -176,8 +165,6 @@ describe("recall() — 段2で score_not_comparable に数えた候補が後の�
   it("(e) 段3.5 の組み立てで対向が取れず落ちた比較不能の記憶は、unit_assembly_dropped にだけ数える", async () => {
     const { runtime, stores } = buildRuntime();
     const x = await createEmbeddedMemory(stores, [1, 0, 0], { digest: "X" });
-    // A は halfLifeHours: 0 で total が NaN（段2で score_not_comparable）。X に近いので連想が拾うが、
-    // 対向 B を forget してあるので組み立てで Unit ごと落ちる。
     const b = await createEmbeddedMemory(stores, [0, 0, 1], { digest: "B" });
     // halfLifeHours: 0 は出力の契約（`markContested` の戻り値の検査）を通らないので、contested の
     // 組は store へ直に書く。
@@ -208,7 +195,6 @@ describe("recall() — 段2で score_not_comparable に数えた候補が後の�
       ctx,
       newMemory({ digest: "owner", validFrom: new Date(Date.UTC(2020, 0, 1)), validUntil: null }),
     );
-    // Z: ゼロベクトル（段2で score_not_comparable）。validFrom が M1 より古いので、上限 1 で切られるのは Z。
     const z = await stores.memoryStore.createMemory(
       ctx,
       newMemory({ digest: "Z", validFrom: new Date(Date.UTC(2020, 0, 2)), validUntil: null }),
@@ -236,7 +222,6 @@ describe("recall() — 段2で score_not_comparable に数えた候補が後の�
   it("(g) 比較不能の記憶が2件同時に戻ったときは、戻った件数ぶん差し引き、戻っていない1件だけが残る", async () => {
     const { runtime, stores } = buildRuntimeWithRelations();
     const owner = await createEmbeddedMemory(stores, [1, 0], { digest: "owner" });
-    // z1・z2 はゼロベクトル（段2で score_not_comparable）で、owner と同じ群。段3の同伴取得で2件とも戻る。
     const z1 = await createEmbeddedMemory(stores, [0, 0], { digest: "Z1" });
     const z2 = await createEmbeddedMemory(stores, [0, 0], { digest: "Z2" });
     await runtime.markContestedGroup!(ctx, [owner.id, z1.id, z2.id]);

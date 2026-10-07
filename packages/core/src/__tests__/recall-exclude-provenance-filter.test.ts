@@ -9,29 +9,11 @@ import { createFakeRuntimeStores } from "./runtime-fakes.js";
 import type { FakeVectorStore } from "./runtime-fakes.js";
 import { createObservedMemory } from "./observed-memory.js";
 
-/**
- * ⭐ 配線の歯: `recall()` が `RecallQuery.excludeProvenanceKinds` を段1
- * （`VectorStore.search`）の filter に載せていることを検査する（ADR 0056）。
- *
- * `recall-subject-filter.test.ts`（ADR 0023 の配線の歯）と同型——`packages/core` 自身の
- * テストなので `@mnemora/testkit` には依存しない（`runtime-fakes.ts` 冒頭のコメントと
- * 同じ理由）。DB を要さないため手元で実行できる。
- *
- * ⟹ `recall-runtime.ts` の段1呼び出しから `excludeProvenanceKinds:` の行を消す変異を
- * 当てると、1つ目の it() が確実に赤くなる
- * （`capturedFilters[0]?.excludeProvenanceKinds` が `undefined` になる）。
- */
+/** `@mnemora/testkit` には依存しない（`runtime-fakes.ts` 冒頭と同じ理由）。 */
 
 const NOW = new Date("2026-06-01T00:00:00.000Z");
 
-/**
- * `vectorStoreOverride` を渡さなければ従来どおり `stores.vectorStore`（FakeVectorStore 本体）を
- * runtime に注入する。渡すと、その結果を注入する——下の「段2専用の歯」が
- * `ExcludeProvenanceStrippingVectorStore` を挟むために使う（`recall-period-filter.test.ts` の
- * `PeriodStrippingVectorStore` と同型）。`stores` に載っている実体（`FakeBackingStore` 経由の
- * memory / vector）は override の有無に関わらず同じものを指す——`createEmbeddedMemory` は
- * いつも `stores.vectorStore.upsert` を直接呼ぶ。
- */
+/** `vectorStoreOverride` を渡すと、その結果を runtime に注入する（段2専用の歯が `ExcludeProvenanceStrippingVectorStore` を挟むために使う）。 */
 function buildRuntime(vectorStoreOverride?: (fvs: FakeVectorStore) => VectorStore) {
   const stores = createFakeRuntimeStores();
   const vectorStore = vectorStoreOverride
@@ -89,40 +71,14 @@ describe("recall() — 段1の filter に excludeProvenanceKinds が載ること
 
     expect(capturedFilters).toHaveLength(1);
     const passed = capturedFilters[0]?.excludeProvenanceKinds;
-    // `RecallQuerySchema.excludeProvenanceKinds` は `.default()` を持たない zod スキーマ
-    // （既定は `undefined`）——`?? []` で正規化して渡すこともこの契約上は許されるため、
-    // どちらであっても段1が no-op になることだけを固定する（VectorFilter の doc 参照:
-    // `undefined` と `[]` はどちらも no-op）。
+    // `.default()` を持たないので `?? []` で渡すことも契約上許される。どちらでも段1が no-op になることだけを固定する。
     expect(passed === undefined || passed?.length === 0).toBe(true);
   });
 });
 
-// ---------------------------------------------------------------------------
-// ⭐⭐ 段2（recall-runtime.ts の後段 excludeProvenanceKinds 再検査、
-// `if (excludeKinds.has(memory.provenance.kind)) continue;`）専用の歯。
-// ADR 0056 が変異試験の表に「生き残る」と記録した2件（変異5・変異6）のうち、
-// 変異5（段2の除外集合を常に空にする）を塞ぐ。
-//
-// **上の describe を含め、通常の歯は必ず段1（FakeVectorStore）と段2
-// （recall-runtime.ts）の両方を経由する。** 段1が `VectorFilter.excludeProvenanceKinds`
-// を正しく適用している限り、段2の1行はコードとしては実行されても「落とす」役には
-// 立たない（段1が既に落としているため）——ADR 0056 が「段1と段2が互いを庇っている」
-// と書いた理由そのもの。
-//
-// ここでは `FakeVectorStore` を薄く包み、`search()` に渡ってきた `opts.filter` から
-// `excludeProvenanceKinds` **だけ**を剥がしてから委譲する
-// （`ExcludeProvenanceStrippingVectorStore`。`recall-period-filter.test.ts` の
-// `PeriodStrippingVectorStore` と同型）。ADR 0056 が「段1がわざと絞らない adapter を
-// 使って段2だけを検査する歯が要る」と書き残していた処方をそのまま実装したもの
-// ——「`VectorFilter` の契約（ADR 0034）を守らない adapter」を歯の中だけで再現し、
-// 段2だけが excludeProvenanceKinds を落とす状況を作る。他のフィールド（tenantId/
-// status/subjectId/period/decayFloorAtAfter）はそのまま通す——
-// excludeProvenanceKinds 以外まで段1でザルにすると、この歯が
-// 「excludeProvenanceKinds だけを測っている」ことが言えなくなる。
-//
-// ⛔ 本番コード（recall-runtime.ts / vector-store.ts）は1文字も変えない——
-// ラッパはこの test ファイルの中に閉じている。
-// ---------------------------------------------------------------------------
+// 段2専用の歯。通常の歯は段1と段2の両方を経由し、段1が除外を適用している限り段2の除外は「落とす」役に立たない（互いを庇う）。
+// `FakeVectorStore` を包み、`search()` の filter から `excludeProvenanceKinds` だけを剥がして段2だけを検査する。
+// 他のフィールドはそのまま通す（それ以外まで段1でザルにすると、excludeProvenanceKinds だけを測っているとは言えなくなる）。
 
 class ExcludeProvenanceStrippingVectorStore implements VectorStore {
   constructor(private readonly inner: VectorStore) {}
@@ -157,7 +113,6 @@ class ExcludeProvenanceStrippingVectorStore implements VectorStore {
     query: number[],
     opts: { limit: number; filter: VectorFilter },
   ): Promise<VectorHit[]> {
-    // 🔑 excludeProvenanceKinds「だけ」を剥がす。他は素通し。
     const { excludeProvenanceKinds: _excludeProvenanceKinds, ...provenanceStripped } = opts.filter;
     return this.inner.search(ctx, space, query, { ...opts, filter: provenanceStripped });
   }
@@ -218,8 +173,6 @@ describe("recall() — 段2（recall-runtime.ts の後段 excludeProvenanceKinds
 
     const query = [1, 0];
 
-    // 除外対象（kind: "inferred"）。段1は excludeProvenanceKinds を見ないので、
-    // 段2の `if (excludeKinds.has(memory.provenance.kind)) continue;` だけが落とせる。
     const inferredProvenance = {
       kind: "inferred" as const,
       model: "test-model",
@@ -235,8 +188,7 @@ describe("recall() — 段2（recall-runtime.ts の後段 excludeProvenanceKinds
       digest: "excluded-inferred-2",
       provenance: inferredProvenance,
     });
-    // 除外対象外（kind: "imported"、newMemory の既定）。2件（複数にしておくと、
-    // たまたま1件だけ残る実装でも見分けが付く）。
+    // 除外対象外は2件にする: たまたま1件だけ残る実装でも見分けが付く。
     await createEmbeddedMemory(stores, [1, 0.02], {
       digest: "kept-imported-1",
     });
@@ -252,9 +204,7 @@ describe("recall() — 段2（recall-runtime.ts の後段 excludeProvenanceKinds
     });
 
     const digests = result.memories.map((m) => m.digest);
-    // 順序に依存しない（distance の僅差でタイブレークしうるため toContain/not.toContain で見る。
-    // ADR 0040: ゼロベクトルは距離が NaN になるため、ここでは使わない）。limit=10 は
-    // 候補4件に対して十分な余裕を持たせてあり、ぎりぎりにしていない。
+    // 順序に依存しない: distance の僅差でタイブレークしうるため toContain で見る。ゼロベクトルは距離が NaN になるので使わない（ADR 0040）。
     expect(digests).toContain("kept-imported-1");
     expect(digests).toContain("kept-imported-2");
     expect(digests).not.toContain("excluded-inferred-1");
@@ -262,24 +212,8 @@ describe("recall() — 段2（recall-runtime.ts の後段 excludeProvenanceKinds
   });
 });
 
-// ---------------------------------------------------------------------------
-// ⭐⭐ 段1（FakeVectorStore.search の excludeProvenanceKinds 適用）専用の歯。
-// ADR 0056 が「引き受ける負債」節に記録した族——`FakeVectorStore` の除外方向を
-// 反転する変異（変異6）や、除外の適用そのものを削る変異——を、既存のどの歯も
-// 独立には捕まえていなかった（マネージャーが手元で実測: `FakeVectorStore` の
-// exclude 適用ブロックを丸ごと削っても、フルスイート 527 本が1本も赤くならない）。
-//
-// `recall-period-filter.test.ts` の「period の押し下げが over-fetch の窓（k'）を
-// 無駄にしない」describe と同型の処方——**素の `FakeVectorStore`（ラッパ無し）**を使い、
-// 「crowd（除外対象の kind・distance 0）が over-fetch の窓を埋めても、target
-// （除外対象外の kind・distance > 0）が返る」ことを測る。段2は生かしたまま
-// ——段2が生きていても、段1が候補の時点で crowd を落としていなければ、狭い窓
-// （k'）が crowd で埋まってしまい target が一度も候補に現れない、という段1
-// 固有の主張をこの歯だけで測るため。
-//
-// ⛔ 本番コード（recall-runtime.ts / vector-store.ts）は1文字も変えない——
-// 素の `FakeVectorStore`（`runtime-fakes.ts`、既存の test double）をそのまま使う。
-// ---------------------------------------------------------------------------
+// 段1専用の歯。素の `FakeVectorStore` を使い、crowd（除外対象 kind・distance 0）が over-fetch の窓を埋めても target が返ることを測る。
+// 段2は生かしたまま: 段1が crowd を落とさないと窓が crowd で埋まり target が候補に現れない、という段1固有の主張だけを測るため。
 
 describe("recall() — 段1（FakeVectorStore の excludeProvenanceKinds 適用）が over-fetch の窓（k'）を無駄にしない専用の歯（ADR 0056、変異6の族）", () => {
   it("除外対象の kind（distance 0）が窓を埋めても、除外対象外の kind（distance > 0）が返る", async () => {
@@ -294,9 +228,7 @@ describe("recall() — 段1（FakeVectorStore の excludeProvenanceKinds 適用�
       confidence: 0.9,
     };
 
-    // crowd: 除外対象（kind: "inferred"）・クエリと完全一致（distance 0）。
-    // limit=3, overFetchFactor=1 -> k'=3 なので、段1が除外しなければこの3件だけで
-    // ANN の窓（k'=3）が埋まり、除外対象外の候補は段1の hits に一度も現れない。
+    // limit=3, overFetchFactor=1 なので k'=3: 段1が除外しないと窓は crowd だけで埋まる。
     for (let i = 0; i < 3; i += 1) {
       await createEmbeddedMemory(stores, query, {
         digest: `crowd-inferred-${i}`,
@@ -304,9 +236,6 @@ describe("recall() — 段1（FakeVectorStore の excludeProvenanceKinds 適用�
       });
     }
 
-    // target: 除外対象外（kind: "imported"、newMemory の既定）・クエリからわずかに
-    // ずれる（distance > 0、しかし similarity は十分高く既定の scoreThreshold=0.1 を
-    // 大きく上回る）。
     const targetIds: string[] = [];
     for (let i = 0; i < 3; i += 1) {
       const memory = await createEmbeddedMemory(stores, [1, 0.01], {
@@ -322,12 +251,6 @@ describe("recall() — 段1（FakeVectorStore の excludeProvenanceKinds 適用�
       overFetchFactor: 1,
     });
 
-    // ⟹ 段1が除外していれば、filter が crowd を最初から候補から外すので k'=3 の窓は
-    // target 3件だけで埋まり、3件とも返る。
-    // ⟹ 段1の exclude 適用を削る変異（あるいは向きを反転する変異6）を当てると、
-    // 段1は距離だけで crowd 3件を選んでしまい（distance 0 が最短）、
-    // target は一度も窓に入らない——段2がまだ生きていても、段2は crowd 3件を
-    // 除外対象として全部落とすため、結果は 0件になる。
     expect(result.memories).toHaveLength(3);
     expect(result.memories.map((m) => m.memoryId).sort()).toEqual([...targetIds].sort());
   });

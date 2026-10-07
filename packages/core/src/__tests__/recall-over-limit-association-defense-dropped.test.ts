@@ -5,16 +5,7 @@ import type { Memory, NewMemory } from "../memory.js";
 import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * 段3.5（連想）の候補が、過取得の窓には入ったが、組み立ての多層防御（`survives*` のゲート）で
- * 落ちるとき、その候補は `over_limit(stage:"association")` に数えられない。したがって、
- * 段2で数えた `over_limit(stage:"rescore")` からも差し引かない（差し引くと、どの札にも
- * 数えられない記憶が1件できる）。
- *
- * ゲートは段1と同じ述語なので、vectorStore が契約どおりなら連想では何も落ちない。ここでは、
- * 連想の候補を読み出す `getMany` だけが、段2のときと違う行（状態が `superseded`）を返す
- * 形にして、ゲートに落とさせる。
- */
+/** ゲートは段1と同じ述語なので、vectorStore が契約どおりなら連想では何も落ちない。連想の候補を読み出す `getMany` だけ段2と違う行（`superseded`）を返す形にして、ゲートに落とさせる。 */
 
 const ctx: Ctx = { tenantId: "tenant-1" };
 const NOW = new Date("2026-06-01T00:00:00.000Z");
@@ -124,17 +115,14 @@ describe("recall() — 連想の組み立てで多層防御に落ちた候補は
       association: { maxCount: 1, anchorCount: 1 },
     });
 
-    // C1 は連想の席に着き、T はゲートに落ちて返らない。
     const returnedC1 = result.memories.find((m) => m.memoryId === c1.id);
     expect(returnedC1?.retrievedVia).toBe("association");
     expect(result.memories.find((m) => m.memoryId === t.id)).toBeUndefined();
 
-    // T は over_limit(association) には数えられていない（窓の中で、席の競りにも載らなかった）。
     expect(
       result.omitted.find((o) => o.kind === "over_limit" && o.stage === "association"),
     ).toBeUndefined();
 
-    // したがって、段2で数えた over_limit(rescore) の T の分は残る（C1 の分だけが差し引かれる）。
     const overLimitRescore = result.omitted.find(
       (o) => o.kind === "over_limit" && o.stage === "rescore",
     );

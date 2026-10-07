@@ -1,25 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 import { type FuzzBackend, fuzzSeeds } from "./recall-invariant-fuzz-harness.js";
 
-/**
- * recall の不変条件を、シードつきのランダムな操作列で検査する（Issue #1019・#1020・#1021 を
- * 見つけた検査器を、固定シードで回す形にしたもの）。Fake（`runtime-fakes.ts`）だけで完結する。
- *
- * 操作と不変条件（I1〜I12）の一覧は `recall-invariant-fuzz-harness.ts` に在る（ここには写さない）。
- * 同じ検査器を Postgres の上で回すのは
- * `packages/postgres/src/__tests__/recall-invariant-fuzz.postgres.test.ts`。
- *
- * `RECALL_FUZZ_SEEDS`・`RECALL_FUZZ_LEN` で本数と長さを変えられる。
- */
-
 const SEEDS = Number(process.env.RECALL_FUZZ_SEEDS ?? 40);
 const LEN = Number(process.env.RECALL_FUZZ_LEN ?? 60);
-// ADR 0492: これまで振っていなかった recall の欄を振る profile。本数は小さく絞る。
 const FIELDS_SEEDS = Number(process.env.RECALL_FUZZ_FIELDS_SEEDS ?? 20);
-// ADR 0494: relationStore をつなぐ profile と、引数を変形する profile。
 const RELATIONS_SEEDS = Number(process.env.RECALL_FUZZ_RELATIONS_SEEDS ?? 20);
 const ARG_SEEDS = Number(process.env.RECALL_FUZZ_ARG_SEEDS ?? 20);
-// ADR 0509: `channels`（`ann`／`lexical` の組と `text`）を振る profile。
 const CHANNELS_SEEDS = Number(process.env.RECALL_FUZZ_CHANNELS_SEEDS ?? 20);
 
 const fakeBackend: FuzzBackend = {

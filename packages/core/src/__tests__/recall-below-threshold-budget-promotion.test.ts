@@ -6,18 +6,6 @@ import type { RecallResult } from "../recall.js";
 import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * Issue #950: 段2で `below_threshold` に数えられた候補が、段3（必須の同伴取得）または
- * 段3.5（連想）で候補集合に戻り、段4の予算で改めて落ちると、`below_threshold` と
- * `budget_dropped` の両方に数えられていた。
- *
- * ADR 0203 追記3（Issue #940）・追記4（Issue #949）の原則「1件の Memory は `omitted` の中で、
- * 最後にそれを落とした段で1回だけ数える」を `below_threshold` にも当てる——戻った候補は
- * `budget_dropped` 側に残し、`below_threshold` の `count` と `nearMisses` からは取り下げる。
- * 取り下げの作法（`count` を減らし、`nearMisses` から外し、0件なら Omission ごと外す）は
- * ADR 0203「決めたこと」5 と同じである。
- */
-
 const ctx: Ctx = { tenantId: "tenant-1" };
 const NOW = new Date("2026-06-01T00:00:00.000Z");
 
@@ -102,7 +90,6 @@ describe("recall() — 段3/段3.5で戻った below_threshold の候補が段4�
     const { runtime, stores } = buildRuntime();
 
     const cand1 = await createEmbeddedMemory(stores, [1, 0], { digest: "C" });
-    // クエリとの類似度 ≈0.05 ⟹ total が既定の scoreThreshold(0.1) を割り、段2で below_threshold。
     const companion = await createEmbeddedMemory(stores, [0.05, 0.9987], {
       status: "contested",
       digest: "COMPANION",
@@ -135,9 +122,7 @@ describe("recall() — 段3/段3.5で戻った below_threshold の候補が段4�
     const { runtime, stores } = buildRuntime();
 
     const cand1 = await createEmbeddedMemory(stores, [1, 0, 0], { digest: "C" });
-    // アンカーになる記憶（クエリとの類似度 0.6 で段2を通る）。
     const anchor = await createEmbeddedMemory(stores, [0.6, 0, 0.8], { digest: "ANCHOR" });
-    // クエリとの類似度 ≈0.05 で段2は below_threshold。アンカーとの類似度 ≈0.83 で連想に拾われる。
     const b = await createEmbeddedMemory(stores, [0.05, 0, 0.9987], { digest: "BBBBBB" });
 
     const result = await runtime.recall(ctx, {
@@ -186,9 +171,7 @@ describe("recall() — 段3/段3.5で戻った below_threshold の候補が段4�
     const { runtime, stores } = buildRuntime({ withRelationStore: true });
 
     const cand1 = await createEmbeddedMemory(stores, [1, 0], { digest: "C" });
-    // 群の起点（owner）。クエリとの類似度が高く、段2を通る。
     const owner = await createEmbeddedMemory(stores, [0.999, 0.0447], { digest: "OWNER" });
-    // クエリとの類似度 ≈0.05 ⟹ 段2で below_threshold。群のメンバーなので段3の同伴取得で戻る。
     const belowMember = await createEmbeddedMemory(stores, [0.05, 0.9987], { digest: "BELOW" });
     // 埋め込みを持たない群のメンバー（同伴取得だけが経路）。
     const plainMember = await stores.memoryStore.createMemory(ctx, newMemory({ digest: "PLAIN" }));
@@ -217,7 +200,6 @@ describe("recall() — 段3/段3.5で戻った below_threshold の候補が段4�
 
     const cand1 = await createEmbeddedMemory(stores, [1, 0, 0], { digest: "C" });
     const anchor = await createEmbeddedMemory(stores, [0.6, 0, 0.8], { digest: "ANCHOR" });
-    // どちらも類似度 ≈0.05 で段2は below_threshold、アンカーとの類似度 ≈0.83 で連想に拾われる。
     const b1 = await createEmbeddedMemory(stores, [0.05, 0, 0.9987], { digest: "BBBBBB" });
     const b2 = await createEmbeddedMemory(stores, [0.05, 0.01, 0.9986], { digest: "DDDDDD" });
     const bystander = await createEmbeddedMemory(stores, [0.05, 0.9987, 0], {

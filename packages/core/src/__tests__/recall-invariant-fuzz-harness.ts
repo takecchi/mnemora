@@ -11,59 +11,31 @@ import {
 } from "../interfaces/memory-store.js";
 
 /**
- * recall の不変条件を、シードつきのランダムな操作列で検査する検査器の本体（Issue #1019・#1020・
- * #1021 を見つけた検査器）。store 一式は呼び出し側が渡す——Fake（`recall-invariant-fuzz.test.ts`）と
- * Postgres（`packages/postgres/src/__tests__/recall-invariant-fuzz.postgres.test.ts`）が同じ操作列・
- * 同じ検査を共有する。
+ * recall の不変条件を、シードつきのランダムな操作列で検査する検査器の本体。store 一式は呼び出し側が渡し、Fake と Postgres が同じ操作列・同じ検査を共有する。
+ * 落ちたときは、操作を1つずつ抜いて違反が残るかを見る形で最小化し、シードと最小の操作列を出力する。
  *
- * 操作: 記憶の作成（ゼロベクトル・`pending` を含む）、recall（`limit`・連想枠・予算・閾値・
- * 語彙チャンネルを振る）、使用報告による強化、forget、purge、restoreArchived、markContested、
- * resolveContested、consolidate（LLM は固定の応答）、sweepArchive、時計を進める。
- *
- * recall のたびに検査する不変条件と、その約束の在り処:
- * - I1 contested は対向なしで返らない（`docs/architecture.md` §0 原則1、`MemoryStore` の契約、
- *   `docs/recall.md` §8、ADR 0136、Issue #959）
- * - I2 `memories` に同じ id が2回出ない（ADR 0203）
- * - I3 status が active/contested 以外の記憶・purge 済みの記憶は返らない
- *   （`docs/recall.md` §2 段0 の status ゲート、ADR 0124）
- * - I4 `below_threshold.nearMisses` の id は返っておらず、score は閾値未満（ADR 0203、
- *   `BelowThresholdOmission` の doc）
- * - I5 `score.total` は `affinity × decay × tagMatch × freshness × strength`
- *   （`strategies/scoring.ts`、`docs/recall.md` §7）
- * - I6 `axis: 'subject'` の群カウントの総和は `totalInScope`（`docs/recall.md` §5）
- * - I7 digest 帯の id は返っていない（`docs/recall.md` §5）
- * - I8 `contestedWith` の相手は同じ結果に居る（ADR 0335）
- * - I9 同じ操作列は同じ結果を返す（Fake の決定性。`checkDeterminism` を立てた backend だけ）
- * - I10 件数の勘定。スコープ内の記憶を、返したもの（status が active/contested）と、**候補ごとの層**の
- *   札（`below_threshold`・`over_limit`・`budget_dropped`・`score_not_comparable`・
- *   `unit_assembly_dropped`）の件数で数える。**集約の層**の札（`not_indexed`、`filtered` のすべての
- *   `condition`）は、スコープ全体の集約から出す件数で、排他性の対象の外に置く（ADR 0203 追記9、
- *   Issue #1021・#1025）ので、この和には入れない。
- *   - 上限: 和 ≦ `totalInScope`。ADR 0203 の「1件の Memory は `omitted` の中で1回だけ数える」
- *     （決めたこと1、追記3〜8）から導ける。
- *   - 下限: 候補ごとの層の件数がすべて `'exact'` で、件数を持たない札（`ann_truncated`・
- *     `ann_unreached`・`lexical_truncated`・段1の `stage_skipped`）が無いとき、
- *     和 ≧ `totalInScope` − `not_indexed` − スコープ内の `filtered`（`within_scope`）。
- *     候補にならなかったスコープ内の記憶は、埋め込みが無いか減衰しきっているかのどちらかであり、
- *     それは集約の層の札が数えている。`docs/recall.md` 冒頭の原則3（結果は、そこから漏れたものと
- *     必ず同時に提示する）から導ける。
- *   下限は `channels` に `"ann"` を含む recall にだけ当てる（ADR 0509）。
- * - I11 集約の件数を、検査器が作った記憶の現在の状態から独立に数えた値と突き合わせる。この検査器の
- *   recall は scope を絞らない（subject・期間・`validAt` の外に出る記憶・taxonomy を持たない）ので、
- *   `totalInScope` は status が active/contested の記憶の件数（`docs/recall.md` §5「`totalInScope` が
- *   何を数えているか」）、`not_indexed` の合計はそのうち埋め込みが `ready` でないものの件数に等しい。
- *   I10 の下限は、`totalInScope` が膨らむと `ann_unreached` が立って効かなくなる（eligible も一緒に
- *   膨らむ）ので、膨らみはここで捕まえる。
- * - I12 `filtered`（`outside_scope`）の `archived`・`superseded`・`forgotten` の件数は、その status の
- *   記憶の件数に等しい（`docs/recall.md` §5 の表の甲群）。
- * - I13 `findCorrectionCandidates` の `excludeMemoryIds` は、大文字小文字を無視して除外する（ADR 0485、`fcc` 操作。ADR 0494）。
- * - I15 `consolidate` が積む `created` の `meta.sources` は小文字（ADR 0527、`argupper` の `consolidate` で届く）。
- * - I16 `getRecall(recallId)` が読み戻す `RecallRecord` は、その recall の戻り値と同じ内容を持つ（`returnedMemories` の
- *   `memoryId`・`retrievedVia`・`score`・`companionOf`・`associationOf`、`omitted`、`usage`。ADR 0155・0480・0509）。
- * - I14 群の同伴の数は、返った owner の数 × `relationMaxCount` 以下（ADR 0381・0396、`relations` profile。ADR 0494）。
- *
- * 落ちたときは、操作を1つずつ抜いて違反が残るかを見る形で操作列を最小化し、シードと最小の
- * 操作列を出力に出す。
+ * recall のたびに検査する不変条件:
+ * - I1 contested は対向なしで返らない。
+ * - I2 `memories` に同じ id が2回出ない。
+ * - I3 status が active/contested 以外の記憶・purge 済みの記憶は返らない。
+ * - I4 `below_threshold.nearMisses` の id は返っておらず、score は閾値未満。
+ * - I5 `score.total` は `affinity × decay × tagMatch × freshness × strength`。
+ * - I6 `axis: 'subject'` の群カウントの総和は `totalInScope`。
+ * - I7 digest 帯の id は返っていない。
+ * - I8 `contestedWith` の相手は同じ結果に居る。
+ * - I9 同じ操作列は同じ結果を返す（`checkDeterminism` を立てた backend だけ）。
+ * - I10 件数の勘定。スコープ内の記憶を、返したものと、候補ごとの層の札（`below_threshold`・`over_limit`・`budget_dropped`・`score_not_comparable`・`unit_assembly_dropped`）の件数で数える。
+ *   集約の層の札（`not_indexed`、`filtered` のすべての `condition`）は排他性の対象外なので、この和には入れない。
+ *   - 上限: 和 ≦ `totalInScope`。
+ *   - 下限: 候補ごとの層の件数がすべて `'exact'` で、件数を持たない札（`ann_truncated`・`ann_unreached`・`lexical_truncated`・段1の `stage_skipped`）が無いとき、和 ≧ `totalInScope` − `not_indexed` − スコープ内の `filtered`（`within_scope`）。
+ *     `channels` に `"ann"` を含む recall にだけ当てる。
+ * - I11 集約の件数を、検査器が作った記憶の現在の状態から独立に数えた値と突き合わせる（`totalInScope` は active/contested の件数、`not_indexed` の合計はそのうち埋め込みが `ready` でないものの件数）。
+ *   I10 の下限は `totalInScope` が膨らむと `ann_unreached` が立って効かなくなるので、膨らみはここで捕まえる。
+ * - I12 `filtered`（`outside_scope`）の `archived`・`superseded`・`forgotten` の件数は、その status の記憶の件数に等しい。
+ * - I13 `findCorrectionCandidates` の `excludeMemoryIds` は、大文字小文字を無視して除外する。
+ * - I14 群の同伴の数は、返った owner の数 × `relationMaxCount` 以下。
+ * - I15 `consolidate` が積む `created` の `meta.sources` は小文字。
+ * - I16 `getRecall(recallId)` が読み戻す `RecallRecord` は、その recall の戻り値と同じ内容を持つ。
  */
 
 /** キーの順に依らない JSON（`undefined` の欄は落ちる）。`getRecall` の読み戻し（jsonb）と、その場の値を比べるのに使う。 */
@@ -105,12 +77,7 @@ function rng(seed: number): () => number {
   };
 }
 
-/**
- * 操作に渡す id の変形（ADR 0494、`argdead`／`argupper` profile だけ）。
- * - `upper`: 大文字にする。操作の対象の `id` の大文字小文字は Postgres が受け、fixture（InMemory・Fake）は受けない
- *   （ADR 0446 の既存の違い）ので、3 実装の差分の検査には載せない。
- * - `dead`: 消した（forget・purge 済みの）記憶の id を狙って渡す。
- */
+/** 操作に渡す id の変形（`argdead`／`argupper` profile だけ）。`upper`: 大文字にする。`dead`: 消した記憶の id を狙って渡す。 */
 export type ArgMutation = "upper" | "dead";
 
 export type Op =
@@ -124,7 +91,7 @@ export type Op =
       hl: number;
       /** `fields` profile だけ: `occurredAt` を「いまから何時間前か」（負なら未来）で振る。無ければ null。 */
       occ?: number | null;
-      /** `channels` profile だけ: content に足す語（ADR 0509。日本語・識別子を含む）。 */
+      /** `channels` profile だけ: content に足す語（日本語・識別子を含む）。 */
       w?: string;
     }
   | {
@@ -136,9 +103,9 @@ export type Op =
       budget: number;
       thr: number;
       lex: boolean;
-      /** `fields` profile だけ: これまで一度も振っていなかった `RecallQuery` の欄（ADR 0492）。 */
+      /** `fields` profile だけ: これまで振っていなかった `RecallQuery` の欄。 */
       x?: { tw: boolean; dbl: number; qt: string[]; rmc?: number };
-      /** `channels` profile だけ: 渡す `channels` と `text`（ADR 0509）。あれば `lex` より優先する。 */
+      /** `channels` profile だけ: 渡す `channels` と `text`。あれば `lex` より優先する。 */
       ch?: { c: ("ann" | "lexical")[]; text: string };
     }
   | { k: "bulk"; n: number; seed: number }
@@ -149,15 +116,15 @@ export type Op =
   | { k: "mark"; i: number; j: number; mu?: ArgMutation }
   | { k: "resolve"; i: number; sup: boolean; mu?: ArgMutation }
   | { k: "consolidate"; i: number; j: number; mu?: ArgMutation }
-  /** `relations` profile だけ（ADR 0494）: 3 件の多者間の群を作る（`markContestedGroup`）。 */
+  /** `relations` profile だけ: 3 件の多者間の群を作る（`markContestedGroup`）。 */
   | { k: "group"; i: number; j: number; l: number }
   /** `relations` profile だけ: 作った群を解決する（`resolveContestedGroup`）。 */
   | { k: "resolveGroup"; g: number; sup: boolean }
-  /** `relations` profile だけ: `RelationStore.link` を直接呼ぶ（`contradicts` の1行、片方向。ADR 0494）。 */
+  /** `relations` profile だけ: `RelationStore.link` を直接呼ぶ（`contradicts` の1行、片方向）。 */
   | { k: "link"; i: number; j: number }
   /** `relations` profile だけ: `RelationStore.unlink` を直接呼ぶ。 */
   | { k: "unlink"; i: number; j: number }
-  /** `argdead`／`argupper` profile だけ: `findCorrectionCandidates` に `excludeMemoryIds` を渡す（ADR 0485・0494）。 */
+  /** `argdead`／`argupper` profile だけ: `findCorrectionCandidates` に `excludeMemoryIds` を渡す。 */
   | { k: "fcc"; i: number; mu?: ArgMutation }
   | { k: "sweep" }
   | { k: "advance"; hours: number };
@@ -173,34 +140,19 @@ const VECS = [
 ];
 
 /**
- * 操作列の形。
- * - `default`: 元の検査器（PR #1030）の操作列そのもの。同じシードは同じ列になる。
- * - `wide`: 記憶を一度に数十〜数百件作る `bulk` を混ぜ、recall の窓（`limit`・`overFetchFactor`）を
- *   広げる。`default` は1シードの記憶が高々二十数件で、窓 k' が scope の候補より小さいため
- *   `ann_unreached`（info）がほぼ常に立ち、I10 の下限がほとんど効かない。`wide` は
- *   索引（HNSW）を通る規模と、k' ≧ 候補数の recall（I10 の下限が効く）の両方を作る。
- * - `fields`: これまで振っていなかった `RecallQuery` の欄（ADR 0492）。
- * - `relations`: `relationStore` を配線し、`relationMaxCount`・多者間の群（`markContestedGroup`／
- *   `resolveContestedGroup`）・`RelationStore.link`／`unlink`（`contradicts` の1行、実在の2件）を振る
- *   （ADR 0494）。範囲外の `kind` や `kind` が偽の値の読み（ADR 0488 が縛った面）は渡さない。
- * - `argdead`／`argupper`: 操作に渡す id を、消した（forget・purge 済みの）記憶の id に差し替える／大文字にする
- *   （ADR 0494）。大文字の id は、ADR 0494 の時点では fixture が受けず（ADR 0446 の既存の違い）、3 実装の差分に載せられなかった。
- *   ADR 0521 で fixture を Postgres に揃えたので、`argdead`・`argupper` とも 3 実装の差分に載せる。
- * - `channels`: `channels`（`["ann","lexical"]`・`["lexical"]` だけ・`["ann"]` だけ）と `text` を乱択し、記憶の content に
- *   語（ASCII の識別子・日本語）を足す。語彙チャンネルの store（tsvector／trigram）との合流を振る（ADR 0509）。
- * - `fieldswide`: `wide` と `fields` を合わせる（近似索引 HNSW を通る規模に `fields` の欄を載せる。ADR 0509）。
- * - どの profile も、追加の乱数は別の流れ（`r2`）から引き、`default`／`wide`／`fields` の同じシードの操作列を変えない。
+ * 操作列の形。どの profile も追加の乱数は別の流れ（`r2`）から引き、`default`／`wide`／`fields` の同じシードの操作列を変えない。
+ * - `default`: 元の検査器の操作列。
+ * - `wide`: 記憶を一度に数十〜数百件作る `bulk` を混ぜ、recall の窓を広げる。`default` は記憶が少なく窓 k' が scope の候補より小さいので `ann_unreached` がほぼ常に立ち、I10 の下限が効かない。`wide` は索引（HNSW）を通る規模と、k' ≧ 候補数の recall の両方を作る。
+ * - `fields`: これまで振っていなかった `RecallQuery` の欄を振る。
+ * - `relations`: `relationStore` を配線し、`relationMaxCount`・多者間の群・`RelationStore.link`／`unlink` を振る。範囲外の `kind` や `kind` が偽の値の読みは渡さない。
+ * - `argdead`／`argupper`: 操作に渡す id を、消した記憶の id に差し替える／大文字にする。
+ * - `channels`: `channels` と `text` を乱択し、記憶の content に語を足して、語彙チャンネルの store（tsvector／trigram）との合流を振る。
+ * - `fieldswide`: `wide` と `fields` を合わせる。
  */
 export type FuzzProfile =
   "default" | "wide" | "fields" | "relations" | "argdead" | "argupper" | "channels" | "fieldswide";
 
-/**
- * `channels` profile が content と query の text に使う語（ADR 0509）。ASCII の語・識別子と、日本語（trigram 側）を含む。
- * ADR 0509 は Fake・testkit が Postgres と食い違う 2 つの語（ハイフンを含む識別子 `PROJ-12`、ほかの語の部分文字列になる語）を
- * 外していた。ADR 0513 で fixture を Postgres に揃えたので戻した（`PROJ-12`・`alp`。`alp` は `alpha` の部分文字列）。
- * ⚠ ADR 0513 が揃えていない parser の細部（`-12` の符号付き token、`a.b`・メールアドレスの 1 token、ハイフン結合語）を踏む語は
- * 入れないこと（`12` 単独、`a.b`、`abc-def` など）。入れると Fake・testkit と Postgres が割れる。
- */
+/** `channels` profile が content と query の text に使う語。ASCII の語・識別子と日本語（trigram 側）を含む。ハイフン結合語・`-12` の符号付き token・`a.b`・メールアドレスなど、parser の細部が Fake・testkit と Postgres で揃っていない語は入れない（割れる）。 */
 const CHANNEL_WORDS = [
   "alpha",
   "beta",
@@ -222,8 +174,7 @@ const CHANNEL_SETS: ("ann" | "lexical")[][] = [
 
 export function genOps(seed: number, n: number, profile: FuzzProfile = "default"): Op[] {
   const r = rng(seed);
-  // `fields` の追加の欄は別の乱数の流れから引く——`r` の引き方は `default` と同じに保ち、
-  // 同じシードの操作列の骨格（どの操作が何番目か）を変えない（ADR 0492）。
+  // `fields` の追加の欄は別の乱数の流れから引く: `r` の引き方を `default` と同じに保ち、同じシードの操作列の骨格を変えない。
   const r2 = rng((seed ^ 0x5bd1e995) >>> 0);
   const fields = profile === "fields" || profile === "fieldswide";
   const wide = profile === "wide" || profile === "fieldswide";
@@ -317,7 +268,7 @@ export type FuzzStores = Pick<
 > & {
   lexicalStore: NonNullable<RuntimeDeps["lexicalStore"]>;
   embeddingProvider: RuntimeDeps["embeddingProvider"];
-  /** `relations` profile だけが配線する（ADR 0494）。 */
+  /** `relations` profile だけが配線する。 */
   relationStore?: RuntimeDeps["relationStore"];
 };
 
@@ -340,7 +291,7 @@ export interface Violation {
 
 export interface RunOutcome {
   violations: Violation[];
-  /** ADR 0494: 変形した引数の形の数え上げ（`操作:変形:狙った記憶の状態` → 回数）。実際に何を渡したかを報告に載せる。 */
+  /** 変形した引数の形の数え上げ（`操作:変形:狙った記憶の状態` → 回数）。実際に何を渡したかを報告に載せる。 */
   shapes: Record<string, number>;
   /** 終わった時点の、作った記憶の状態（作成順。`status` と、purge 済みなら `+purged`）。 */
   finalStates: string[];
@@ -353,33 +304,19 @@ export interface RunOutcome {
   snapshots: string[];
 }
 
-/**
- * 差分検査で `VECS` の代わりに使うベクトル。角度（度）をゴロム定規 {0, 1, 4, 10, 12, 17} の
- * 5倍に置く——どの2本の組の角度差も互いに異なるので、**違うベクトルどうしが、あるクエリに
- * 対して数学的に同じ cosine を持つことが無い**。`VECS` は鏡像（[0.95, 0.31] と [0.31, 0.95]、
- * [1, 0] と [0, 1]）を含み、数学的な同点を作る。同点の決着は浮動小数の端数に落ち、pgvector は
- * ベクトルを float4 で持つので、Fake（float8）と逆に転ぶことがある（実測: seed 183 の連想枠の
- * 過取得の窓、#1033）。
- */
+/** 差分検査で `VECS` の代わりに使うベクトル。角度（度）をゴロム定規 {0, 1, 4, 10, 12, 17} の5倍に置く: どの2本の組の角度差も異なるので、違うベクトルどうしが同じ cosine を持つことが無い。`VECS` は鏡像を含み数学的な同点を作るが、同点の決着は浮動小数の端数に落ち、pgvector は float4 で持つので Fake（float8）と逆に転ぶことがある。 */
 const DIFF_VECS = [0, 5, 20, 50, 60, 85].map((deg) => [
   Math.cos((deg * Math.PI) / 180),
   Math.sin((deg * Math.PI) / 180),
 ]);
 
 export interface RunOptions {
-  /**
-   * 操作ごと（`bulk` は1件ごと）に時計を進める（既定は進めない）。同じ時刻に作った記憶の並びは
-   * id で決着し、id の振り方は backend ごとに違う（Fake は続き番号、Postgres は
-   * `gen_random_uuid()`）。差分検査では時刻をずらして、並びを id に頼らせない。
-   * 進め幅は、このシードの擬似乱数で 1〜1,000,000 ms に散らす——一定の幅だと
-   * 「減衰の起点 + 鮮度の起点 = 2 × 別の記憶の起点」のような算術的な一致が起き、
-   * 数学的に同点の total を作る（実測: seed 85、#1033）。
-   */
+  /** 操作ごと（`bulk` は1件ごと）に時計を進める（既定は進めない）。同じ時刻に作った記憶の並びは id で決着し、id の振り方は backend ごとに違うので、差分検査では時刻をずらす。進め幅は擬似乱数で 1〜1,000,000 ms に散らす: 一定の幅だと「減衰の起点 + 鮮度の起点 = 2 × 別の記憶の起点」のような算術的な一致が起き、数学的に同点の total を作る。 */
   jitterSeed?: number;
   /** `VECS` の代わりに `DIFF_VECS` を使う。 */
   diffVectors?: boolean;
   snapshot?: boolean;
-  /** `relationStore` を runtime に配線する（`relations` profile、ADR 0494）。配線すると recall の段3が変わる。 */
+  /** `relationStore` を runtime に配線する（`relations` profile）。配線すると recall の段3が変わる。 */
   relations?: boolean;
 }
 
@@ -465,7 +402,7 @@ export async function runOps(
       for (const k of Object.keys(value).sort()) {
         if (k === "recallId") continue;
         out[k] = await normalize((value as Record<string, unknown>)[k]);
-        // `groups` の出現順序は契約にしない（ADR 0307 決定6）。
+        // `groups` の出現順序は契約にしない。
         if (k === "groups" && Array.isArray(out[k]))
           out[k] = (out[k] as unknown[])
             .map((g) => JSON.stringify(g))
@@ -477,10 +414,7 @@ export async function runOps(
     return value;
   };
   const nth = (i: number) => (ids.length > 0 ? ids[i % ids.length] : undefined);
-  /**
-   * ADR 0494: 消した記憶の id。forget 済み（`purgedAt` なし）と purge 済み（`purgedAt` あり。行は墓標として残る）を
-   * 別々に集め、`i` の偶奇で交互に狙う（片方が無ければ、もう片方）。どちらも無ければ undefined。
-   */
+  /** 消した記憶の id。forget 済み（`purgedAt` なし）と purge 済み（`purgedAt` あり。行は墓標として残る）を別々に集め、`i` の偶奇で交互に狙う（片方が無ければもう片方）。 */
   const deadNth = async (i: number): Promise<MemoryId | undefined> => {
     const forgotten: MemoryId[] = [];
     const purged: MemoryId[] = [];
@@ -493,7 +427,7 @@ export async function runOps(
       (i & 1) === 1 && purged.length > 0 ? purged : forgotten.length > 0 ? forgotten : purged;
     return pool.length > 0 ? pool[Math.floor(i / 2) % pool.length] : undefined;
   };
-  /** ADR 0494: 操作に渡す id を変形する（`upper`: 大文字、`dead`: 消した記憶を狙う。無ければ元の id）。 */
+  /** 操作に渡す id を変形する（`upper`: 大文字、`dead`: 消した記憶を狙う。無ければ元の id）。 */
   const shapes: Record<string, number> = {};
   const countShape = async (op: string, id: MemoryId | undefined, mu?: ArgMutation) => {
     if (mu === undefined || id === undefined) return;
@@ -519,7 +453,7 @@ export async function runOps(
     const v = (inv: string, detail: string) => violations.push({ inv, detail, op: oi });
     const returned = new Set(r.memories.map((m) => m.memoryId));
     if (returned.size !== r.memories.length) v("I2-unique", JSON.stringify([...returned]));
-    // I16（ADR 0509）: 書いた `recalls` の行を `getRecall` で読み戻すと、返した内容と一致する。
+    // I16: 書いた `recalls` の行を `getRecall` で読み戻すと、返した内容と一致する。
     {
       const rec = await rt.getRecall(ctx, r.recallId);
       if (rec === null) v("I16-record-missing", String(r.recallId));
@@ -547,9 +481,7 @@ export async function runOps(
         if (canon(rec.usage) !== canon(r.usage)) v("I16-record-usage", "usage が食い違う");
       }
     }
-    // I14（ADR 0494）: 群の同伴（`contestedWithId` を持たない `contested` から辿った `mandatory_companion`）は、
-    // 群ごとに `relationMaxCount` 件まで（`RecallQuery.relationMaxCount`）。単位は丸ごと返る（owner を含む）ので、
-    // 返った owner（同伴でなく、`contested` で `contestedWithId` なし）の数 × 上限が、同伴の総数の上限になる。
+    // I14: 群の同伴は群ごとに `relationMaxCount` 件まで。単位は丸ごと返る（owner を含む）ので、返った owner（同伴でなく、`contestedWithId` なしの `contested`）の数 × 上限が同伴の総数の上限になる。
     if (q.relationMaxCount !== undefined && q.relationMaxCount > 0) {
       const rows = new Map(
         (await stores.memoryStore.getMany(ctx, [...returned])).map((m) => [m.id, m]),
@@ -586,10 +518,7 @@ export async function runOps(
       if (rm.contestedWith !== undefined && !returned.has(rm.contestedWith))
         v("I8-contestedWith", rm.memoryId);
       const s = rm.score;
-      // Issue #548 方向2 / ADR 0352: affinityMeasured: false の score（AffinityUnmeasuredScore）
-      // は total/similarity/lexicalMatch を欄として持たない——I5 が比べる「公開された total」
-      // そのものが無いので、この形の記憶は I5 の検査対象から外す（内部では今日も同じ積で
-      // total を計算しているが、その値は返り値に出ない。`toRecalledScore` の doc 参照）。
+      // `affinityMeasured: false` の score は total/similarity/lexicalMatch を欄として持たず、I5 が比べる「公開された total」が無いので、この形の記憶は I5 の対象から外す。
       if (s.affinityMeasured === false) {
         continue;
       }
@@ -622,7 +551,7 @@ export async function runOps(
       if (returned.has(d.memoryId)) v("I7-band-returned", d.memoryId);
 
     let counted = returnedInScope;
-    // 集約の層の札（ADR 0203 追記9）。和には入れず、下限の余白にだけ使う。
+    // 集約の層の札。和には入れず、下限の余白にだけ使う。
     let aggregateSlack = 0;
     let allExact = true;
     for (const o of r.omitted) {
@@ -651,9 +580,7 @@ export async function runOps(
           break;
       }
     }
-    // ADR 0509: `channels` に `"ann"` が無い recall（`["lexical"]` だけ）の候補は語彙に当たった記憶だけで、当たらなかった
-    // スコープ内の記憶は、どの札にも数えられない（埋め込みが有っても候補にならない）。下限は「ann が eligible を全部候補にする」
-    // ことに依っているので、ann を含まない recall には当てない（上限は当てる）。
+    // `channels` に "ann" が無い recall（`["lexical"]` だけ）では、語彙に当たらなかったスコープ内の記憶がどの札にも数えられない。下限は ann が eligible を全部候補にすることに依るので、ann を含まない recall には当てない（上限は当てる）。
     if (q.channels !== undefined && !q.channels.includes("ann")) allExact = false;
     const summary = () =>
       `returned ${returnedInScope}, counted ${counted}, aggregate-layer ${aggregateSlack}, total ${r.index.totalInScope} :: ${JSON.stringify(r.omitted)}`;
@@ -719,9 +646,7 @@ export async function runOps(
         halfLifeHours: op.hl,
       }),
       embeddingStatus: op.ready ? "ready" : "pending",
-      // ADR 0494: 群の同伴の並び・切り捨ては `validFrom` の新しい順→id の順。`validFrom` が全員 null だと id で決まり、
-      // id が作成順の `mem-N`（Fake・InMemory）か乱数の uuid（Postgres）かで並びが割れる（約束の外）ので、
-      // `relations` の実行では作成ごとに別の `validFrom` を付けて、id の比較に落ちないようにする。
+      // 群の同伴の並び・切り捨ては `validFrom` の新しい順→id の順。`validFrom` が全員 null だと id で決まり、id が `mem-N`（Fake・InMemory）か uuid（Postgres）かで並びが割れる（約束の外）ので、`relations` の実行では作成ごとに別の `validFrom` を付ける。
       ...(runOpts.relations ? { validFrom: at } : {}),
     };
     const m = await stores.memoryStore.createMemory(ctx, n);
@@ -790,9 +715,7 @@ export async function runOps(
           lastRecall = r;
           trace.push(
             JSON.stringify({
-              // Issue #548 方向2 / ADR 0352: affinityMeasured: false の score には total が
-              // 無い——I9（決定性）の指紋としては null で揃える（無いことも決定的なので、
-              // トレースの一貫性には影響しない）。
+              // `affinityMeasured: false` の score には total が無い: I9（決定性）の指紋としては null で揃える。
               m: r.memories.map((x) => [
                 x.memoryId,
                 x.retrievedVia,
@@ -810,7 +733,6 @@ export async function runOps(
                   memories: r.memories,
                   omitted: r.omitted,
                   index: r.index,
-                  // ADR 0509: `getRecall` で読み戻した `RecallRecord`（`recallId` は normalize が落とす）。
                   record: withoutBackendDependentFields(await rt.getRecall(ctx, r.recallId)),
                 }),
               ),
@@ -934,7 +856,7 @@ export async function runOps(
             const res = await rt.consolidate(ctx, { target: { memoryIds: [a, b] } });
             if (res.consolidatedMemoryId) allIds.push(res.consolidatedMemoryId);
             if (res.consolidatedMemoryId) {
-              // I15（ADR 0527）: `created` の `meta.sources` は、渡された綴り（大文字でも）ではなく store の行の id（小文字）。
+              // I15: `created` の `meta.sources` は、渡された綴り（大文字でも）ではなく store の行の id（小文字）。
               const created = (
                 await stores.eventStore.list(ctx, { memoryId: res.consolidatedMemoryId })
               ).find((e) => e.kind === "created");
@@ -955,7 +877,7 @@ export async function runOps(
               limit: 20,
               excludeMemoryIds: [id],
             });
-            // ADR 0485: 除外の突き合わせは大文字小文字を無視する。
+            // 除外の突き合わせは大文字小文字を無視する。
             for (const c of res.candidates)
               if (c.memoryId.toLowerCase() === id.toLowerCase())
                 violations.push({ inv: "I13-exclude", detail: `${id} が除外されていない`, op: oi });

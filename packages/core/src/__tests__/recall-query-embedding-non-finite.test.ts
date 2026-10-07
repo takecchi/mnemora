@@ -4,15 +4,6 @@ import type { EmbeddingProvider } from "../interfaces/embedding-provider.js";
 import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * `recall()` のクエリ埋め込みで、provider が `NaN`・`Infinity` を含むベクトルを返したときも、
- * 「provider が使えない」（`embedding_provider_unavailable`）として名乗る（2026-09-30、ADR 0393）。
- * 次元違い（`recall-query-embedding-dimension-mismatch.test.ts`）と同じ理由に丸める。
- *
- * 以前は vectorStore まで届き、Postgres では `toComparableQuery` が全 0 に差し替えて
- * `score_not_comparable` と記録された。
- */
-
 const ctx: Ctx = { tenantId: "tenant-1" };
 
 function buildRuntime(bad: number) {
