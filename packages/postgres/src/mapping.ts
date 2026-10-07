@@ -22,34 +22,18 @@ import type {
 } from "@mnemora/core";
 
 /**
- * DB の行（`pg` ドライバが返す生の行。列名は snake_case）を core の型へ変換する。
+ * Postgres の `timestamptz` の既定テキスト出力（例: `"2026-05-11 00:47:17.621+09"`）を `Date` に変換する。
  *
- * `packages/postgres` のクエリは `sql` タグ付きテンプレート（drizzle-orm）で書いており、
- * `SELECT *` の結果はドライバがそのまま snake_case のプロパティ名で返す。ここで
- * camelCase の core 型へ変換する境界を1箇所に集める。
+ * 生 SQL 実行（`db.execute(sql\`...\`)`）の `timestamptz` は、`drizzle-orm/node-postgres` が型パーサを
+ * 恒等関数に上書きしているため文字列で返る。この関数がその文字列を `Date` へ変換する唯一の境界である。
  *
- * **`timestamptz` は文字列で返る。** `drizzle-orm/node-postgres` は
- * `TIMESTAMPTZ`/`TIMESTAMP`/`DATE`/`INTERVAL` 等の型パーサをあえて恒等関数に上書きしている
- * （drizzle 独自の decode を後段の schema 経由でしか適用しないための仕様。生 SQL 実行
- * （`db.execute(sql\`...\`)`）ではこの decode を経由しないため、文字列のまま返る）。
- * このファイルの `parsePgTimestamp` がその文字列を `Date` へ変換する境界を1箇所に集める。
- */
-
-/**
- * Postgres の `timestamptz` の既定テキスト出力（例:
- * `"2026-05-11 00:47:17.621+09"`、`"2026-01-01 00:00:00.123456+05:30"`）を `Date` に変換する。
- * `new Date()` にそのまま渡せる ISO 8601 形式（`T` 区切り・コロン付きタイムゾーン）へ
- * 正規化してから変換する。
- *
- * Issue #1039: 既定の出力には、`new Date()` が読めない形もある。
- * - 秒を含む時差（`"1850-01-01 09:18:59+09:18:59"`）——サーバの `TimeZone` が
- *   地方平均時（LMT）の時代を持つ地域のとき、その時代の時刻
+ * `new Date()` に渡せる ISO 8601 形式へ置換するだけでは足りない。既定の出力には `new Date()` が読めない形がある。
+ * - 秒を含む時差（`"1850-01-01 09:18:59+09:18:59"`。地方平均時の時代）
  * - 紀元前の接尾辞（`"0001-06-01 00:00:00+00 BC"`。紀元前1年は天文年の0年）
  * - 5桁以上の年（`"10000-01-01 00:00:00+00"`）
  *
- * これらを含め、時差つきの形は各欄から UTC の時刻を組み立てる。年は `Date.UTC` ではなく
- * `setUTCFullYear` で入れる（`Date.UTC` は0〜99年を1900年代として読む）。小数秒は
- * `new Date()` と同じく、ミリ秒より下を切り捨てる。
+ * 年は `Date.UTC` ではなく `setUTCFullYear` で入れる（`Date.UTC` は0〜99年を1900年代として読む）。
+ * 小数秒はミリ秒より下を切り捨てる。
  */
 export function parsePgTimestamp(value: string): Date;
 export function parsePgTimestamp(value: string | null): Date | null;
@@ -63,8 +47,7 @@ export function parsePgTimestamp(value: string | null): Date | null {
   if (parts) {
     const [, y, mo, d, h, mi, s, frac, sign, oh, om, os, bc] = parts;
     const year = bc === undefined ? Number(y) : 1 - Number(y);
-    // 時差は各欄から直接引く（ローカル時刻をいったん UTC として組むと、`Date` の表せる
-    // 範囲の端（±275760年）で途中の値だけが範囲を超えて NaN になる）。
+    // 時差は各欄から直接引く。ローカル時刻をいったん UTC として組むと、`Date` の範囲の端（±275760年）で途中の値だけが NaN になる。
     const k = sign === "-" ? -1 : 1;
     const utc = new Date(0);
     utc.setUTCFullYear(year, Number(mo) - 1, Number(d));
@@ -87,23 +70,15 @@ export function parsePgTimestamp(value: string | null): Date | null {
 }
 
 /**
- * `Date` を、SQL のパラメータとして送る `timestamptz` の文字列（UTC）にする。
- * `parsePgTimestamp` の逆向きである。
+ * `Date` を、SQL のパラメータとして送る `timestamptz` の文字列（UTC）にする。`parsePgTimestamp` の逆向き。
+ * 書き込みの値も WHERE の条件も、`Date` を `pg` に直接渡さず必ずこの関数を通す。
  *
- * Issue #1040: node-postgres（`pg`）は `Date` のパラメータを**プロセスのローカル時刻**の
- * 文字列にし、時差を**分に切り捨てて**送る（`pg/lib/utils.js` の `dateToString`）。
- * プロセスの TZ が地方平均時（LMT）の時代に秒を含む時差を持つ地域だと、その時代の日時が
- * 秒単位でずれて保存される（Asia/Tokyo では1888年より前の日時が59秒後へ、
- * America/New_York では1883年11月より前が2秒前へ）。⟹ `Date` を `pg` に渡さず、
- * 書き込みの値も WHERE の条件も、必ずこの関数を通す。
+ * - `pg` は `Date` を**プロセスのローカル時刻**の文字列にし、時差を**分に切り捨てて**送る。TZ が地方平均時の
+ *   時代に秒を含む時差を持つ地域だと、その時代の日時が秒単位でずれて保存される。
+ * - `pg.defaults.parseInputDatesAsUTC` は使わない。プロセス全体の `pg` の既定が変わり、利用者の他の接続にも効くため。
+ * - `toISOString()` は使わない。5桁以上の年と紀元前が `+010000-...` / `-000001-...` になり、Postgres が読めないため。
  *
- * `pg.defaults.parseInputDatesAsUTC` は使わない——プロセス全体の `pg` の既定を変え、
- * 利用者のアプリの他の接続にも効くため。`toISOString()` も使わない——5桁以上の年と
- * 紀元前を `+010000-...` / `-000001-...` の形にし、Postgres が読めないため。
- *
- * 年は4桁に0詰めし、5桁以上はそのまま書く。紀元前は ` BC` を付ける（天文年の0年が
- * 紀元前1年）。Invalid Date は Postgres が拒む文字列になる（これまでと同じく DB の
- * エラーになる）。
+ * Invalid Date は Postgres が拒む文字列になる（DB のエラーになる）。
  */
 export function toPgTimestamp(date: Date): string;
 export function toPgTimestamp(date: Date | null | undefined): string | null;
@@ -122,28 +97,23 @@ export function toPgTimestamp(date: Date | null | undefined): string | null {
   );
 }
 
-/**
- * PostgreSQL の timestamptz の下限（4714-11-24 BC 00:00:00 UTC。天文学的年 -4713）。これより前の日時は、パラメータとして
- * 渡された時点で `22008 timestamp out of range` になる。**行に書く口はこれより前を書けない**（ADR 0547 は書く口を変えない）。
- */
+/** PostgreSQL の timestamptz の下限（4714-11-24 BC 00:00:00 UTC）。これより前の日時は `22008 timestamp out of range` になる。 */
 export const PG_TIMESTAMPTZ_MIN_MS = Date.UTC(-4713, 10, 24);
 
 /**
- * `date` が `timestamptz` の下限より前か。Invalid Date（`NaN`）は「前」ではない（`NaN < x` は偽。`22007` のまま DB が断る）。
- * `purgeExpiredEvents`・`purgeExpiredRecalls`・`purgeCompletedJobs` が、cutoff が下限より前のとき問い合わせずに「0件」で返す判定に使う
- * （ADR 0547。下限より前に作られた行は存在しえない）。
+ * `date` が `timestamptz` の下限より前か。Invalid Date（`NaN`）は「前」ではない（`22007` のまま DB が断る）。
+ * cutoff が下限より前の purge が、問い合わせずに「0件」で返す判定に使う（ADR 0547）。
  */
 export function isBeforePgTimestamptzMin(date: Date): boolean {
   return date.getTime() < PG_TIMESTAMPTZ_MIN_MS;
 }
 
 /**
- * **読みの口の条件**の日時を、`timestamptz` の下限へ寄せてから `toPgTimestamp` にする（ADR 0547）。下限より前の日時は
- * 下限（`PG_TIMESTAMPTZ_MIN_MS`）として比べる。列の値はすべて下限以後なので、`>=`・`>` の条件（`since`・`occurredAfter`・
- * `decayFloorAtAfter`）は全件を返し、`<=`・`<` の条件（`until`・`occurredBefore`）は0件に近い結果になる——どちらも
- * 日時の意味どおりの答えである。Invalid Date は寄せず、これまでどおり `22007` になる。
+ * **読みの口の条件**の日時を、`timestamptz` の下限へ寄せてから `toPgTimestamp` にする（ADR 0547）。
+ * 列の値はすべて下限以後なので、`>=`・`>` の条件は全件を、`<=`・`<` の条件は0件に近い結果を返す
+ * （日時の意味どおりの答え）。Invalid Date は寄せず `22007` になる。
  *
- * ⚠ **行に書く値には使わない**（寄せると別の日時が保存される）。書く口は `toPgTimestamp` のまま、下限より前なら `22008`。
+ * **行に書く値には使わない**（寄せると別の日時が保存される）。書く口は `toPgTimestamp` のまま、下限より前なら `22008`。
  */
 export function toPgTimestampClamped(date: Date): string;
 export function toPgTimestampClamped(date: Date | null | undefined): string | null;
@@ -157,14 +127,10 @@ export function toPgTimestampClamped(date: Date | null | undefined): string | nu
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
- * core の id 型（`ObservationId` / `MemoryId` 等）は単なる `string` であり、UUID 形式を
- * 強制しない。しかし `packages/postgres` の各テーブルの主キーは `uuid` 型のため、
- * 呼び出し側が任意の文字列（例: 存在確認のための `"does-not-exist"`）を渡すと、
- * Postgres がクエリ実行時点で `invalid input syntax for type uuid` を投げてしまう
- * ——「存在しない」と「壊れた入力」を区別せずに済ませたい箇所（`getObservation` が
- * null を返す契約、`OutboxStore.complete`/`fail` がべき等に成功する契約）では、
- * この形式チェックで**クエリを投げる前に**判定し、DB 由来のエラーメッセージを
- * 呼び出し側に漏らさない（roadmap.md 段階3 で実 DB 検査により判明した不整合の修正）。
+ * core の id 型は単なる `string` で UUID 形式を強制しないが、テーブルの主キーは `uuid` 型なので、任意の文字列を
+ * 渡すと Postgres が `invalid input syntax for type uuid` を投げる。「存在しない」と「壊れた入力」を区別せずに
+ * 済ませたい箇所（`getObservation` が null を返す契約、`OutboxStore.complete`/`fail` がべき等に成功する契約）では、
+ * この形式チェックで**クエリを投げる前に**判定し、DB 由来のエラーを呼び出し側に漏らさない。
  */
 export function isUuidLike(value: string): boolean {
   return UUID_PATTERN.test(value);
@@ -173,11 +139,9 @@ export function isUuidLike(value: string): boolean {
 /**
  * store の入口で、uuid の形の id を小文字にそろえる（形の合わない id はそのまま返す）。
  *
- * DB は uuid を大文字小文字を区別せずに比べ、小文字で返す。⟹ 渡された id を JS で比べる箇所（`Map` を引く・
- * `===`）や、渡された id を記録に写す箇所（`memory_events.meta`）は、大文字の UUID だけで DB の値と食い違う。
- * 入口でそろえれば、その先は DB と同じ形の id だけを扱える（`uppercase-uuid-store-entry.postgres.test.ts`）。
- * ⚠ store の中の正規化であり、呼び出し側（Runtime）から渡される値は変えない。呼び出し側が組んだイベントの
- * `meta` の中身は、store が解釈しない値なのでそろえない。
+ * DB は uuid を大文字小文字を区別せずに比べ、小文字で返す。渡された id を JS で比べる箇所（`Map` を引く・`===`）や
+ * 記録に写す箇所（`memory_events.meta`）は、大文字の UUID だけで DB の値と食い違うため、入口でそろえる。
+ * store の中の正規化であり、呼び出し側から渡されるイベントの `meta` の中身は、store が解釈しないのでそろえない。
  */
 export function normalizeUuidCase<T extends string>(id: T): T {
   return (isUuidLike(id) ? id.toLowerCase() : id) as T;
@@ -203,18 +167,11 @@ export interface MemoryRow {
   last_reinforced_at: string | null;
   valid_from: string | null;
   valid_until: string | null;
-  // Issue #371（ADR 0185/ADR 0315）: `Memory.claimKey` の doc コメント参照。
-  // 2列とも NULL＝鍵なし。`rowToMemory` がこの2列を1つの `ClaimKey` オブジェクトへ
-  // 組み立てる（`packages/postgres/migrations/0021_memories_claim_key.sql` の
-  // 「NULL の意味」参照）。
   claim_key_subject: string | null;
   claim_key_predicate: string | null;
   strength: number;
   half_life_hours: number;
   decay_floor_at: string;
-  // ADR 0165（Issue #305）: 活動時計の3つ組。`bigint` 列は node-postgres が精度損失を
-  // 避けるため文字列で返す——`parsePgBigint` で変換する（`parsePgTimestamp` と同じ形の
-  // 境界）。すべて NULL 許容（「この軸には床が無い」を意味する）。
   decay_base_seq: string | number | null;
   decay_floor_seq: string | number | null;
   half_life_recalls: number | null;
@@ -222,20 +179,12 @@ export interface MemoryRow {
   purged_at: string | null;
   created_at: string;
   updated_at: string;
-  // Issue #152/#153（ADR 0312）: `jsonb NOT NULL DEFAULT '{}'`。`pg` は jsonb を
-  // パース済みオブジェクトとして返す（`provenance` 列と同じ扱い——`row.provenance` も
-  // 追加の変換なしに使っている）。
   attributes: Record<string, string>;
 }
 
 /**
- * Postgres の `bigint` 列（node-postgres が精度損失を避けるため文字列で返しうる。
- * `parsePgTimestamp` の doc コメント参照——生 SQL 実行では drizzle の decode を経由しない）
- * を `number` に変換する。`null` はそのまま通す（ADR 0165 決めたこと4「NULL はこの軸に
- * 床が無いことを意味する」）。
- *
- * `Number.MAX_SAFE_INTEGER` を超える運用は想定していない（活動時計は「recall() の回数」を
- * 数えるカウンタであり、そこまで到達する前に他の限界に当たる）。
+ * Postgres の `bigint` 列（node-postgres が精度損失を避けるため文字列で返しうる）を `number` に変換する。
+ * `null` はそのまま通す（この軸に床が無い）。`Number.MAX_SAFE_INTEGER` を超える運用は想定しない。
  */
 export function parsePgBigint(value: string | number | null): number | null {
   if (value === null) {
@@ -245,14 +194,10 @@ export function parsePgBigint(value: string | number | null): number | null {
 }
 
 /**
- * `memories.claim_key_subject`/`claim_key_predicate`（2列）を、`Memory.claimKey`
- * （`{subject, predicate}` の組、または鍵なしの `null`）へ組み立てる。
+ * `memories.claim_key_subject`/`claim_key_predicate` を `Memory.claimKey` へ組み立てる。
  *
- * Issue #371: 契約上は両方 NULL か両方非 NULL のどちらかのはず（`0021_memories_claim_key.sql`
- * の「NULL の意味」参照）だが、DB 側で CHECK 制約は強制していない。**片方だけ非 NULL の
- * 行に出会っても例外にしない**——読み出し側（この関数）は「主語または述語のどちらかが
- * 欠けているなら鍵なしとして扱う」という寛容な側へ倒す（`docs/autonomy.md` の「壊れている
- * ものを直す」規律に反しない範囲で、読み出しを止めない）。
+ * 契約上は両方 NULL か両方非 NULL だが、DB に CHECK 制約は無い。**片方だけ非 NULL の行に出会っても例外にしない**
+ * （鍵なしとして扱い、読み出しを止めない）。
  */
 function rowToClaimKey(
   row: Pick<MemoryRow, "claim_key_subject" | "claim_key_predicate">,
@@ -299,9 +244,7 @@ export function rowToMemory(row: MemoryRow): Memory {
   };
 }
 
-/**
- * Issue #201 / ADR 0318: `labels` テーブルの1行（`migrations/0020_taxonomy_labels.sql`）。
- */
+/** `labels` テーブルの1行。 */
 export interface LabelRow {
   id: string;
   tenant_id: string;
@@ -332,7 +275,6 @@ export interface ObservationRow {
   recorded_at: string;
   valid_from: string | null;
   valid_until: string | null;
-  // Issue #152（ADR 0312）: `MemoryRow.attributes` の doc コメント参照。
   attributes: Record<string, string>;
 }
 
@@ -410,12 +352,7 @@ export function rowToOutboxJob(row: OutboxJobRow): OutboxJobRecord {
   };
 }
 
-/**
- * Issue #298 / [ADR 0155](../../../docs/decisions/0155-recall-score-breakdown-persisted.md):
- * `recalls` 行（`MemoryStore.getRecall` が読む側）。`createRecall` の書き込みが埋める
- * 列と1対1に対応する（`packages/postgres/src/memory-store.ts` の `createRecall`/`getRecall`
- * 参照）。
- */
+/** `recalls` 行（`MemoryStore.getRecall` が読む側）。 */
 export interface RecallRow {
   id: string;
   tenant_id: string;
