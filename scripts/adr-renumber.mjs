@@ -273,9 +273,9 @@ function performRenumber() {
     try {
       buf = readFileSync(absPath);
     } catch {
-      continue;
+      continue; // 削除された側なので書き換え対象にならない
     }
-    if (buf.includes(0)) continue;
+    if (buf.includes(0)) continue; // NUL バイトを含む＝バイナリとみなしスキップ
 
     const diffText = run("git", ["diff", "--unified=0", "origin/main", "--", relPath]);
     const addedLines = addedLineNumbers(diffText);
