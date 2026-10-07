@@ -7,20 +7,10 @@ import { PostgresTenantSettingsStore } from "../tenant-settings-store.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
 /**
- * `PostgresMemoryStore.purgeExpiredEvents`（ADR 0115）と `purgeExpiredEventsForTenant` の歯。
- *
- * 1. **同時に走った掃除が、消していない行を消したと名乗らない。** `PurgeExpiredEventsResult.purged`
- *    は「実際に削除された行数」であり、`events_purged` の `meta.purgedCount` は `docs/memory-model.md`
- *    §9 の「件数と期間」の記録である。対象の SELECT は行を掴まないので、同時に走った掃除は同じ行を
- *    対象に選ぶ。先に消した側だけが実際に消し、後の側の DELETE は0行になる——後の側がそれでも
- *    選んだ件数を名乗ると、監査ログが起きなかった削除を記録する（修正前の実測: 8本同時・対象400件・
- *    limit 300 で、名乗りの合計 2400、実際の削除 300）。
- * 2. **受け付けた保持日数で、掃除が例外にならない。** `setEventRetention` は正の整数を受け付け、
- *    Postgres の列は `integer`（2^31 − 1 まで）である。日数が大きいと cutoff が
- *    PostgreSQL の timestamptz の下限（4714-11-24 BC）より前になり（約247万日から）、さらに
- *    大きいと JS の `Date` の範囲を越えて Invalid Date になる（約1億日から）。どちらも
- *    「cutoff より古い行は1件も無い」ので、結果は0件の削除であり、testkit の fixture もそう返す。
- *    修正前の Postgres は `timestamp out of range` などの例外で、そのテナントの掃除が毎回落ちていた。
+ * 1. 同時に走った掃除が、消していない行を消したと名乗らない。対象の SELECT は行を掴まないので、同時に走った掃除は同じ行を対象に選ぶ。先に消した側だけが実際に消し、後の側の DELETE は0行になる。
+ *    後の側がそれでも選んだ件数を名乗ると、監査ログが起きなかった削除を記録する。
+ * 2. 受け付けた保持日数で、掃除が例外にならない。日数が大きいと cutoff が timestamptz の下限（紀元前4714年11月24日）より前になり、さらに大きいと JS の `Date` の範囲を越えて Invalid Date になる。
+ *    どちらも「cutoff より古い行は1件も無い」ので、結果は0件の削除であり、testkit の fixture もそう返す。
  */
 
 const NOW = new Date("2026-09-27T00:00:00.000Z");
@@ -80,7 +70,6 @@ describe("purgeExpiredEvents: 同時に走った掃除の件数と、極大の�
     expect(actuallyDeleted).toBeGreaterThan(0);
     expect(claimed).toBe(actuallyDeleted);
     expect(recorded).toBe(actuallyDeleted);
-    // 1行も消さなかった呼び出しは events_purged を積まない（ADR 0115: purged === 0 なら追記しない）。
     expect(purgedRows.length).toBe(results.filter((r) => r.purged > 0).length);
   }, 60_000);
 
@@ -117,7 +106,6 @@ describe("purgeExpiredEvents: 同時に走った掃除の件数と、極大の�
     const { memoryStore, eventStore } = await stores();
     const ctx: Ctx = { tenantId: "purge-range-edge" };
     await eventStore.append(ctx, oldEvent(ctx, new Date("1970-01-01T00:00:00.000Z")));
-    // 4714-11-24 BC 00:00:00 UTC（天文学的年 -4713）。PostgreSQL の timestamptz の下限。
     const pgMin = new Date(Date.UTC(-4713, 10, 24));
     const result = await memoryStore.purgeExpiredEvents(ctx, { olderThan: pgMin, limit: 10 });
     expect(result.purged).toBe(0);

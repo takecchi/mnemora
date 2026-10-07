@@ -3,26 +3,7 @@ import type { Ctx, MemoryStore, NewMemory } from "@mnemora/core";
 import { PostgresMemoryStore } from "../memory-store.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
-/**
- * `MemoryStore` の TSDoc が約束していて、どのテストも縛っていなかった振る舞いを、`PostgresMemoryStore` について
- * 縛る（3回目の棚卸し）。振る舞いは変えていない。同じ本文の歯を testkit の fixture
- * （`packages/testkit/src/__tests__/in-memory-fixtures-memory-store-tsdoc-edges-round3.test.ts`）と core の Fake
- * （`packages/core/src/__tests__/fake-memory-store-tsdoc-edges-round3.test.ts`）にも置いている。
- *
- * - `findActiveByClaimKey`: claim key の `subject` が違えば返さない／有効期間は半開区間（接するだけでは重ならない）／
- *   `subjectId` の NULL と非 NULL は一致しない／claim key を正規化しない／`active` 以外は返さない／形の崩れた
- *   `excludeMemoryId` でも投げない。
- * - `listActiveClaimPredicates`: `limit: 0` は空／`active` 以外は対象にしない／`subjectId` の NULL と非 NULL は
- *   一致しない。
- * - `listLabels`: ラベルの行は消えず、`proposedCount` も減らない。`registerLabel`: 空白だけの名前もそのまま
- *   `registered` の行になる。
- * - `aggregateScope` の `axis: 'taxonomy'`: 0件のラベル・0件の残差は群を作らない／`taxonomyGroupCandidates: []` は
- *   残差だけ、`undefined` は taxonomy の群を作らない。
- *
- * このファイルの末尾に、Postgres だけの約束（`registerLabel` の孤立サロゲート・長すぎる名前）も置いている。
- *
- * `*-conformance.ts` には足していない（適合試験を厳しくすると、第三者の adapter を落としうるため）。
- */
+/** `*-conformance.ts` には足していない（適合試験を厳しくすると、第三者の adapter を落としうるため）。ファイル末尾に、Postgres だけの約束（`registerLabel` の孤立サロゲート・長すぎる名前）も置いている。 */
 
 const IMPL = "PostgresMemoryStore";
 
@@ -63,7 +44,7 @@ function newMemory(overrides: Partial<NewMemory> = {}): NewMemory {
   };
 }
 
-/** status を渡された値にした Memory を作る。`contested` は対向が要るので、無関係の対向を1件作る（ADR 0140）。 */
+/** status を渡された値にした Memory を作る。`contested` は対向が要るので、無関係の対向を1件作る。 */
 async function memoryWithStatus(
   store: MemoryStore,
   status: "contested" | "superseded" | "forgotten",
@@ -247,7 +228,6 @@ describe(`${IMPL}.listLabels / registerLabel: 行は消えず、名前は検査�
 
     await store.updateStatus(ctx, memories[0]!.id, "forgotten");
     await store.updateStatus(ctx, memories[1]!.id, "archived");
-    // ADR 0503: superseded は置き換えた側を伴う（この歯の関心事ではない）。
     await store.updateStatus(ctx, memories[2]!.id, "superseded", {
       supersededById: memories[0]!.id,
     });

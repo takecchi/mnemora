@@ -4,17 +4,6 @@ import { InMemoryTenantSettingsStore } from "@mnemora/testkit/fixtures";
 import { PostgresTenantSettingsStore } from "../tenant-settings-store.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
-/**
- * `setEventRetention` は、型の外の `kind` を例外で拒み、何も書かない（Issue #1168）。
- * `setDecayClock`・`setTaxonomyMode` が型の外の文字列を実行時に拒むのと同じ形で、
- * 検査は core の `assertValidEventRetentionKind` に1か所で置き、2実装が同じ関数で拒む。
- *
- * 【実測 2026-09-27】以前は両実装とも `retention.kind === "days"` のときだけ日数を検査し、
- * それ以外はすべて無期限（`event_retention_days = NULL`）として書いていた——型の外の
- * `{ kind: "bogus" }` や綴りの誤り `{ kind: "Days", days: 30 }` が、例外にならずに
- * 保持期間を無期限にしていた（短くしたつもりの呼び出しが、黙って「消さない」に倒れる）。
- */
-
 const KIND_INVALID = /event retention kind must be 'unlimited' or 'days'/;
 
 const KITS: Array<[string, () => Promise<TenantSettingsStore>]> = [

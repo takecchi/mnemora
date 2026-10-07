@@ -16,13 +16,8 @@ import { requireDatabaseUrl } from "./test-db.js";
 import { dropTempDatabase } from "./temp-database.js";
 
 /**
- * 書き込み時の ANALYZE の自動発火が、閾値・guard・対象の表・数える経路の各側で
- * 約束どおりに動くことを、表の `reltuples`（ANALYZE した瞬間に更新される）と、
- * 書き込み累計の読み口で縛る。`last_analyze` は統計の反映が遅れうるので使わない。
- *
- * 専用の使い捨てデータベースを使う: `memories` の統計を他のファイルの行から隔離するため。
- * 探り用の表は autovacuum を切る。切らないと `reltuples` が autovacuum の ANALYZE で動き、
- * 「撃たなかった」ことを確かめられない。
+ * 表の `reltuples`（ANALYZE した瞬間に更新される）と、書き込み累計の読み口で縛る。`last_analyze` は統計の反映が遅れうるので使わない。
+ * 専用の使い捨てデータベースを使う（`memories` の統計を他のファイルの行から隔離するため）。探り用の表は autovacuum を切る。切らないと `reltuples` が autovacuum の ANALYZE で動き、「撃たなかった」ことを確かめられない。
  */
 
 const TEST_DATABASE = "mnemora_analyze_on_write_recheck_0917_test";

@@ -21,14 +21,6 @@ import {
   TEST_EMBEDDING_SPACE,
 } from "./test-db.js";
 
-/**
- * Issue #1207 / [ADR 0383](../../../../docs/decisions/0383-erase-tenant.md):
- * `eraseTenant`（`packages/core/src/erase-tenant.ts`）を `@mnemora/postgres` の
- * 4 store に対して実行する歯。`tenant-erasure-residue.postgres.test.ts`
- * （forget→purge→保持期間の掃除、今の振る舞いの記録）とは別物——こちらは
- * テナントを**跡形なく**消す新しい操作そのものを検査する。
- */
-
 const S = "SECRET-ERASE-TENANT";
 const vec = (text: string): number[] => {
   const h = createHash("sha256").update(text).digest();
@@ -109,11 +101,8 @@ async function seedTenant(
     } as never);
     if (r.processed === 0) break;
   }
-  // decayClock を 'wall' から進めておかないと、`activityCounting` を渡しても
-  // `advanceActivityClock` は常に false のまま（`recall-runtime.ts` 参照）——
-  // `tenant_activity.activity_seq` を確実に進める（ADR 0165・ADR 0353）ため、
-  // `tenant_activity` も `eraseTenant` が消す表の1つなので、消す前に0行だった、
-  // という偽陰性を避ける。
+  // decayClock を 'wall' から進めておかないと、`activityCounting` を渡しても `advanceActivityClock` は常に false のままで、
+  // `tenant_activity` に行ができない（消す前に0行だった、という偽陰性を避ける）。
   await tenantSettingsStore.setDecayClock(ctx, "either" as never);
   const recalled = await runtime.recall(ctx, {
     text: `${S} の問い`,
@@ -125,9 +114,7 @@ async function seedTenant(
     recallId: recalled.recallId,
     usedMemoryIds: recalled.memories.slice(0, 1).map((m) => m.memoryId),
   } as never);
-  // `tenant_settings` に行を作る——observe/tick/recall だけでは行が作られないため
-  // （`getDefaultHalfLifeHours` 等は行が無ければ既定値へ倒れる。`tenant-erasure-residue
-  // .postgres.test.ts` も同じ理由で明示的に書き込んでいる）。
+  // `tenant_settings` の行は、observe/tick/recall だけでは作られない。
   await tenantSettingsStore.setEventRetention(ctx, { kind: "unlimited" } as never);
 }
 
@@ -159,7 +146,7 @@ async function countAll(
   return out;
 }
 
-/** 最小の Memory を1件作る（自己参照・他テナントからの参照の歯が使う）。 */
+/** 最小の Memory を1件作る。 */
 async function createBareMemory(
   memoryStore: PostgresMemoryStore,
   tenantId: string,
@@ -300,7 +287,7 @@ describe("eraseTenant（Issue #1207 / ADR 0383、本物の Postgres）", () => {
     const inA = await createBareMemory(memoryStore, A, "foreign-ref-a");
     const inB = await createBareMemory(memoryStore, B, "foreign-ref-b");
     const inC = await createBareMemory(memoryStore, C, "foreign-ref-c");
-    // A の行が B の行を参照する（生 SQL。この状態は mnemora の書き込み経路では作れない）。
+    // 生 SQL: この状態は mnemora の書き込み経路では作れない。
     await pool.query(`UPDATE memories SET superseded_by_id = $1 WHERE id = $2`, [inB.id, inA.id]);
 
     const outcome = await eraseTenant({ tenantId: C }, deps, {
@@ -309,11 +296,9 @@ describe("eraseTenant（Issue #1207 / ADR 0383、本物の Postgres）", () => {
     });
     expect(outcome.kind).toBe("executed");
     expect(await memoryStore.get({ tenantId: C }, inC.id)).toBeNull();
-    // A・B の行は無傷（A→B の参照も残る）。
     expect((await memoryStore.get({ tenantId: A }, inA.id))?.supersededById).toBe(inB.id);
     expect(await memoryStore.get({ tenantId: B }, inB.id)).not.toBeNull();
 
-    // 対照: B を消そうとすると、A の参照のために止まる。
     const blocked = await eraseTenant({ tenantId: B }, deps, {
       confirmTenantId: B,
       limit: 100_000,
@@ -333,8 +318,7 @@ describe("eraseTenant（Issue #1207 / ADR 0383、本物の Postgres）", () => {
     await seedTenant(runtime, tenantSettingsStoreForSeed, OTHER);
 
     const before = await countAll(pool, T);
-    // 少なくともいくつかの表には実際にデータが入っていることを確認してからでないと、
-    // この歯は「最初から0件だった」を「消えた」と取り違えかねない。
+    // 最初から0件だったものを「消えた」と取り違えないよう、先にデータが入っていることを確かめる。
     expect(before.memories).toBeGreaterThan(0);
     expect(before.observations).toBeGreaterThan(0);
     expect(before[embeddingSpaceTableName(TEST_EMBEDDING_SPACE)]).toBeGreaterThan(0);
@@ -355,7 +339,6 @@ describe("eraseTenant（Issue #1207 / ADR 0383、本物の Postgres）", () => {
     };
     const ctxT: Ctx = { tenantId: T };
     let outcome = await eraseTenant(ctxT, deps, { confirmTenantId: T, limit: 100_000 });
-    // 1回で消し切れなければ、reachedLimit が false になるまで呼び直す（何度呼んでも安全）。
     let guard = 0;
     while (outcome.kind === "executed" && outcome.reachedLimit) {
       guard += 1;
@@ -417,7 +400,6 @@ describe("eraseTenant（Issue #1207 / ADR 0383、本物の Postgres）", () => {
     const ctxT: Ctx = { tenantId: T };
     const ctxOther: Ctx = { tenantId: OTHER };
 
-    // このテナントの記憶を1件作る。
     const mine = await memoryStore.createMemory(ctxT, {
       tenantId: T,
       subjectId: null,
@@ -437,7 +419,6 @@ describe("eraseTenant（Issue #1207 / ADR 0383、本物の Postgres）", () => {
       decayFloorAt: new Date("2026-06-01T00:00:00.000Z"),
       embeddingStatus: "pending",
     });
-    // 別テナントの記憶を1件作る。
     const other = await memoryStore.createMemory(ctxOther, {
       tenantId: OTHER,
       subjectId: null,
@@ -458,12 +439,9 @@ describe("eraseTenant（Issue #1207 / ADR 0383、本物の Postgres）", () => {
       embeddingStatus: "pending",
     });
 
-    // ⚠ ここから先は port 直呼びではなく生 SQL を使う——「別テナントの行がこのテナントの
-    // 行を superseded_by_id で参照する」状態は、mnemora のどの書き込み経路
-    // （`supersedeWithNewMemories` 等）も ctx でテナントを揃えるため作れない。FK 自体は
-    // テナントで絞られていない（`memories.superseded_by_id uuid NULL REFERENCES
-    // memories(id)`）ので、スキーマとしては可能——この歯はスキーマレベルの
-    // 参照整合性チェックを検査するためのものであり、意図的に生 SQL でこの状態を作る。
+    // ⚠ ここから先は port 直呼びではなく生 SQL を使う。「別テナントの行がこのテナントの行を `superseded_by_id` で参照する」状態は、
+    // どの書き込み経路も ctx でテナントを揃えるため作れない。FK 自体はテナントで絞られていないのでスキーマとしては可能で、
+    // この歯はスキーマレベルの参照整合性チェックを検査するために、意図的に生 SQL でこの状態を作る。
     await pool.query(`UPDATE memories SET superseded_by_id = $1 WHERE id = $2`, [
       mine.id,
       other.id,
@@ -473,19 +451,15 @@ describe("eraseTenant（Issue #1207 / ADR 0383、本物の Postgres）", () => {
     const outcome = await eraseTenant(ctxT, deps, { confirmTenantId: T, limit: 100_000 });
     expect(outcome).toEqual({ kind: "blocked_by_foreign_reference", count: 1 });
 
-    // 何も消えていない——mine 自身も、other も、outbox/vectorStore の行（あれば）も無傷。
     expect(await memoryStore.get(ctxT, mine.id)).not.toBeNull();
     const otherReread = await memoryStore.get(ctxOther, other.id);
     expect(otherReread?.supersededById).toBe(mine.id);
   }, 60_000);
 
   it("blocked_by_foreign_reference: 自己参照以外の経路（埋め込みの表の CASCADE・memory_events）でも止まり、どちらのテナントの行も1行も変わらない", async () => {
-    // クローン miku の決定（ADR 0383）: 他テナントからの参照に当たったら止める。他テナントの
-    // 行は書き換えない。途中まで消えた状態を残さない。
-    // ⚠ 埋め込みの表の `memory_id` は `ON DELETE CASCADE` なので、検査が自己参照しか
-    // 見ないと、他テナントの埋め込みの行が `memories` の削除に巻き込まれて黙って消える。
-    // ⚠ `vectorStore`/`outboxStore` を `memoryStore` より先に呼ぶと、止まった時点で
-    // このテナントの埋め込み・outbox の行が既に消えている。
+    // 他テナントからの参照に当たったら止める。他テナントの行は書き換えず、途中まで消えた状態を残さない。
+    // ⚠ 埋め込みの表の `memory_id` は `ON DELETE CASCADE` なので、検査が自己参照しか見ないと、他テナントの埋め込みの行が `memories` の削除に巻き込まれて黙って消える。
+    // ⚠ `vectorStore`/`outboxStore` を `memoryStore` より先に呼ぶと、止まった時点でこのテナントの埋め込み・outbox の行が既に消えている。
     await resetTestDatabase();
     const { db, pool } = await getTestClient();
     const runtime = buildRuntime(db);
@@ -501,8 +475,6 @@ describe("eraseTenant（Issue #1207 / ADR 0383、本物の Postgres）", () => {
     );
     const mineId = rows[0]!.id;
     const space = embeddingSpaceTableName(TEST_EMBEDDING_SPACE);
-    // 他テナントの行から、このテナントの記憶を指す（生 SQL で作る——#854/#1051 のとおり、
-    // 外部キーはテナントを見ないのでスキーマとしては作れる）。
     await pool.query(
       `INSERT INTO ${space} (tenant_id, memory_id, embedding, model)
        SELECT $1, $2, embedding, model FROM ${space} WHERE tenant_id = $3 LIMIT 1`,
@@ -516,7 +488,6 @@ describe("eraseTenant（Issue #1207 / ADR 0383、本物の Postgres）", () => {
 
     const beforeT = await countAll(pool, T);
     const beforeOther = await countAll(pool, OTHER);
-    // 埋め込み・outbox に実際に行があることを確かめてからでないと、「消えていない」を示せない。
     expect(beforeT[space]).toBeGreaterThan(0);
     expect(beforeT.outbox).toBeGreaterThan(0);
 
@@ -536,8 +507,6 @@ describe("eraseTenant（Issue #1207 / ADR 0383、本物の Postgres）", () => {
     expect(await countAll(pool, OTHER)).toEqual(beforeOther);
   }, 120_000);
 
-  // ADR 0383 の約束: 「設定は最後にする」。`limit` で止まった回は、後ろの port
-  // （埋め込み・outbox・設定）に触れない。
   it("limit で途中で止まった回は、設定・outbox・埋め込みを消さない（呼び直せば最後まで消える）", async () => {
     await resetTestDatabase();
     const { db, pool } = await getTestClient();
@@ -550,7 +519,6 @@ describe("eraseTenant（Issue #1207 / ADR 0383、本物の Postgres）", () => {
     const embeddingTable = embeddingSpaceTableName(TEST_EMBEDDING_SPACE);
     const before = await countAll(pool, T);
     const otherBefore = await countAll(pool, OTHER);
-    // `limit` より多い行が残る形になっていること（そうでないと「止まった回」が作れない）。
     const LIMIT = 10;
     expect(before.memories!).toBeGreaterThan(0);
     expect(before.memories! + before.memory_events! + before.recalls!).toBeGreaterThan(LIMIT);
@@ -566,30 +534,24 @@ describe("eraseTenant（Issue #1207 / ADR 0383、本物の Postgres）", () => {
     };
     const ctxT: Ctx = { tenantId: T };
 
-    // 1回目: `limit` で止まる。
     const first = await eraseTenant(ctxT, deps, { confirmTenantId: T, limit: LIMIT });
     expect(first.kind).toBe("executed");
     if (first.kind !== "executed") throw new Error("unreachable");
     expect(first.reachedLimit).toBe(true);
     const afterFirst = await countAll(pool, T);
-    // まだ消え残りがある（途中で止まった）。
     expect(afterFirst.memories! + afterFirst.memory_events! + afterFirst.recalls!).toBeGreaterThan(
       0,
     );
-    // 設定と outbox は1行も消えていない。
     expect(afterFirst.tenant_settings).toBe(before.tenant_settings);
     expect(afterFirst.outbox).toBe(before.outbox);
-    // 埋め込みは、消えた memories に CASCADE で巻き込まれた分しか減らない。
     expect(before[embeddingTable]! - afterFirst[embeddingTable]!).toBeLessThanOrEqual(
       before.memories! - afterFirst.memories!,
     );
 
-    // 呼ばなかった port の deleted は 0。
     expect(first.deleted.vectorStore).toBe(0);
     expect(first.deleted.outboxStore).toBe(0);
     expect(first.deleted.tenantSettingsStore).toBe(0);
 
-    // 呼び直す。途中の回では、設定は残り続ける。
     let outcome = first;
     let guard = 0;
     while (outcome.reachedLimit) {

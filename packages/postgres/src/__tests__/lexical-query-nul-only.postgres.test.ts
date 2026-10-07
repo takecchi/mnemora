@@ -10,14 +10,7 @@ import {
 } from "../trigram-lexical-store.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
-/**
- * 穴 O-6-1（ADR 0424）の確かめ直し（Issue #1734、PR #1527）で足した歯。
- *
- * - 検索語の NUL は、**DB の生の例外ではなく**、この store 自身の明示の例外で断る。適合テストの
- *   `/query.*NUL/` は、DB の生の例外（`Failed query: … NULL …`）にも当たるので、trigram 経路で検査を外しても
- *   赤にならなかった。ここでは文面を全体で比べる。
- * - 断るのは NUL だけ。NUL 以外の制御文字（`\u0001`）は、断らず普通に検索する（Postgres も受け取る）。
- */
+/** 適合テストの `/query.*NUL/` は DB の生の例外（`Failed query: … NULL …`）にも当たるので、trigram 経路で検査を外しても赤にならない。ここでは文面を全体で比べる。NUL 以外の制御文字は断らず普通に検索する。 */
 const ctx: Ctx = { tenantId: "lexical-query-nul-only" };
 const filter = { tenantId: ctx.tenantId };
 

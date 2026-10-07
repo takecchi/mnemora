@@ -3,43 +3,10 @@ import { join, relative } from "node:path";
 import { describe, expect, it } from "vitest";
 import { DEFAULT_OVER_FETCH_FACTOR, DEFAULT_RECALL_LIMIT } from "@mnemora/core";
 
-/**
- * ADR 0111 が本物の PostgreSQL 17.11 + pgvector 0.8.6 で実測した前提を、
- * 機械的に固定する歯。
- *
- * ⚠ **この歯は DB を必要としない。**定数の比較とソース走査だけで判定する
- * （`packages/core/src/__tests__/embed-batch-size.test.ts` /
- * `packages/core/src/__tests__/dependency-boundary.test.ts` と同じ形）。
- * DB を要する検査は `*.postgres.test.ts` の役目——このファイルは `./test-db.js` を import しない。
- *
- * **向き**: いま赤くて直したら緑、ではない。**いま緑で、前提が黙って変わったら赤。**
- *
- * ## 背景（ADR 0011 → ADR 0111 → ADR 0284）
- *
- * [ADR 0011](../../../../docs/decisions/0011-no-window-count-in-ann-stage.md) は
- * 「HNSW の索引スキャンは `hnsw.ef_search` 件までしか下流に行を渡さない」ことを
- * PostgreSQL 18.6 で実測していた。[ADR 0111](../../../../docs/decisions/0111-hnsw-window-shrinks-with-tenant-scale.md)
- * は同じ現象を PostgreSQL 17.11 上で再現し、かつ「テナントが10万行に育つと、
- * プランナが GUC 無しで自然に HNSW を選ぶ」ことを実測した——その領域では
- * ANN 段の窓（`kPrime`）は `hnsw.ef_search` を超えて広げても、超えた分は黙って効かない。
- *
- * **⚠ 検査2は ADR 0284 で前提が変わった。**[ADR 0063](../../../../docs/decisions/0063-hnsw-iterative-scan-not-adopted.md)
- * 決定1（`hnsw.iterative_scan` を有効にしない）は、Issue #671（他テナントの near-duplicate
- * が `ef_search` の候補枠を独占し、自テナントの候補がゼロになって `recall` が全滅する）を受けて
- * [ADR 0284](../../../../docs/decisions/0284-hnsw-iterative-scan-relaxed-order-adopted.md) が覆した。
- * いまは `vector-store.ts` の `search()` が、1トランザクション内で
- * `SET LOCAL hnsw.iterative_scan = relaxed_order` を発行してから SELECT する
- * ——「1つも SET していない」から「`search()` の1箇所だけが SET している」へ、
- * 検査の向きそのものが変わった。**検査1（`ef_search` の天井）は変えていない**
- * ——ADR 0284 は `hnsw.ef_search` にも `hnsw.max_scan_tuples` にも触れていない。
- */
+/** 定数の比較とソース走査だけで判定し、DB を必要としない。いま緑で、前提が黙って変わったら赤になる向きの歯。 */
 
 describe("検査1: kPrime は pgvector の hnsw.ef_search 既定値を超えない（ADR 0111）", () => {
-  /**
-   * ADR 0111 が実測した `pg_settings` の値（`hnsw.ef_search` / `source = 'default'`）。
-   * pgvector 自身がこの値を変えたら、この歯ではなく ADR 0111 の測定条件が変わったことに注意
-   * ——その場合もこの定数は「この repo が確認した既定値」として更新し、測定を引き直す。
-   */
+  /** pgvector の `hnsw.ef_search` の既定値。pgvector 自身がこの値を変えたら、この定数は確認した既定値として更新し、測定を引き直す。 */
   const PGVECTOR_HNSW_EF_SEARCH_DEFAULT = 40;
 
   it("DEFAULT_RECALL_LIMIT * DEFAULT_OVER_FETCH_FACTOR(=kPrime) <= 40", () => {
@@ -65,7 +32,6 @@ describe("検査2: 本番経路は hnsw.ef_search / hnsw.iterative_scan を SET 
   // 除外しないと自分自身を誤検出してしまう（陽性が「自分の説明文」になる）。
   const SELF_FILE = relative(SRC_DIR, __filename);
 
-  /** `SRC_DIR` 以下の *.ts をすべて再帰的に集める（`node_modules` はそもそも下に無い）。 */
   function walk(dir: string): string[] {
     const out: string[] = [];
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
@@ -89,10 +55,8 @@ describe("検査2: 本番経路は hnsw.ef_search / hnsw.iterative_scan を SET 
       }));
   }
 
-  /** `SET` / `SET LOCAL` で `hnsw.ef_search` を設定している箇所（値を捕捉する）。 */
   const SET_EF_SEARCH = /SET\s+(?:LOCAL\s+)?hnsw\.ef_search\s*=\s*(\d+)/g;
 
-  /** `SET` / `SET LOCAL` で `hnsw.iterative_scan` を設定している箇所（値を捕捉する）。 */
   const SET_ITERATIVE_SCAN = /SET\s+(?:LOCAL\s+)?hnsw\.iterative_scan\s*=\s*([a-z_]+)/g;
 
   it("`SET ... hnsw.ef_search` の出現は __tests__/count-over-window.test.ts の1箇所だけであり、値は既定値と同じ40である", () => {
@@ -108,7 +72,7 @@ describe("検査2: 本番経路は hnsw.ef_search / hnsw.iterative_scan を SET 
       }
     }
 
-    // 陰性対照が空回りしないことの確認（ADR 0103）: この検査自体が何も見ていない、を防ぐ。
+    // 陰性対照が空回りしないことの確認: この検査自体が何も見ていない、を防ぐ。
     expect(
       occurrences.length,
       "packages/postgres/src のどこにも `SET ... hnsw.ef_search` が見つからなかった。" +
@@ -149,7 +113,6 @@ describe("検査2: 本番経路は hnsw.ef_search / hnsw.iterative_scan を SET 
 
   it("`CREATE INDEX ... USING hnsw` に m / ef_construction の指定が無い", () => {
     const files = readAllSourceFiles();
-    // "CREATE INDEX" から、直後に現れる `USING hnsw` を経て次の `;` までを1文として拾う。
     const CREATE_HNSW_INDEX_STATEMENT = /CREATE\s+INDEX[\s\S]*?USING\s+hnsw[\s\S]*?;/g;
 
     const statements: { file: string; statement: string }[] = [];

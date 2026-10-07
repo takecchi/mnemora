@@ -1,9 +1,5 @@
-// 確かめ直し（Issue #1759、B 群 #1639 / ADR 0513）の歯。
-//
-// ADR 0513（決めたことの testkit の `InMemoryLexicalStore` の項）: 「同じ token 列の語は 1 つにまとめる（Postgres の `array_agg(DISTINCT tsquery)`）」。
-// `foo_bar` と `foo__bar` は別の綴りだが、どちらも tsquery `foo <-> bar` なので分母は 1 つ（`foo-bar` は Postgres では別の tsquery になり、fixture と割れる——報告参照）。
-// 既存の歯は綴りの大文字小文字違い（`PROJ-12`・`proj-12`）しか見ておらず、fixture の phrase の重複除去を外しても
-// 赤にならなかった。Postgres を基準に、fixture が同じ coverage を返すことを縛る。
+// `foo_bar` と `foo__bar` は別の綴りだが、どちらも tsquery `foo <-> bar` なので分母は 1 つ（Postgres の `array_agg(DISTINCT tsquery)`）。
+// 既存の歯は綴りの大文字小文字違いしか見ておらず、fixture の phrase の重複除去を外しても赤にならない。Postgres を基準に、fixture が同じ coverage を返すことを縛る。
 import { afterAll, describe, expect, it } from "vitest";
 import type { Ctx } from "@mnemora/core";
 import { buildNewMemoryFixture } from "@mnemora/testkit";

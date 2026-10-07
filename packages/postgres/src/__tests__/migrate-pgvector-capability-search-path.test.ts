@@ -6,15 +6,7 @@ import { describe, expect, it } from "vitest";
 import { REQUIRED_EXTENSIONS, runMigrations } from "../migrate.js";
 import { PgvectorVersionUnsupportedError } from "../pgvector-capability.js";
 
-/**
- * Issue #1780: `schema` + `extensionSchema` を渡した呼び出しの pgvector 能力検査が、
- * 検査だけを囲む `BEGIN` / `SET LOCAL search_path` / `COMMIT`（失敗時は `ROLLBACK`）で流れることを、
- * DB 無しで測る（本物の Postgres での通り方は
- * `migrate-pgvector-capability-extension-schema.postgres.test.ts`）。
- *
- * 実 DB では作れない「能力が無い」側（pgvector 0.8 未満）の経路——検査が失敗したとき、
- * 握り潰されず、かつロックを持つ接続を中断したトランザクションのまま返さない——を、ここで縛る。
- */
+/** 実 DB では作れない「能力が無い」側（pgvector 0.8 未満）の経路、つまり検査が失敗したとき、握り潰されず、かつロックを持つ接続を中断したトランザクションのまま返さないことを、DB 無しで縛る。 */
 
 const CAPABLE = { extversion: "0.8.0", vartype: "enum", enumvals: ["off", "relaxed_order"] };
 
@@ -84,7 +76,6 @@ describe("runMigrations: 能力検査を囲む search_path（Issue #1780、DB �
     expect(err).toBeInstanceOf(PgvectorVersionUnsupportedError);
     const probe = log.lastIndexOf("PROBE");
     expect(log.slice(probe - 2, probe + 2)).toEqual(["BEGIN", SET_PATH, "PROBE", "ROLLBACK"]);
-    // 検査のあとに流れるのは ROLLBACK と、ロックの返却（`pg_advisory_unlock`）と、接続の返却だけ。
     const after = log.slice(probe + 1);
     expect(after).not.toContain("COMMIT");
     expect(after[0]).toBe("ROLLBACK");

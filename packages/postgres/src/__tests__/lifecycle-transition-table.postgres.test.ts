@@ -25,13 +25,6 @@ import {
   TEST_EMBEDDING_SPACE,
 } from "./test-db.js";
 
-/**
- * 記憶の状態遷移の期待値の表（`packages/core/src/__tests__/lifecycle-transition-table.ts`）を
- * 本物の Postgres で走らせる。**表は core と同じ1つ**——core Fake の同じ歯は
- * `packages/core/src/__tests__/lifecycle-transition-table.test.ts`。1マスが1本の `it`。
- * `docs/memory-model.md` §11 との結び目は core 側にだけ置いている（表が1つなので、1回で足りる）。
- */
-
 async function postgresKit(): Promise<LifecycleKit> {
   await resetTestDatabase();
   const { db } = await getTestClient();

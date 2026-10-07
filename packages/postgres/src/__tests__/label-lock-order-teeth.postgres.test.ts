@@ -9,40 +9,20 @@ import { requireDatabaseUrl } from "./test-db.js";
 import { dropTempDatabase } from "./temp-database.js";
 
 /**
- * ADR 0662（Issue #1718）: ADR 0511 の約束3・4・6・8 を縛る歯。
- * 機能の歯（戻り値・行の中身）では見えない「ロックを取る順」と「ロックを取りすぎないこと」を、
- * ロックそのものを外から見て縛る。実装の SQL は一切変えない（歯は外から呼ぶだけ）。
- * クローン（miku）の判断で、オーナーの判断ではない。
+ * 機能の歯（戻り値・行の中身）では見えない「ロックを取る順」と「ロックを取りすぎないこと」を、ロックそのものを外から見て縛る。実装の SQL は変えない。
  *
- * ## 歯の形
+ * A. 先取りの中身を直接見る。別の接続が、対象の語彙のうち名前（コードポイント順）で真ん中の1行を `FOR UPDATE` で掴んでおくと、
+ *    先取りは「それより前の名前を全部掴み、その1行で待つ」。その待っている瞬間に、(1) 掴まれている行の集合がちょうど名前順の先頭からその1行までであること、
+ *    (2) `labels` への表ロックが弱いロックだけであること（`pg_locks`）、(3) `labels` の UPDATE トリガが1回も発火していないこと（`nextval` は巻き戻らないので、待っている最中の別の接続から読める）、
+ *    (4) 無関係なラベルへの書き込みが `lock_timeout` 300ms で塞がれないこと、を見る。
+ * B. 経路をまたぐ deadlock。`labels` を UPDATE するたびに眠るトリガの下で、`createMemory` が a を掴んで眠っている間に先取りの側が入る。
+ *    先取りが逆順なら b を先に掴んで a を待ち、upsert は b を待つので 40P01 になる。トリガは `FOR UPDATE` の先取りでは発火しないので、窓は「相手が眠る側」に置く。
+ * C. `FOR SHARE` の揺れ。先取りの後・labels の UPDATE の前に通る `INSERT INTO memories` に眠るトリガを置き、同じ語彙を持つ同じ経路の2呼び出しを同時に走らせる。
+ *    先取りが `FOR UPDATE` なら後の呼び出しは前の呼び出しの commit まで待つ。`FOR SHARE` だと両方が掴んだ後で互いに UPDATE の昇格を待って 40P01 になる。
  *
- * A. 先取りの中身を直接見る（順・取りすぎ・行を書かないこと）。
- *    別の接続が、対象の語彙のうち名前（コードポイント順）で真ん中の1行を `FOR UPDATE` で掴んでおく。
- *    先取りがコードポイント順で `FOR UPDATE` を取るなら、先取りは「それより前の名前を全部掴み、
- *    その1行で待つ」。その待っている瞬間に、(1) 掴まれている行の集合がちょうど
- *    「名前順の先頭からその1行まで」であること（逆順・順なし・全ラベルを掴む・別テナントも掴む、で崩れる）、
- *    (2) `labels` への表ロックが弱いロックだけであること（`pg_locks`）、
- *    (3) `labels` の UPDATE トリガが1回も発火していないこと（行を書いていない。トリガは `nextval` で数える。
- *        `nextval` は巻き戻らないので、待っている最中の別の接続から読める）、
- *    (4) 無関係なラベルへの書き込みが `lock_timeout` 300ms で塞がれないこと、
- *    を見る。経路は createMany・supersede・purge・scrub の4つ。
- *
- * B. 経路をまたぐ deadlock。`labels` を UPDATE するたびに眠るトリガの下で、`createMemory`（upsert。
- *    名前順に [a, b] と掴み、掴んだ行の上で眠る）が a を掴んで眠っている間に、先取りの側が入る。
- *    先取りが逆順なら b を先に掴んで a を待ち、upsert は b を待つので 40P01 になる。
- *    トリガは `FOR UPDATE` の先取りでは発火しないので、窓は「相手が眠る側」に置く。
- *
- * C. `FOR SHARE` の揺れ。先取りの後・labels の UPDATE の前に通る `INSERT INTO memories` に眠るトリガを置き、
- *    同じ語彙を持つ同じ経路の2呼び出しを同時に走らせる。先取りが `FOR UPDATE` なら後の呼び出しは
- *    前の呼び出しの commit まで待つ。`FOR SHARE` だと両方が掴んだ後で互いに UPDATE の昇格を待って 40P01 になる。
- *
- * ## `COLLATE "C"`
- * A の名前は、コードポイント順と en-US の照合順序がずれるもの（大文字・記号・アクセント・補助面）。
- * 2つの DB で走らせる: 既定の DB（CI の UTF8 の脚は `en_US.utf8`、手元は `C.UTF-8` なので手元では差が出ない）と、
- * ICU `en-US` の DB（OS のロケールに依らず差が出る。`list-labels-codepoint-order.postgres.test.ts` と同じ作り方）。
+ * A の名前は、コードポイント順と en-US の照合順序がずれるもの。既定の DB と、ICU `en-US` の DB（OS のロケールに依らず差が出る）の2つで走らせる。
  * この Postgres ビルドが ICU 非対応のときは、理由を出して明示的に skip する（偽の緑にしない）。
- *
- * `pg_locks` は `database` を自分の DB の oid に絞って読み、自分専用の DB で走らせる（並列の群でよい）。
+ * `pg_locks` は `database` を自分の DB の oid に絞って読み、自分専用の DB で走らせる。
  */
 
 const SLEEP_FN = "adr1718_sleep";
@@ -161,10 +141,7 @@ async function removeTriggers(env: Env): Promise<void> {
   await pool.query(`DROP SEQUENCE IF EXISTS ${COUNT_SEQ}`);
 }
 
-/**
- * 語彙を直接入れる。**入れる順は名前順の逆**（heap の並びを名前順の逆にする。`ORDER BY` を外した
- * 先取りが、名前順と偶然そろわないようにする）。
- */
+/** 語彙を直接入れる。入れる順は名前順の逆にする（`ORDER BY` を外した先取りが、名前順と偶然そろわないようにする）。 */
 async function seedLabels(env: Env, tenantId: string, names: readonly string[]): Promise<void> {
   for (const name of [...names].sort(byCodePoint).reverse()) {
     await env.client.pool.query(
@@ -199,10 +176,7 @@ function newMemory(ctx: Ctx, hash: string, tags: string[]): NewMemory {
 type PathName = "createMany" | "supersede" | "purge" | "scrub";
 const PATHS: PathName[] = ["createMany", "supersede", "purge", "scrub"];
 
-/**
- * 経路ごとの「準備」と「走らせる関数」。準備のあとで語彙（`names`）が `labels` に既に在る状態になる。
- * 戻り値の `run` は、`names` 全部の行ロックを先取りする経路を1回走らせる。
- */
+/** 経路ごとの「準備」と「走らせる関数」。準備のあとで語彙（`names`）が `labels` に既に在る状態になる。 */
 async function preparePath(
   env: Env,
   path: PathName,
@@ -214,7 +188,6 @@ async function preparePath(
   const eventFor = (memoryId: MemoryId, kind?: "purged" | "superseded") =>
     buildNewMemoryEventFixture({ tenantId: ctx.tenantId, memoryId, ...(kind ? { kind } : {}) });
   if (path === "createMany" || path === "supersede") {
-    // 2候補。語彙の和が `names`（重なりを持たせる）。
     const lists = [names.slice(0, 3), names.slice(2)].map((l) => [...l]);
     const news = lists.map((tags, i) => ({
       input: newMemory(ctx, `${tag}-new-${i}`, tags),
@@ -239,7 +212,6 @@ async function preparePath(
     return () =>
       store.purgeMemory(ctx, old.id, { content: "[p]", digest: "[p]" }, eventFor(old.id, "purged"));
   }
-  // `scrubPurged` は purged 済みで memory_labels が残っている行が対象（purge の途中状態）。
   await env.client.pool.query(
     "UPDATE memories SET purged_at = now() WHERE tenant_id = $1 AND id = $2",
     [ctx.tenantId, old.id],
@@ -406,16 +378,11 @@ describe.each(ENVS)("先取りの中身（$title）", ({ database, icu }) => {
       const seen = await observeWhileBlocked(env, ctx, other, blockName, run);
       await removeTriggers(env);
 
-      // 順（約束3・4・6）と、無関係な行・別テナントの行を掴まないこと（約束8）。
       expect(seen.locked).toEqual(SORTED.slice(0, position + 1));
       expect(seen.lockedOtherTenant).toEqual([]);
-      // 表ロックを取らない（約束8）。
       expect(seen.tableLockModes.filter((m) => !WEAK_TABLE_LOCKS.includes(m))).toEqual([]);
-      // 行を書かない（約束8）。
       expect(seen.updatesFired).toBe(0);
-      // 無関係なラベルへの書き込みが塞がれない（約束8）。
       expect(seen.unrelatedWriteCode).toBeUndefined();
-      // 掴みが離れたら経路は成功する。
       expect(failureCodes([seen.outcome])).toEqual([]);
     }, 60_000);
   }

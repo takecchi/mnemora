@@ -15,12 +15,8 @@ import {
 } from "./contested-group-fixtures.js";
 
 /**
- * Issue #1449 PR1（ADR 0401）の歯1: `markContestedGroup` が作る関係の行の集合は、
- * 実装を N² の総当たり結合から書き換えても変わらない。
- *
  * 2通りで縛る（どちらか片方だけでは、参照実装と実装が同じ誤りをする余地が残る）。
- * - `LEGACY_PAIRS_SQL`: 書き換え前の `INSERT ... SELECT` の `SELECT` 部分を、挿入せずに
- *   そのまま持つ参照実装。同じ DB 上の同じ行に対して走らせる。
+ * - `LEGACY_PAIRS_SQL`: 書き換え前の `INSERT ... SELECT` の `SELECT` 部分を、挿入せずにそのまま持つ参照実装。
  * - `overlaps()`: 有効期間から JS のマイクロ秒（BigInt）で期待集合を計算する。
  */
 
@@ -75,8 +71,6 @@ async function markAndCompare(
   for (let i = 0; i < validities.length; i++) {
     ids.push(await insertRawMemory(pool, tenantId, `eq-${i}`, validities[i]!));
   }
-  // 書き込み前に参照実装を走らせる（markContestedGroup は memories の有効期間を変えないので
-  // 後でも同じだが、「書く前の入力から決まる」ことを形で示す）。
   const legacy = await legacyPairs(pool, tenantId, ids);
   await store.markContestedGroup(
     ctx,

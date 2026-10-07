@@ -14,36 +14,15 @@ import {
 } from "./test-db.js";
 
 /**
- * 連想枠（段3.5、ADR 0151）にも忘却ゲート（ADR 0153 / ADR 0165）と `validAt` ゲート
- * （ADR 0164）が掛かることを、**本物の Postgres + pgvector** に対して実測する
- * （Issue #347 / ADR 0172）。
+ * 連想枠にも忘却ゲートと `validAt` ゲートが掛かることを、本物の Postgres + pgvector で実測する。core の歯は `FakeVectorStore`（`VectorFilter` の各欄を自前で適用する擬似物）に対するもので、`PostgresVectorStore` が連想枠の呼び出しでも
+ * `decayFloorAtAfter`/`decayFloorSeqAfter`/`decayFloorAnyAxis` を実際に SQL へ効かせることは、2つを繋いだ経路として走っていなかった。
  *
- * ⭐ **なぜユニットの歯（`packages/core` の `recall-association-gates.test.ts`）だけでは
- * 足りないか。** あちらは `FakeVectorStore`（`VectorFilter` の各欄を自前で適用する擬似物）
- * に対する歯であり、`PostgresVectorStore` が**連想枠の呼び出しでも**
- * `decayFloorAtAfter`/`decayFloorSeqAfter`/`decayFloorAnyAxis` を実際に SQL へ効かせる
- * ことは、2つを繋いだ経路として一度も走っていなかった。
- * **連想枠は PR #336 以降 `examples/chat` の既定経路である**——出荷物の既定の道が
- * 実 Postgres で測られていない状態を残さない。
+ * 配置は連想枠でしか届かない三角形: クエリ `Q = [1,0,0]`、アンカー `A = [0.70710678,0.70710678,0]`（`cos(Q,A) ≈ 0.7071` で段1で拾われ、連想のアンカーになる）、
+ * 相方 `B = [0,1,0]`（`cos(Q,B) = 0` ちょうどで段1では below_threshold に落ちるが、`cos(A,B) ≈ 0.7071` で既定 `minSimilarity` 0.5 以上）。
+ * `B` が `result.memories` に現れたら、それは段3.5 を通ったということである（`retrievedVia: 'association'` と `associationOf` でも検算する）。
  *
- * ⚠ **`recall-decay-cross-day.postgres.test.ts` には足さない**（そちらは Issue #302 の
- * 北極星 項目1 の歯であり、別の作業（Issue #329）が同じファイルを触っている）。
- *
- * ## 配置（連想枠でしか届かない三角形）
- *
- * - クエリ `Q = [1,0,0]`
- * - アンカー `A = [0.70710678,0.70710678,0]` — `cos(Q,A) ≈ 0.7071` ⟹ 段1で拾われ、
- *   連想のアンカーになる
- * - 相方 `B = [0,1,0]` — **`cos(Q,B) = 0` ちょうど**（段1では below_threshold に落ち、
- *   `withinLimit` に入らない）だが `cos(A,B) ≈ 0.7071`（既定 `minSimilarity` 0.5 以上）
- *
- * ⟹ **`B` が `result.memories` に現れたら、それは段3.5 を通ったということ**である
- * （`retrievedVia: 'association'` と `associationOf` でも検算する）。
- *
- * ⚠ 段3.5 の候補は段2の閾値分割（`scoreThreshold`）を通らない——`recall-runtime.ts` が
- * `associationUnits` を `units` の**後ろに連結**するのは閾値の後である。⟹
- * `recall-decay-cross-day.postgres.test.ts` の `(乙)` が必要とした `scoreThreshold: 0`
- * は、この歯では要らない（ゲートを外せば `B` はそのまま連想枠から返る）。
+ * ⚠ 段3.5 の候補は段2の閾値分割（`scoreThreshold`）を通らない（`associationUnits` を `units` の後ろに連結するのは閾値の後）ので、`recall-decay-cross-day.postgres.test.ts` が必要とした `scoreThreshold: 0` はこの歯では要らない。
+ * `recall-decay-cross-day.postgres.test.ts` には足さない。
  */
 
 const throwingLlm: LLMProvider = {
@@ -60,13 +39,8 @@ const QUERY_VECTOR = [1, 0, 0];
 const ANCHOR_VECTOR = [0.70710678, 0.70710678, 0];
 const ASSOCIATED_VECTOR = [0, 1, 0];
 
-/**
- * `buildNewMemoryFixture` の既定 `recordedAt`（2026-01-01）に時計を固定する
- * （`recall.postgres.test.ts` の `buildTestRuntime` と同じ理由——実時計のままだと
- * 段2の decay でアンカー自身が below_threshold に化ける）。
- */
+/** `buildNewMemoryFixture` の既定 `recordedAt`（2026-01-01）に時計を固定する（実時計のままだと、段2の decay でアンカー自身が below_threshold に化ける）。 */
 const NOW = new Date("2026-01-01T00:00:00.000Z");
-/** +100年。壁時計では絶対に沈まない。 */
 const FAR_FUTURE = new Date(NOW.getTime() + 1_000 * 60 * 60 * 24 * 365 * 100);
 
 async function buildTestRuntime() {
@@ -76,7 +50,6 @@ async function buildTestRuntime() {
   const tenantSettingsStore = new PostgresTenantSettingsStore(db);
   const runtime = createRuntime({
     memoryStore,
-    // observe()/tick() は使わない（`createMemory` + `vectorStore.upsert` で直接置く）。
     outboxStore: {
       claimBatch: async () => [],
       complete: async () => {},
@@ -92,7 +65,6 @@ async function buildTestRuntime() {
     llmProvider: throwingLlm,
     embeddingProvider: {
       space: TEST_EMBEDDING_SPACE,
-      // `RecallQuery.vector` を直接渡すので embed は呼ばれない。
       embed: async () => {
         throw new Error("この歯は RecallQuery.vector を直接渡すので embed を呼ばないはず");
       },
@@ -178,13 +150,11 @@ describe("runtime.recall() の連想枠に忘却ゲートが掛かる — 本物
     const ctx: Ctx = { tenantId: `tenant-assoc-decayed-${randomUUID()}` };
     const { runtime, memoryStore, vectorStore } = await buildTestRuntime();
     const { anchor, associated } = await seedAnchorAndAssociated(memoryStore, vectorStore, ctx, {
-      // 「いま」（固定時計）の1秒前に沈んでいる。狭義の `>` なのでゲートに掛かる。
       decayFloorAt: new Date(NOW.getTime() - 1_000),
     });
 
     const result = await runtime.recall(ctx, ASSOCIATION_QUERY);
 
-    // アンカー自身は返る——「連想枠が丸ごと走らなかったから返らなかった」ではない。
     expect(result.memories.map((m) => m.memoryId)).toContain(anchor.id);
     expect(result.memories.map((m) => m.memoryId)).not.toContain(associated.id);
     expect(result.memories.some((m) => m.retrievedVia === "association")).toBe(false);
@@ -202,17 +172,12 @@ describe("runtime.recall() の連想枠に忘却ゲートが掛かる — 本物
     const entry = result.memories.find((m) => m.memoryId === associated.id);
     expect(entry?.retrievedVia).toBe("association");
     expect(entry?.associationOf).toBe(anchor.id);
-    // ⚠ `recall-decay-cross-day.postgres.test.ts` の (乙) が必要とした `scoreThreshold: 0` を
-    // ここでは渡していない——段3.5 の候補は段2の閾値分割を通らないためである
-    // （ファイル冒頭の doc コメント参照）。この非対称自体が、この歯が測っている経路が
-    // 段1ではなく段3.5 であることの証拠でもある。
   });
 
   it("(丙) 'activity' のテナントでは、壁時計が遠い未来でも decay_floor_seq を割った記憶は連想枠から返らない（ADR 0165 の2軸目）", async () => {
     const ctx: Ctx = { tenantId: `tenant-assoc-activity-${randomUUID()}` };
     const { runtime, memoryStore, vectorStore, tenantSettingsStore } = await buildTestRuntime();
     await tenantSettingsStore.setDecayClock(ctx, "activity");
-    // 新しいテナントの activity_seq は 0（`getActivitySeq` の既定）。
     expect(await tenantSettingsStore.getActivitySeq(ctx)).toBe(0);
 
     const { anchor, associated } = await seedAnchorAndAssociated(
@@ -224,7 +189,6 @@ describe("runtime.recall() の連想枠に忘却ゲートが掛かる — 本物
         decayBaseSeq: 0,
         decayFloorSeq: 0, // nowSeq(=0) ちょうど。狭義の `>` が効かず沈んでいる
       },
-      // アンカーは活動時計の床を持たない（NULL = この軸には床が無い、ADR 0165 決めたこと4）。
       { decayBaseSeq: null, decayFloorSeq: null },
     );
 
@@ -269,7 +233,6 @@ describe("runtime.recall() の連想枠に忘却ゲートが掛かる — 本物
   it("(丁) 対照: 同じ記憶を 'wall'（既定）のテナントで引くと、活動時計の床は無視され連想枠から返る", async () => {
     const ctx: Ctx = { tenantId: `tenant-assoc-wall-${randomUUID()}` };
     const { runtime, memoryStore, vectorStore } = await buildTestRuntime();
-    // decay_clock を設定しない = 既定 'wall'。
     const { associated } = await seedAnchorAndAssociated(memoryStore, vectorStore, ctx, {
       decayFloorAt: FAR_FUTURE,
       decayBaseSeq: 0,
@@ -283,16 +246,7 @@ describe("runtime.recall() の連想枠に忘却ゲートが掛かる — 本物
     );
   });
 
-  /*
-   * `'either'` のテナントの約束（ADR 0172「引き受けた負債」4——実 Postgres の歯は `'either'` を
-   * 測っていなかった——を埋める）。約束が書かれている場所:
-   * - `DecayClock` の TSDoc（`packages/core/src/interfaces/tenant-settings-store.ts`）:
-   *   「`'either'`: どちらかが生きていれば通す（OR）。最も緩い。」（ADR 0165 決めたこと1）
-   * - `VectorFilter.decayFloorAnyAxis` の TSDoc（`packages/core/src/interfaces/vector-store.ts`）:
-   *   両方の境界が与えられているときに限り、その2つを OR で結ぶ。
-   * - 連想枠も段1と同じゲートを通す（ADR 0172）。
-   * ⟹ 片方の軸だけが生きている記憶は、**どちらの向きでも**連想枠から返る。両軸とも沈んでいれば返らない。
-   */
+  /* `'either'` のテナントでは、片方の軸だけが生きている記憶は、どちらの向きでも連想枠から返る。両軸とも沈んでいれば返らない（`VectorFilter.decayFloorAnyAxis` は両方の境界が与えられているときに限り、その2つを OR で結ぶ）。 */
   it("(庚) 'either' のテナントでは、活動時計が沈んでいても壁時計が生きていれば、連想枠から返る", async () => {
     const ctx: Ctx = { tenantId: `tenant-assoc-either-activity-decayed-${randomUUID()}` };
     const { runtime, memoryStore, vectorStore, tenantSettingsStore } = await buildTestRuntime();
@@ -363,9 +317,7 @@ describe("runtime.recall() の連想枠に忘却ゲートが掛かる — 本物
     const result = await runtime.recall(ctx, ASSOCIATION_QUERY);
 
     // アンカーは返る（この配置が段3.5 まで届いていることの検算）。相方だけが落ちる。
-    // ⚠ 段3.5 の後置フィルタ（core の `survivesDecayGate`）も同じ述語で落とすので、SQL の押し下げ
-    // だけを外しても、この歯は緑のままである（ADR 0172「引き受けた負債」3 と同じ）。押し下げと後置の
-    // 両方を外したときに赤になる。
+    // ⚠ 段3.5 の後置フィルタ（core の `survivesDecayGate`）も同じ述語で落とすので、SQL の押し下げだけを外しても、この歯は緑のままである。押し下げと後置の両方を外したときに赤になる。
     expect(result.memories.map((m) => m.memoryId)).toContain(anchor.id);
     expect(result.memories.map((m) => m.memoryId)).not.toContain(associated.id);
     expect(result.memories.some((m) => m.retrievedVia === "association")).toBe(false);

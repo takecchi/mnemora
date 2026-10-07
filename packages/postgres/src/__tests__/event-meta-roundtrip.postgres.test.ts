@@ -22,29 +22,6 @@ import {
   TEST_EMBEDDING_SPACE,
 } from "./test-db.js";
 
-/**
- * 監査ログ（`memory_events`）の `meta`・`actor` に JSON で往復しない値や、`jsonb` が受け付けない文字を
- * 渡したときの振る舞いを縛る（Issue #1211・Issue #1384。`MemoryEvent.meta` の doc の
- * 2026-09-27 追記・2026-09-29 追記）。
- *
- * 1. `EventStore.append` の `meta` の `Date`・`NaN`・`Infinity`・`-0`・`undefined` は、
- *    `@mnemora/postgres` では JSON として保存した値で返り、testkit の fixture ではそのまま返る
- *    （振る舞いは変えていない——#1211 の「採らない案」のうち、この差は残した）。
- * 2. `Runtime` の口の `reason`・`actor.id` に NUL（U+0000）か孤立サロゲート（上位・下位のどちらか単体）が入ると、
- *    **2026-09-29 から、Postgres と testkit の fixture の両方が拒む**（オーナーの回答 ask_human `3f3411c5` を受けて、
- *    以前は fixture だけが書き換えを通していたのを揃えた）。`forget` は `{ kind: "failed" }` を返し、Memory は
- *    `active` のまま、イベントは0件。`markContested` は例外を投げ、両方の Memory が `active` のまま、イベントは
- *    どちらも0件。サロゲートペア（絵文字）・結合文字・U+FFFD・空文字など、Postgres が受け入れる文字列は
- *    引き続きどちらの実装でも通る（過剰実装で無いことの確認）。
- * 3. `actor`・`meta`（入れ子・配列の要素も）に BigInt が入ると、**2026-09-29 から、Postgres と
- *    testkit の fixture の両方が同じ `TypeError`（`Do not know how to serialize a BigInt`）を、
- *    状態を書き換える前に投げる**（Issue #1384。オーナーの回答 ask_human `3f3411c5` を受けて、
- *    以前は fixture だけが BigInt をそのまま保持していたのを揃えた）。この検査は
- *    `assertStorableMemoryEvent` の中の他のどの検査よりも先に働く——ただし `memoryId` の実在確認は
- *    その関数の外（`InMemoryEventStore.append` 自身）にあるため、そこだけは揃っていない
- *    （下の該当する it のコメント参照）。number・数字に見える文字列は引き続き通る（陽性対照）。
- */
-
 const shared = {
   llmProvider: {
     complete: async () => ({ content: "unused" }),
@@ -130,8 +107,7 @@ const BAD_STRINGS: Array<[string, string]> = [
   ["孤立サロゲート（下位、\\uDC00 単体）", "a\uDC00b"],
 ];
 
-// Postgres が受け入れる（拒まない）文字列——fixture が新しく拒むようになった判定の
-// 過剰実装（サロゲートペアまで拒む・空文字を拒む等）で無いことを確かめる陽性対照。
+// Postgres が受け入れる（拒まない）文字列。拒む判定の過剰実装（サロゲートペアまで拒む・空文字を拒む等）で無いことを確かめる陽性対照。
 const GOOD_STRINGS: Array<[string, string]> = [
   ["空文字", ""],
   ["対になったサロゲートペア（絵文字 😀）", "a😀b"],
@@ -184,19 +160,9 @@ describe("EventStore.append: meta と actor の JSON で往復しない値（今
 });
 
 /**
- * `meta`・`actor` の BigInt（今の振る舞い、Issue #1384）。
- *
- * **2026-09-29 まで**は、`@mnemora/postgres` が `TypeError`（`JSON.stringify` が BigInt を渡されて
- * 投げるもの）で拒む一方、`@mnemora/testkit` の fixture は BigInt をそのまま保持していた
- * （唯一揃っていない差として Issue #1211 が残していたもの）。**2026-09-29 から、両実装とも同じ
- * `TypeError`・同じ文言（`Do not know how to serialize a BigInt`）で、状態を書き換える前に拒む。**
- *
- * ⚠ **この検査は他のどの検査よりも先に働く**——`@mnemora/postgres` の `EventStore.append` は
- * `INSERT` の引数（`actor`・`meta` を含む）を全部 JS 側で評価してから、初めて DB へ問い合わせを
- * 送る。`actor`/`meta` に BigInt があると、その JS 側の評価（`JSON.stringify`）が例外を投げ、
- * 問い合わせ自体が一切送られない——`kind` が列挙に無くても・`memoryId` が実在しなくても・`at` が
- * Invalid Date でも・NUL/孤立サロゲートがあっても、Postgres 自身がそれらを検査する機会が無いまま
- * `TypeError` になる。下の「他の不正な入力と同時に BigInt」の各ケースがそれを縛る。
+ * ⚠ BigInt の検査は他のどの検査よりも先に働く。`@mnemora/postgres` の `EventStore.append` は `INSERT` の引数（`actor`・`meta` を含む）を
+ * 全部 JS 側で評価してから初めて DB へ問い合わせを送るので、`actor`/`meta` に BigInt があると `JSON.stringify` が例外を投げ、問い合わせ自体が一切送られない。
+ * 下の「他の不正な入力と同時に BigInt」の各ケースがそれを縛る。
  */
 describe("meta・actor の BigInt（今の振る舞い、Issue #1384）", () => {
   for (const [name, makeKit] of KITS) {
@@ -222,7 +188,6 @@ describe("meta・actor の BigInt（今の振る舞い、Issue #1384）", () => 
         });
         await expect(appending, label).rejects.toThrow(TypeError);
         await expect(appending, label).rejects.toThrow(/Do not know how to serialize a BigInt/);
-        // 状態を書き換える前に拒む——イベントは1件も増えない（Postgres は行数、fixture は配列長で見る）。
         expect(await kit.memoryStore.get(ctx, memory.id), label).toStrictEqual(memoryBefore);
         expect(await kit.eventStore.list(ctx, { memoryId: memory.id }), label).toEqual(
           eventsBefore,
@@ -233,10 +198,6 @@ describe("meta・actor の BigInt（今の振る舞い、Issue #1384）", () => 
     it(`${name}: 他の不正な入力と同時に BigInt（assertStorableMemoryEvent の中の検査は BigInt が先に出る）`, async () => {
       const kit = await makeKit();
       const memory = await createActive(kit);
-      // ここに挙げるのは、`assertStorableMemoryEvent` の中で行う検査（kind・at・NUL）と
-      // BigInt の優先順位——どちらも同じ関数の中の分岐なので、両実装で揃う。
-      // `memoryId` の実在確認はこの関数の外（`InMemoryEventStore.append` 自身）で行うので、
-      // ここには含めない——下の別の it が、そこだけ揃っていないことを縛る。
       const cases: Array<[string, Partial<NewMemoryEvent>]> = [
         ["NUL を含む meta の文字列 + BigInt", { meta: { bad: "a\u0000b", big: 10n } }],
         ["列挙に無い kind + BigInt", { kind: "not-a-real-kind" as never, meta: { big: 10n } }],
@@ -257,14 +218,8 @@ describe("meta・actor の BigInt（今の振る舞い、Issue #1384）", () => 
     });
 
     /**
-     * ⚠ **揃っていない1点（Issue #1384 の PR 本文にも書く）**: `memoryId` が実在しない状態で
-     * BigInt も同時に渡すと、`@mnemora/postgres` は（`INSERT` の引数評価で BigInt が先に
-     * 例外になるため）`TypeError` になるが、`@mnemora/testkit` の `InMemoryEventStore.append` は
-     * 実在確認（ADR 0047 相当）を `assertStorableMemoryEvent` より**前に**行うので、
-     * 「memory not found」の `Error` が先に出る（`assertStorableMemoryEvent` の中の BigInt 検査まで
-     * 到達しない）。この実在確認は `assertStorableMemoryEvent` の外側（呼び出し元の
-     * `InMemoryEventStore.append` 自身）にあり、本 Issue の範囲（`assertStorableMemoryEvent` の
-     * 中の検査の優先順位）の外なので、揃えていない。
+     * ⚠ 揃っていない1点: `memoryId` が実在しない状態で BigInt も同時に渡すと、`@mnemora/postgres` は引数評価で BigInt が先に例外になり `TypeError` になるが、
+     * `InMemoryEventStore.append` は実在確認を `assertStorableMemoryEvent` より前に行うので、「memory not found」の `Error` が先に出る。
      */
     it(`${name}: 実在しない memoryId + BigInt（揃っていない——adapter で例外が違う）`, async () => {
       const kit = await makeKit();
@@ -282,7 +237,6 @@ describe("meta・actor の BigInt（今の振る舞い、Issue #1384）", () => 
       } else {
         await expect(appending).rejects.toThrow(/memory not found/);
       }
-      // どちらの実装でも、対象の Memory・イベントは変わらない。
       expect(await kit.eventStore.list(ctx, { memoryId: memory.id })).toEqual([]);
     });
 
@@ -318,7 +272,6 @@ describe("meta・actor の BigInt（今の振る舞い、Issue #1384）", () => 
       );
       await expect(updating).rejects.toThrow(TypeError);
       await expect(updating).rejects.toThrow(/Do not know how to serialize a BigInt/);
-      // status の更新（先に実行される側）も含めてロールバックされる——active のまま。
       expect((await kit.memoryStore.get(ctx, memory.id))!.status).toBe("active");
       expect(await kit.eventStore.list(ctx, { memoryId: memory.id })).toEqual([]);
     });
@@ -340,7 +293,6 @@ describe("meta・actor の欄に関数・Symbol（今の振る舞い、Issue #12
       });
       const eventsOf = async () => (await kit.eventStore.list(ctx, { memoryId: memory.id })).length;
       if (name === "Postgres") {
-        // JSON.stringify が関数・Symbol の欄を落とし、配列の要素なら null にする。残りを書いて通す。
         const appended = await appending;
         const back = (await kit.eventStore.get(ctx, appended.id))!;
         for (const event of [appended, back]) {
@@ -349,7 +301,6 @@ describe("meta・actor の欄に関数・Symbol（今の振る舞い、Issue #12
         }
         expect(await eventsOf()).toBe(1);
       } else {
-        // structuredClone が写せずに投げる。イベントは積まれない。
         await expect(appending).rejects.toThrow(/could not be cloned/);
         expect(await eventsOf()).toBe(0);
       }
@@ -376,7 +327,6 @@ describe("meta・actor の欄に関数・Symbol（今の振る舞い、Issue #12
         expect(updated.status).toBe("forgotten");
         expect(event.meta).toStrictEqual({ keep: 1 });
       } else {
-        // 書く前に投げる（PR #1231）——状態は呼ぶ前のまま。
         await expect(updating).rejects.toThrow(/could not be cloned/);
         expect((await kit.memoryStore.get(ctx, memory.id))!.status).toBe("active");
       }
@@ -394,7 +344,6 @@ describe("Runtime の reason・actor.id に NUL・孤立サロゲートを渡し
           const { outcomes } = await kit.runtime.forget(ctx, { memoryId: memory.id }, opts);
           const after = await kit.memoryStore.get(ctx, memory.id);
           const events = await kit.eventStore.list(ctx, { memoryId: memory.id });
-          // 2026-09-29: Postgres も fixture も同じ形——Memory は active のまま、イベントは0件。
           expect(outcomes.map((o) => o.kind)).toEqual(["failed"]);
           expect(after?.status).toBe("active");
           expect(events).toEqual([]);
@@ -406,8 +355,6 @@ describe("Runtime の reason・actor.id に NUL・孤立サロゲートを渡し
         const first = await createActive(kit);
         const second = await createActive(kit);
         const call = kit.runtime.markContested(ctx, first.id, second.id, { reason: bad });
-        // 2026-09-29: Postgres も fixture も同じ形——例外を投げ、両方の Memory が active のまま、
-        // どちらの側にもイベントは残らない。
         await expect(call).rejects.toThrow();
         expect((await kit.memoryStore.get(ctx, first.id))?.status).toBe("active");
         expect((await kit.memoryStore.get(ctx, second.id))?.status).toBe("active");

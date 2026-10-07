@@ -1,15 +1,7 @@
 import { setTimeout as sleep } from "node:timers/promises";
 import { Client, type Pool } from "pg";
 
-/**
- * 「ある文の直前に、その接続を殺す」ための注入（ADR 0444）。`Client.prototype.query` を差し替え、
- * `applicationName` が一致する接続が `matches` に当たる文を投げようとした瞬間に、別の接続
- * （`admin`）から `pg_terminate_backend` でその接続を切ってから、本物の `query` を呼ぶ。
- * 切れた接続への `query` は reject する——実運用で「Postgres の再起動の最中に `begin` を投げる」
- * のと同じ形を、決まった位置で作る。
- *
- * 戻り値の関数で元に戻す（`finally` で必ず呼ぶこと）。promise 形の `query` だけを扱う。
- */
+/** `Client.prototype.query` を差し替え、`applicationName` が一致する接続が `matches` に当たる文を投げようとした瞬間に、別の接続（`admin`）から `pg_terminate_backend` でその接続を切ってから本物の `query` を呼ぶ（「Postgres の再起動の最中に `begin` を投げる」のと同じ形を決まった位置で作る）。戻り値の関数で元に戻す（`finally` で必ず呼ぶこと）。promise 形の `query` だけを扱う。 */
 export function killConnectionBeforeStatement(options: {
   admin: Pool;
   applicationName: string;
@@ -48,14 +40,7 @@ export function killConnectionBeforeStatement(options: {
   };
 }
 
-/**
- * 「ある文を、サーバーへ送らずに reject させる」ための注入（ADR 0451）。`Client.prototype.query` を差し替え、
- * `applicationName` が一致する接続が `matches` に当たる文を投げようとしたら、その文は送らずに `error` で
- * reject する（接続は生きたまま。トランザクションの中なら、サーバー側の状態は変わらない）。
- * 「savepoint の `rollback to savepoint` だけが失敗し、接続もトランザクションも生きている」形を作るのに使う。
- *
- * 戻り値の関数で元に戻す（`finally` で必ず呼ぶこと）。promise 形の `query` だけを扱う。
- */
+/** `Client.prototype.query` を差し替え、`applicationName` が一致する接続が `matches` に当たる文を投げようとしたら、その文は送らずに `error` で reject する（接続は生きたまま）。「savepoint の `rollback to savepoint` だけが失敗し、接続もトランザクションも生きている」形を作るのに使う。戻り値の関数で元に戻す（`finally` で必ず呼ぶこと）。 */
 export function rejectStatement(options: {
   applicationName: string;
   matches: (text: string) => boolean;
