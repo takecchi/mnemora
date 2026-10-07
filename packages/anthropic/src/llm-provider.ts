@@ -154,7 +154,7 @@ export class AnthropicLLMProvider implements LLMProvider {
     this.maxTokens = options.maxTokens ?? DEFAULT_MAX_TOKENS;
   }
 
-/**
+  /**
    * `req` を1回送り、最初のテキストブロックを返す。拒否は `kind: "refusal"`、切り詰めは `kind: "truncated"` の
    * {@link AnthropicLLMProviderError} を投げる。どちらでもなくテキストブロックが無いときは空文字を返す。
    *
@@ -179,7 +179,7 @@ export class AnthropicLLMProvider implements LLMProvider {
     return { content: firstTextBlock(response.content) ?? "" };
   }
 
-/**
+  /**
    * zod スキーマを Anthropic のネイティブ構造化出力へ翻訳して送り、返った JSON を `req.schema` で検査して返す。
    *
    * 翻訳できない形（`z.tuple`・`z.date`・`transform`、深さを問わず `z.record` を含むもの）は、送る前に

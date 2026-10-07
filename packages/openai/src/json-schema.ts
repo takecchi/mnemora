@@ -1,28 +1,10 @@
 import type { z } from "zod";
 import { needsRootWrap, toBaseJsonSchema, wrapRootSchema } from "./structured-root.js";
 
-/**
- * zod スキーマ → OpenAI Structured Output（`response_format: json_schema`, strict モード）への
- * 翻訳（docs/architecture.md §3.8）。**この翻訳がこのパッケージの本体である。**
- *
- * OpenAI の strict モードには JSON Schema の一般形にない制約が2つある:
- * 1. すべての object は `additionalProperties: false` を持たなければならない。
- * 2. すべての object は、`properties` に載っているキーを **全て** `required` に含めなければ
- *    ならない——「省略可能」は required から外すのではなく、**値を `null` にできる**ことで
- *    表現する（OpenAI の Structured Output ガイドが明記する回避策）。
- *
- * zod v4 の `z.toJSONSchema()` は (1) を既定で満たすが、(2) は満たさない
- * （zod の `.optional()` は素直に `required` から除外されるだけで、`null` を許容する
- * 型には変換されない）。この差分を埋めるのがこのモジュールの仕事であり、
- * **ここが壊れても擬似物（testkit の DeterministicLLMProvider）では気づけない**
- * ——だからこそ、翻訳結果そのものを検査する歯を専用に用意する（PR 本文参照）。
- */
-
-/** OpenAI の `response_format: { type: "json_schema", json_schema }` に入れる値（上の翻訳の出力）。 */
+/** OpenAI の `response_format: { type: "json_schema", json_schema }` に入れる値。 */
 export interface OpenAIJsonSchemaFormat {
-  /** スキーマの名前（`json_schema.name`）。 */
   name: string;
-  /** strict モードの制約（上の1・2）を満たすように翻訳した JSON Schema。 */
+  /** strict モードの制約を満たすように翻訳した JSON Schema。 */
   schema: Record<string, unknown>;
   /** 常に `true`（strict モードで送る）。 */
   strict: true;
@@ -34,16 +16,9 @@ function isPlainObject(value: unknown): value is JsonSchemaNode {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-/**
- * 「省略可能」だったフィールドの型を null 許容に変える。
- * - `type` が単一の文字列なら `[type, "null"]` の配列にする。
- * - 既に `anyOf` を持つ（zod の union 等）なら `{ type: "null" }` を選択肢に足す。
- * - それ以外（`enum` のみ等、type を持たない形）は `anyOf: [元のスキーマ, { type: "null" }]` に包む。
- *
- * ⚠ `enum` / `const` は `type` と独立に値を縛る。`type` に "null" を足しただけでは null が
- * `enum` / `const` で弾かれ、モデルは「省略」を表せない（任意の欄が実質必須に化ける）。
- * ⟹ `const` を持つ形は `anyOf` に包み、`enum` を持つ形は `enum` にも null を足す。
- */
+// strict は全キーを required にさせるため、「省略可能」は required から外さず値を null 許容にして表す。
+// `const` / `enum` は `type` と独立に値を縛るので、`type` に "null" を足すだけでは null が弾かれる。
+// `const` は `anyOf` に包み、`enum` は `enum` にも null を足す。
 function makeNullable(node: JsonSchemaNode): JsonSchemaNode {
   if ("const" in node) {
     return { anyOf: [node, { type: "null" }] };
@@ -59,17 +34,7 @@ function makeNullable(node: JsonSchemaNode): JsonSchemaNode {
   return { anyOf: [node, { type: "null" }] };
 }
 
-/**
- * JSON Schema 木を再帰的に「強化」する。object を見つけるたびに、全プロパティを
- * `required` に含め、`additionalProperties: false` を強制する。配列・combinator
- * （`anyOf`/`oneOf`/`allOf`）・`$defs` の中も辿る。
- *
- * **確かめていないこと**: JSON Schema の全機能（`$ref` による外部循環参照、
- * `patternProperties` 等）を網羅した変換ではない。`extraction.ts` の
- * `ExtractionResultSchema`（object/array/string/number/enum の組み合わせ）が
- * 要求する範囲をカバーすることを目的にしたスコープであり、それ以上は
- * 確かめていない。
- */
+// JSON Schema の全機能を網羅する変換ではない。core のスキーマが要求する範囲だけを扱う。
 function hardenForStrictMode(node: unknown): unknown {
   if (!isPlainObject(node)) {
     return node;
@@ -105,10 +70,8 @@ function hardenForStrictMode(node: unknown): unknown {
     }
   }
 
-  // OpenAI の strict は `oneOf` を受け付けない（`openai` SDK の `helpers/standard-schema.js`:
-  // 「OpenAI strict schemas do not support `oneOf`; use `anyOf`」）。zod の判別可能ユニオンは
-  // `oneOf` になるが、枝は判別子の値で排他なので、`anyOf` にしても受ける値は変わらない
-  // （受け取った後の `req.schema.parse` が元の判別可能ユニオンで検査する）。
+  // `oneOf` を `anyOf` にする: OpenAI の strict は `oneOf` を受け付けない。判別可能ユニオンの枝は
+  // 判別子で排他なので受ける値は変わらず、`req.schema.parse` が元のユニオンで検査する。
   if (Array.isArray(result.oneOf) && result.anyOf === undefined) {
     result.anyOf = result.oneOf;
     delete result.oneOf;
@@ -127,13 +90,10 @@ function hardenForStrictMode(node: unknown): unknown {
 }
 
 /**
- * `StructuredRequest.schema`（core の `z.ZodType<T>`）を OpenAI の
- * `response_format.json_schema` の形へ翻訳する。
- *
- * 返す `schema` は、`$schema` を落とし、根が object でなければ1つの欄を持つ object に包んだもの
- * （`structured-root.ts`）。`strict` は常に `true`。`name` は渡された値がそのまま入る。
- * zod が JSON Schema で表せない形（`z.date()`・`transform` など）は、zod の既定どおりここで投げる
- * （`OpenAILLMProvider.completeStructured` が `kind: "schema_unsupported"` に包む）。
+ * `StructuredRequest.schema` を OpenAI の `response_format.json_schema` の形へ翻訳する。
+ * `strict` は常に `true`、`name` は渡された値がそのまま入る。zod が JSON Schema で表せない形
+ * （`z.date()`・`transform` など）は、ここで投げる（`OpenAILLMProvider.completeStructured` が
+ * `kind: "schema_unsupported"` に包む）。
  */
 export function translateForOpenAIStructuredOutput<T>(
   name: string,
@@ -141,10 +101,7 @@ export function translateForOpenAIStructuredOutput<T>(
 ): OpenAIJsonSchemaFormat {
   const base = toBaseJsonSchema(schema);
   const hardened = hardenForStrictMode(base) as JsonSchemaNode;
-  // `$schema` はメタ情報であり OpenAI 側は要求しない。翻訳結果を最小限にするため落とす。
   delete hardened.$schema;
-  // 根が object でない（判別可能ユニオンなど）なら、1つの欄を持つ object に包む
-  // （`structured-root.ts`。OpenAI の strict は根が object であることを求める）。
   return {
     name,
     schema: needsRootWrap(base) ? wrapRootSchema(hardened) : hardened,
