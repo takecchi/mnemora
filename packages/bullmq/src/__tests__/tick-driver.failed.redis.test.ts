@@ -4,12 +4,7 @@ import type { TickResult } from "@mnemora/core";
 import { createBullmqTickDriver } from "../tick-driver.js";
 import type { BullmqTickDriver } from "../tick-driver.js";
 
-/**
- * 実 Redis（`REDIS_PORT`）での実測の歯。`runtime.tick()` が throw したとき、BullMQ の Worker は
- * `'error'` ではなく `'failed'` を emit する（bullmq 6.3.8）。driver がそれを `onTickError` へ
- * 流さないと、tick の失敗が誰にも見えない。`tick-driver.failed.test.ts`（Redis 不要）は同じ emit を
- * fake で写しており、こちらは fake が実物とずれていないことを実物で確かめる。
- */
+/** `tick-driver.failed.test.ts` の fake が実物の emit とずれていないことを、実 Redis で確かめる。 */
 const REDIS_PORT = process.env.REDIS_PORT;
 if (!REDIS_PORT) {
   throw new Error("tick-driver.failed.redis.test: missing env REDIS_PORT（test:redis 専用）");
@@ -78,7 +73,6 @@ describe("実 Redis: tick の失敗が onTickError に届く", () => {
       await waitFor(() => errors.length >= 3, 15_000);
       await driver.stop();
       driver = undefined;
-      // `'failed'` は job が failed へ移った後に emit される。届いた件数ぶんは、Redis に残っている。
       const counts = await queue.getJobCounts("failed");
       expect(counts.failed).toBeGreaterThanOrEqual(errors.length);
       expect(counts.failed).toBeGreaterThanOrEqual(3);

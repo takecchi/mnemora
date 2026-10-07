@@ -1,10 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-// Redis を要らない検査（`bullmq` の `Queue`/`Worker` をモックに差し替える）。
-// `tick-driver.stop-cleanup.test.ts` は `worker.close()` と `removeJobScheduler()` の失敗を見ている。
-// ここは最後に閉じる `queue.close()` の失敗が、`stop()` の呼び出し側へ届くことを見る
-// （後始末の失敗を黙って捨てると、接続が残ったことが誰にも分からない）。
-
 interface MockQueueInstance {
   removeJobScheduler: ReturnType<typeof vi.fn>;
   close: ReturnType<typeof vi.fn>;

@@ -1,10 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-// Redis を要らない検査（`bullmq` の `Queue`/`Worker` をモックに差し替える）。
-// `tick-driver.lifecycle.test.ts` が見ていない2点を縛る:
-//   - `worker.run()` の reject は `onTickError` へ1回だけ届く（二重に知らせない）。
-//   - `stop()` の後の `start()` の Error は、使い捨てであることと、呼び直す方法を伝える。
-
 const workerInstances: Array<{ run: ReturnType<typeof vi.fn> }> = [];
 
 vi.mock("bullmq", () => {
