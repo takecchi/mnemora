@@ -308,7 +308,7 @@ function main() {
       shaNow = args.pr ? resolvePrHead(repo, args.pr).sha : sha;
     } catch (err) {
       console.error(String(err.message ?? err));
-      process.exit(3);
+      process.exit(1);
       return;
     }
     if (shaNow !== sha) {
