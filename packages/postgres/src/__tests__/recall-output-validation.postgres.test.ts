@@ -16,15 +16,12 @@ import {
 } from "./test-db.js";
 
 /**
- * ADR 0481: 実 Postgres の `recall()` の出力が、`@mnemora/core` 自身の `RecallResultSchema` を満たす。
+ * 実 Postgres の `recall()` の出力が、`@mnemora/core` 自身の `RecallResultSchema` を満たす。
  *
- * このパッケージのテストは、すべて `setup-recall-output-contract.ts` が `createRuntime` の `recall` の戻り値を
- * `checkRecallResultContract`（schema・`outputValidation.ok`・TSDoc の約束）に通している。**ただし、検査は
- * テストが `RecallQuery` のその欄を渡したときにだけ走る。**この歯は、これまで実 Postgres のテストが一度も渡して
- * いなかった欄（`digestBandLimit`・`timeWeighting`・`relationMaxCount`・`activityCounting`、`taxonomyGroups`
- * の組み合わせ）を実 Postgres に渡す。runtime は `outputValidation: "throw"` で作る（違反があれば
- * `RecallOutputValidationError` で落ちる）うえ、戻り値の `outputValidation` が `{ ok: true, issues: [] }`
- * であることを各ケースで見る。
+ * `setup-recall-output-contract.ts` が `createRuntime` の `recall` の戻り値を `checkRecallResultContract` に通しているが、
+ * 検査はテストが `RecallQuery` のその欄を渡したときにだけ走る。この歯は、他の実 Postgres のテストが渡していない欄
+ * （`digestBandLimit`・`timeWeighting`・`relationMaxCount`・`activityCounting`、`taxonomyGroups` の組み合わせ）を渡す。
+ * runtime は `outputValidation: "throw"` で作り、戻り値の `outputValidation` が `{ ok: true, issues: [] }` であることも各ケースで見る。
  */
 
 const TENANT = "recall-output-validation-pg";

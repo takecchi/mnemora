@@ -1,53 +1,21 @@
-// Issue #704 のさらに続き。PR #740（ADR 0299 追記3）の要因分離（言い回し・件数・位置）は
-// 「話題間で揃って回復する要因は1つに絞れなかった」で終わった。そのADR追記3自身が、
-// 「未検証の仮説」として次を書き残していた:
-//   PR #740 の12ケースは、応答がすべて「それでお願いします」だった。PR #737 で5/5
-//   だった i 系は、応答が「大丈夫です」「それで大丈夫です」の類だった。**同意の言い方は
-//   動かしていない要因**であり、これまでの結果からは何も言えない。
-// 本ファイルは、この「同意の言い方」という未検証の仮説を、初めて単独の要因として動かす
-// （マネージャー依頼）。`extraction.ts` は1バイトも変えない。
-//
-// 組み方: 基準は PR #740 の m0（eval-m0-topicA-baseline / eval-m0-topicB-baseline）。
-// **observation の発話テキスト（田中の同意の言い方）だけを変え、文脈
-// （contextMessages）・話者（speaker/subjectId）・日時（occurredAt/recordedAt/timeZone）は
-// m0 と1バイトも違わず同じにする**——`buildExtractionPrompt` はプロンプト本文の JSON に
-// speaker/subjectId/occurredAt/recordedAt/observedLocalDate/relativeDates/context/timeZone
-// を埋め込む（`packages/core/src/extraction.ts` 実測）ため、これらのどれか1つでも変えると
+// 同意の言い方だけを単独の要因として動かす評価。基準は m0（eval-m0-topicA-baseline / eval-m0-topicB-baseline）。
+// observation の発話テキストだけを変え、文脈（contextMessages）・話者・日時は m0 と1バイトも違わず同じにする:
+// `buildExtractionPrompt` はこれらをプロンプト本文の JSON に埋め込むため、どれか1つでも変えると
 // 「言い方だけを動かした」という前提が崩れる。
 //
-// 同意の言い方は4種（依頼が名指し）: 「大丈夫です」「それで」「了解です、それで行きましょう」
-// 「それでいいです」。対照として、m0 そのもの（「それでお願いします」）も**同じ回に**
-// 測り直す——PR #740 の m0 の記録済み結果（話題A 1/5・話題B 2/5）を対照として流用せず、
-// 同一バッチ内で録り直すことで、バッチ間の変動（モデル・APIの日々のばらつき）を対照と
-// 各言い方とで揃える。
+// 対照として m0 そのもの（「それでお願いします」）も同じ回に録り直す。記録済みの結果を流用すると、バッチ間の変動が対照と各言い方とで揃わない。
 //
-// 話題は PR #740 と同じ2つ（話題A: 集合場所=正面玄関、話題B: 締切=金曜日）。
-// 各話題で5ケース（対照+4種）、計10ケース、各5回で50回。
+// ⛔ このファイルは録音後に書き換えない。期待値・入力を結果に合わせて直すことはしない。
 //
-// 期待値は m0 と同じにする（参照先の語が includes に入るだけ——`extraction.ts` を見て
-// 調整した開発ケースではない）。
-//
-// 各ケースは5回ずつ録音する（`scripts/record-extraction-context-eval-agreement.mjs`）。
-//
-// ⛔ このファイルは録音後に書き換えない——期待値・入力を結果に合わせて直すことはしない。
-// 直したくなった点は commit せず、報告に書く。
-//
-// 判定はここでは行わない。ここは「入力・期待値・根拠」の定義だけを持つ。判定（機械的な
-// 包含/非包含）は
-// `packages/core/src/__tests__/extraction-context-eval-agreement.test.ts` が、録音済みの
-// `extraction-context-eval-agreement-recorded.json` に対して行う。
+// 判定はここでは行わない。ここは「入力・期待値・根拠」の定義だけを持つ。
 
-// PR #740（`extraction-context-eval-factors-cases.mjs`）の m0 と1バイト違わず同じ値。
 const RECORDED_AT = "2026-04-15T00:00:00.000Z";
 const OCCURRED_AT = "2026-04-10T09:00:00.000Z";
 const TIME_ZONE = "Asia/Tokyo";
-// tenantId は observation のメタデータであり、プロンプト本文（PromptSpec）には現れない
-// （`buildExtractionPrompt` は tenantId を読まない）——別のカセットキーにするためだけに
-// 新しい値にしてある。この違いはプロンプト自体には影響しない。
+// tenantId は observation のメタデータでプロンプト本文に現れない。別のカセットキーにするためだけに新しい値にしてある。
 const TENANT_ID = "context-eval-agreement";
 
-// --- 話題A: 集合場所（PR #740 のm0=eval-l3と同一の題材。contextMessagesはm0と1バイト
-//     違わず同じ）---
+// --- 話題A: 集合場所（contextMessages は m0 と同じ）---
 const topicA = {
   contextMessages: [
     { speaker: "assistant", text: "集合場所は正面玄関にします" },
@@ -58,7 +26,7 @@ const topicA = {
   expectWord: "正面玄関",
 };
 
-// --- 話題B: 締切（話題Aと独立、PR #740 のm0と1バイト違わず同じ）---
+// --- 話題B: 締切（contextMessages は m0 と同じ）---
 const topicB = {
   contextMessages: [
     { speaker: "assistant", text: "締切は金曜日にします" },
@@ -69,8 +37,7 @@ const topicB = {
   expectWord: "金曜",
 };
 
-// 依頼が名指しした4種＋対照（m0そのもの）。全ての話題で共通のテキストを使う——
-// 言い方という単一要因だけを動かすため、テキスト自体は話題に依らず固定する。
+// 全ての話題で共通のテキストを使う。言い方という単一要因だけを動かすため。
 const agreementVariants = [
   { variant: "control", text: "それでお願いします", label: "対照（PR #740のm0と同一文言）" },
   { variant: "p1-daijoubu", text: "大丈夫です", label: "同意の言い方1: 「大丈夫です」" },

@@ -6,18 +6,8 @@ import type { NewMemory } from "../memory.js";
 import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * `reflect` は、いまの時点で有効期間の外にある `active` な記憶を材料にしない
- * （[Issue #1188](https://github.com/takecchi/mnemora/issues/1188)。`ReflectBasisOutcome` の
- * `"expired"`/`"not_yet_valid"` の doc）。内省の記憶は有効期間を持たないので、材料にすると期限切れ・
- * 未到来の事実が期限の無い `active` な記憶として `recall()` に戻るため。
- *
- * 述語は `consolidate()`・`recall()` の期間のゲート（`classifyValidity`、ADR 0164 決定1）と同じ
- * ——`validUntil <= now` なら期限切れ、`validFrom > now` なら未到来。境界の両側と、判定の優先順
- * （`status` → 有効期間 → `basis_is_reflected`）、やりすぎ（期間の内側の記憶まで弾く）の形も縛る。
- * 2実装（Postgres・testkit の fixture）と `{ seedMemoryId }`・`{ query }` の形は
- * `packages/postgres/src/__tests__/reflect-target-selection.postgres.test.ts` が見る。
- */
+// 2実装（Postgres・testkit の fixture）と `{ seedMemoryId }`・`{ query }` の形は
+// `packages/postgres/src/__tests__/reflect-target-selection.postgres.test.ts` が見る。
 
 const ctx: Ctx = { tenantId: "reflect-validity-gate" };
 const NOW = new Date("2026-06-01T00:00:00.000Z");
@@ -109,7 +99,6 @@ describe("reflect は、いまの時点で有効期間の外にある記憶を�
 
     const reflected = await stores.memoryStore.get(ctx, result.reflectedMemoryId!);
     expect(reflected?.provenance).toMatchObject({ kind: "reflected", sources: [a.id, b.id] });
-    // 内省の記憶の有効期間は今までどおり持たない。
     expect(reflected?.validFrom ?? null).toBeNull();
     expect(reflected?.validUntil ?? null).toBeNull();
   });
@@ -232,7 +221,7 @@ describe("reflect は、いまの時点で有効期間の外にある記憶を�
       newMemory({ validUntil: PAST }),
     );
     await runtime.forget(ctx, { memoryId: forgottenExpired.id });
-    // 逆転した区間（Issue #1042）: validFrom が validUntil より後。どの時点でも期間の外にある。
+    // 逆転した区間: validFrom が validUntil より後。どの時点でも期間の外にある。
     const inverted = await stores.memoryStore.createMemory(
       ctx,
       newMemory({ validFrom: FUTURE, validUntil: PAST }),

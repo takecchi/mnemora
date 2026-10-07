@@ -18,14 +18,14 @@ import {
 const TABLE = embeddingSpaceTableName(TEST_EMBEDDING_SPACE);
 
 /**
- * `VectorStore.searchMany?`（任意メソッド、Issue #377）の `PostgresVectorStore` 実装が、
+ * `VectorStore.searchMany?`（任意メソッド）の `PostgresVectorStore` 実装が、
  * 契約（`packages/core/src/interfaces/vector-store.ts` の doc コメント）——
  * 「各 `queries[i]` に対する結果は `search(ctx, space, queries[i].vector, opts)` を
  * 単独で呼んだ場合と、集合・順序ともに完全に一致する」——を満たすことを検査する。
  *
  * `search()`/`searchMany()` は同じ `buildFilterConditions`（`vector-store.ts`）を
- * 使い、`ORDER BY` の3段 tie-break（距離 → `recorded_at` DESC → `memory_id`、
- * Issue #339 / ADR 0170）も同じ式をそのまま `LATERAL` の中に書いている——
+ * 使い、`ORDER BY` の3段 tie-break（距離 → `recorded_at` DESC → `memory_id`）も
+ * 同じ式をそのまま `LATERAL` の中に書いている——
  * この歯は「実装がその作り方どおりに動いている」ことを実地で確かめる。
  */
 async function countClientQueries(fn: () => Promise<unknown>): Promise<number> {
@@ -130,7 +130,7 @@ describe("PostgresVectorStore.searchMany — search() との一致（Issue #377�
     // 検算: 同点が実際に起きていること（この歯が何も検査していない、にならないため）。
     // 距離0の4件（recorded_at DESC → memory_id フォールバック）が必ず先頭に来る——
     // 最新の recorded_at を持つ aFallback1/aFallback2（同点、memory_id の辞書順）→
-    // aNewer → aOlder の順（`vector-search-tiebreak.test.ts` と同じ既知の残余、ADR 0170）。
+    // aNewer → aOlder の順。
     expect(singleA.slice(0, 4).map((h) => h.distance)).toEqual([0, 0, 0, 0]);
     expect(singleA.slice(0, 4).map((h) => h.memoryId)).toEqual([
       ...[aFallback1.id, aFallback2.id].sort(),

@@ -35,13 +35,11 @@ import {
 
 /**
  * tick のジョブが「書いた後・`complete` の前」に落ち、リースが切れた後に1回だけ**逐次に**
- * 再配達されたときの今の振る舞いを、Postgres と testkit の fixture の両方で縛る
- * （`Runtime.reflect` の doc の 2026-09-27 追記）。並行の2本（#1092）は扱わない。
+ * 再配達されたときの今の振る舞いを、Postgres と testkit の fixture の両方で縛る。並行の2本は扱わない。
  *
- * - `embed`・`consolidate`: 1回だけ処理したときと同じ状態になる（consolidate は ADR 0089 の
- *   「読んで status で弾く」が効く）。
- * - `reflect`: 内省の Memory が2件になる（ADR 0091 決定11「冪等性は買わない」の帰結）。
- * - `extract`（Issue #1092。`OutboxStore` の doc）: 再配達された2回目は、その Observation から同じ抽出器の版で
+ * - `embed`・`consolidate`: 1回だけ処理したときと同じ状態になる（consolidate は「読んで status で弾く」が効く）。
+ * - `reflect`: 内省の Memory が2件になる（冪等性は買わない）。
+ * - `extract`: 再配達された2回目は、その Observation から同じ抽出器の版で
  *   作られた Memory が既に在れば、LLM を呼ばずに何も書かない。⟹ LLM の出力が変わっても、1回目の分だけが残る
  *   （1回目が全文フォールバックなら、それが残る）。1回目が候補の一部だけを書いて止まった場合、残りは作られず、
  *   `reextract` で回復する。
@@ -101,10 +99,10 @@ function crashable(inner: OutboxStore): { store: OutboxStore; state: { crash: bo
  * n 回目の `createMemoryWithOutbox` が決して返らない（プロセスが死んだのと同じ。例外にすると、止まったのではなく
  * 「保存できない候補」として落とされる）。止まった時点で `reached` が解決する。
  *
- * ADR 0410: 2つの store はどちらも `createMemoriesWithOutboxAndEvents`（全候補を1トランザクションで書く任意メソッド）を持つので、
+ * 2つの store はどちらも `createMemoriesWithOutboxAndEvents`（全候補を1トランザクションで書く任意メソッド）を持つので、
  * 抽出は `createMemoryWithOutbox` を呼ばず、「候補の一部だけが書かれて止まる」形は作れない。
- * - `withoutBatchMethod`: この口を**持たない adapter** のふりをする（`undefined` を返す）。今までの
- *   候補ごとの経路——一部だけ書かれて止まる形——を、この口を持たない adapter の振る舞いとして縛り続けるために使う。
+ * - `withoutBatchMethod`: この口を**持たない adapter** のふりをする（`undefined` を返す）。候補ごとの経路——
+ *   一部だけ書かれて止まる形——を、この口を持たない adapter の振る舞いとして縛るために使う。
  * - `hangOnBatch`: `createMemoriesWithOutboxAndEvents` の呼び出しが決して返らない（コミットの前に止まる。何も書かれない）。
  */
 function hangableMemory(inner: MemoryStore): {
@@ -385,8 +383,6 @@ for (const [name, makeKit] of KITS) {
       });
     }
 
-    // ---- forget・purge した記憶が在る Observation への再配達（#1318） ----
-
     for (const how of ["forget", "purge"] as const) {
       it(`extract: 1回目が書いた記憶を ${how} した後の再配達でも、LLM を呼ばず、active は増えず、忘れさせた内容は蘇らない（#1318）`, async () => {
         nowMs = Date.parse("2030-01-01T00:00:00.000Z");
@@ -395,7 +391,6 @@ for (const [name, makeKit] of KITS) {
         extractOutputs = ["候補A", "候補B"];
         await kit.runtime.observe(ctx, { kind: "utterance", text: "発話", extract: "deferred" });
         nowMs += 1000;
-        // 1回目: 書いた後・complete の前で止まる。
         kit.crash.crash = true;
         await expect(
           kit.runtime.tick(ctx, { kinds: ["extract"], leaseMs: LEASE_MS }),
@@ -406,7 +401,6 @@ for (const [name, makeKit] of KITS) {
         // 止まっている間に、書かれた記憶を忘れさせる（purge なら物理削除まで）。
         await kit.runtime.forget(ctx, { memoryId: written! });
         if (how === "purge") await kit.runtime.purge(ctx, { memoryId: written! });
-        // 2回目: リースが切れて再配達される。
         nowMs += LEASE_MS * 2;
         const redelivered = await kit.runtime.tick(ctx, { kinds: ["extract"], leaseMs: LEASE_MS });
         expect({ processed: redelivered.processed, failed: redelivered.failed }).toEqual({
@@ -421,8 +415,6 @@ for (const [name, makeKit] of KITS) {
         expect(await kit.eventStore.list(ctx, { kind: "created" })).toHaveLength(1);
       });
     }
-
-    // ---- やりすぎを捕まえる歯（#1092 の判定が正当な抽出を塞がないこと） ----
 
     it("extract: 1回目の配達は、今どおり抽出して書く（#1092）", async () => {
       nowMs = Date.parse("2030-01-01T00:00:00.000Z");
@@ -495,7 +487,7 @@ for (const [name, makeKit] of KITS) {
     it("extract（createMemoriesWithOutboxAndEvents を持たない adapter）: 1回目が候補の一部だけを書いて止まると、再配達は残りを書かず、reextract で回復する", async () => {
       nowMs = Date.parse("2030-01-01T00:00:00.000Z");
       const kit = await makeKit();
-      // ADR 0410: この口を持たない adapter のふり（持つ adapter は、全候補を1トランザクションで書くので、一部だけ書かれて止まらない。下の it）。
+      // この口を持たない adapter のふり（持つ adapter は、全候補を1トランザクションで書くので、一部だけ書かれて止まらない。下の it）。
       kit.memoryHang.withoutBatchMethod = true;
       extractOutputs = [
         ["候補1", "候補2"],
@@ -538,7 +530,7 @@ for (const [name, makeKit] of KITS) {
       await kit.runtime.observe(ctx, { kind: "utterance", text: "発話", extract: "deferred" });
       nowMs += 1000;
       // 全候補を1トランザクションで書く呼び出しの途中でワーカーが止まる（この tick は返らない）。
-      // 1トランザクションなので、止まったときに書かれているものは無い（旧経路の「1件目だけ書かれた」は起きない）。
+      // 1トランザクションなので、止まったときに書かれているものは無い。
       kit.memoryHang.hangOnBatch = true;
       void kit.runtime.tick(ctx, { kinds: ["extract"], leaseMs: LEASE_MS });
       await kit.memoryHang.reached;
@@ -550,7 +542,6 @@ for (const [name, makeKit] of KITS) {
         "候補1",
         "候補2",
       ]);
-      // 何も書かれていなかったので、再配達は抽出をやり直す（LLM の2回目の出力を使い切る）。
       expect(extractOutputs).toEqual([]);
       expect(await kit.eventStore.list(ctx, { kind: "created" })).toHaveLength(2);
     });

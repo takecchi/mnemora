@@ -2,17 +2,7 @@ import { sql } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
 import { closeTestClient, getTestClient } from "./test-db.js";
 
-/**
- * `mnemora_lexical_tsvector` は、tsvector が1MBを超える本文だけ、本文の先頭150,000文字で作り直す。
- * 縮退したあとの語彙の対象は「先頭150,000文字」であり、それより短くも長くもならない。
- *
- * - 先頭150,000文字の内側の語は引ける（縮退が短すぎない）。
- * - 150,000文字より後ろの語は引けない（縮退が長すぎない。全文は `memories.content` に残るが、
- *   語彙の索引は先頭だけを見る）。
- *
- * 本文は、重複の無い12桁の16進の語を空白で区切って作る（13文字で1語。語の位置から文字位置が決まる）。
- * 語彙検索（`to_tsquery('simple', …)`）の対象の語は、この16進の語と重ならない文字列を使う。
- */
+/** 本文は、重複の無い12桁の16進の語を空白で区切って作る（13文字で1語。語の位置から文字位置が決まる）。語彙検索の対象の語は、この16進の語と重ならない文字列を使う。 */
 
 const WORD_CHARS = 13;
 const TOTAL_WORDS = 120_000; // 156万文字。旧式の tsvector は1MBを超える。
@@ -43,12 +33,10 @@ describe("mnemora_lexical_tsvector: 縮退したときの語彙の対象は先�
   it("旧式は例外になる本文で、先頭150,000文字の内側の語は引け、外側の語は引けない", async () => {
     const { db } = await getTestClient();
     const content = buildContent();
-    // 文字位置の前提（マーカーが 150,000 文字の内側・外側に在る）。
     expect(content.indexOf(INSIDE_MARKER)).toBeLessThan(150_000);
     expect(content.indexOf(OUTSIDE_MARKER)).toBeGreaterThan(150_000);
 
-    // 旧式のままでは落ちる本文である（縮退の経路を通っていることの確認）。
-    // （失敗の文面に本文が入るので、`expect(...).rejects` ではなく原因の文面だけを取り出す。）
+    // 旧式のままでは落ちる本文である（縮退の経路を通っていることの確認）。失敗の文面に本文が入るので、`expect(...).rejects` ではなく原因の文面だけを取り出す。
     let thrown: unknown;
     try {
       await db.execute(sql`SELECT to_tsvector('simple', mnemora_lexical_normalize(${content}))`);

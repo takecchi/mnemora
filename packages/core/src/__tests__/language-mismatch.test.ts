@@ -8,12 +8,6 @@ import {
   detectLanguageMismatch,
 } from "../language-mismatch.js";
 
-/**
- * Issue #1370（ADR 0391）: 言語の事後検査の判定関数（純関数）。
- * 「印を付けるだけ」の判定であり、偽陽性の側（固有名詞だけ・コード片・短い本文・
- * 観測が日本語ほぼ皆無）に倒れないことを、ここで例で縛る。
- */
-
 const JA_OBSERVATION = "今日は渋谷のパン屋で働いています。毎朝パンを焼くのが好きです。";
 const EN_CONTENT = "The user works at a bakery in Shibuya and enjoys baking bread every morning.";
 

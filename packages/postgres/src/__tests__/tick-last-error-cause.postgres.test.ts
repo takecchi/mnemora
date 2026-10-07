@@ -17,10 +17,9 @@ import {
 } from "./test-db.js";
 
 /**
- * Issue #969: `tick()` がジョブの失敗を `outboxStore.fail()` に記録する `lastError` は、
- * `err.message` だけだった。drizzle の `db.execute()` は pg のエラーを
- * `Failed query: <SQL> params: …` で包むので、DB 由来の失敗では**理由（pg のエラー文・
- * SQLSTATE）が `cause` にしか無く、`lastError` に残らなかった**。
+ * `tick()` がジョブの失敗を `outboxStore.fail()` に記録する `lastError` に、DB 由来の失敗の理由を載せる。
+ * drizzle の `db.execute()` は pg のエラーを `Failed query: <SQL> params: …` で包むので、
+ * 理由（pg のエラー文・SQLSTATE）は `cause` にしか無い。
  *
  * ここでは `memories` への UPDATE をトリガーで `RAISE EXCEPTION` させ、本物の drizzle/pg の
  * 包み方で失敗させる。`lastError` に理由と SQLSTATE が載ること、そして pg エラーの

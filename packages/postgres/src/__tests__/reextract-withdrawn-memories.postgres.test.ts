@@ -29,17 +29,14 @@ import {
 } from "./test-db.js";
 
 /**
- * 利用者の意思で退けた記憶を持つ Observation に `reextract` を呼んだときの振る舞いを縛る（Issue #1079・#1149。
- * `Runtime.reextract` の doc）。Postgres と testkit の fixture で同じ。
+ * 利用者の意思で退けた記憶を持つ Observation に `reextract` を呼んだときの振る舞いを縛る。Postgres と testkit の fixture で同じ。
  *
- * - 同じ Observation（同じ `extractorVersion`）の記憶に、`forgotten`（purge を含む）・`contested`・訂正の解決で
- *   負けた `superseded`（最新の `superseded` イベントの `meta.reason` が `contested_resolved`）が1件でも在れば、
- *   抽出をやり直さない。LLM も呼ばず、何も書かない（`extraction: "skipped"`・`atomicity: "not_attempted"`、
- *   退けた記憶ごとに `skipped` に `status_not_active`）。
- * - やりすぎないこと: 退けた記憶が無い Observation と、機構（reextract・consolidate）で置き換えただけの
- *   `superseded`、理由の読めない `superseded`（イベントが無い）しか持たない Observation は、今どおりやり直す。
- * - 置き換えた側（統合先）を forget しても、`restoreSuperseded` はその群を `active` に戻す（#1079 のコメント。
- *   変えていない）。
+ * - 同じ Observation（同じ `extractorVersion`）の記憶に、`forgotten`（purge を含む）・`contested`・訂正の解決で負けた `superseded`
+ *   （最新の `superseded` イベントの `meta.reason` が `contested_resolved`）が1件でも在れば、抽出をやり直さない。
+ *   LLM も呼ばず、何も書かない（`extraction: "skipped"`・`atomicity: "not_attempted"`、退けた記憶ごとに `skipped` に `status_not_active`）。
+ * - やりすぎないこと: 退けた記憶が無い Observation と、機構（reextract・consolidate）で置き換えただけの `superseded`、
+ *   理由の読めない `superseded`（イベントが無い）しか持たない Observation は、今どおりやり直す。
+ * - 置き換えた側（統合先）を forget しても、`restoreSuperseded` はその群を `active` に戻す。
  */
 
 /** 抽出の LLM。`next.content` を1件の候補として返し、統合では `next.content` を本文にする。呼ばれた回数を数える。 */
@@ -168,7 +165,6 @@ async function reextractAfter(makeKit: (next: Next) => Promise<Kit>, withdraw: W
       }
       break;
     case "reextract_superseded":
-      // 1回目の reextract（言い換え）で X が機構により置き換えられる。
       next.content = "猫が3匹いる";
       expect((await kit.runtime.reextract(ctx, first.observationId)).supersededMemoryIds).toEqual([
         x,
@@ -274,11 +270,7 @@ for (const [name, makeKit] of KITS) {
   });
 }
 
-// =====================================================================
-// Issue #1432 / ADR 0380: extractorVersion を跨いだ reextract は、前の版で退けた記憶を
-// 見落とさない。v1 の runtime で退け、v2 の runtime（同じ store・`config.extractorVersion`
-// だけ違う）で reextract したときの振る舞いを縛る。
-// =====================================================================
+// extractorVersion を跨いだ reextract は、前の版で退けた記憶を見落とさない。v1 の runtime で退け、v2 の runtime（同じ store・`config.extractorVersion` だけ違う）で reextract する。
 
 interface CrossVersionKit {
   memoryStore: MemoryStore;
@@ -408,8 +400,7 @@ async function crossVersionReextractAfter(
       }
       break;
     case "contested_claim_key":
-      // 同じ claim key を2回 observe すると、claim key の自動検出（ADR 0324）が2件目で
-      // 1件目と対にして両方 contested にする。markContested を呼ばない（訂正とは別の経路）。
+      // 同じ claim key を2回 observe すると、claim key の自動検出が2件目で1件目と対にして両方 contested にする。markContested を呼ばない（訂正とは別の経路）。
       v1Next.content = "猫は2匹";
       y = (
         await v1.observe(ctx, {
@@ -467,7 +458,6 @@ for (const [name, makeKit] of CROSS_VERSION_KITS) {
       expect(got.result.extraction).toBe("ok");
       expect(got.result.memoryIds).toHaveLength(1);
       expect(got.result.supersededMemoryIds).toEqual([]);
-      // v1 の active はそのまま——版を跨いだ active の扱いは変えていない（Issue #873）。
       expect(got.xStatus).toBe("active");
     });
 
@@ -475,18 +465,16 @@ for (const [name, makeKit] of CROSS_VERSION_KITS) {
       const kit = await makeKit();
       const v1Next: MultiNext = { contents: ["猫は3匹", "犬は1匹"], calls: 0 };
       const v1 = kit.runtimeFor(makeMultiLlm(v1Next), "v1");
-      // 1回の observe で2件の候補を抽出させる（同じ Observation から2件の Memory ができる）。
       const first = await v1.observe(ctx, { kind: "utterance", text: "猫は3匹、犬は1匹いる" });
       expect(first.memoryIds).toHaveLength(2);
       const [catId, dogId] = first.memoryIds as [string, string];
-      // 猫の事実だけを forget する。犬の事実は退けていない、隣の active な記憶。
       await v1.forget(ctx, { memoryId: catId });
 
       const v2Next: MultiNext = { contents: ["猫を3匹飼っている", "犬を1匹飼っている"], calls: 0 };
       const v2 = kit.runtimeFor(makeMultiLlm(v2Next), "v2");
       const result = await v2.reextract(ctx, first.observationId);
 
-      // Observation 全体を打ち切る——犬の事実（隣の active な記憶）も v2 では作り直されない。
+      // Observation 全体を打ち切る。犬の事実（隣の active な記憶）も v2 では作り直されない。
       expect(v2Next.calls).toBe(0);
       expect(result.extraction).toBe("skipped");
       expect(result.memoryIds).toEqual([]);
@@ -497,7 +485,7 @@ for (const [name, makeKit] of CROSS_VERSION_KITS) {
           status: "forgotten",
         }),
       );
-      // 犬の事実自身は skipped に載らない（退けた記憶だけを載せる、ADR 0028 追記の規律のまま）。
+      // 犬の事実自身は skipped に載らない（退けた記憶だけを載せる）。
       expect(result.skipped).not.toContainEqual(expect.objectContaining({ memoryId: dogId }));
       expect((await kit.memoryStore.get(ctx, dogId))!.status).toBe("active");
       expect((await kit.memoryStore.get(ctx, catId))!.status).toBe("forgotten");

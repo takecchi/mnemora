@@ -1,21 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { rowToObservation, type ObservationRow } from "../mapping.js";
 
-/**
- * `rowToObservation`（`../mapping.ts`）が `valid_from`/`valid_until`（Issue #280、
- * Issue #202 第2弾）を `Date`/`null` へ正しく変換することを検査する歯。
- *
- * `mapping-valid-from-until.test.ts`（`Memory` 側、ADR 0145）と同型——`Observation` 側は
- * 本 PR（`migrations/0014_observations_valid_from_until.sql`）で初めて列が増える。
- *
- * ⚠ **DB を要求しない。** `rowToObservation` は純関数（DB 接続を一切持たない、
- * `ObservationRow` → `Observation` の変換だけを行う）。
- *
- * ⚠ **手元でDB無しに実行するときは、このファイルを名指しで直接 vitest に渡すこと**
- * （`mapping-valid-from-until.test.ts` と同じ理由・同じ手順）:
- * `pnpm --filter @mnemora/postgres exec vitest run src/__tests__/mapping-observation-valid-from-until.test.ts`
- */
-
 function baseRow(overrides: Partial<ObservationRow> = {}): ObservationRow {
   return {
     id: "11111111-1111-1111-1111-111111111111",
@@ -28,7 +13,6 @@ function baseRow(overrides: Partial<ObservationRow> = {}): ObservationRow {
     recorded_at: "2026-01-01 00:00:00+00",
     valid_from: null,
     valid_until: null,
-    // Issue #152（ADR 0312）: `jsonb NOT NULL DEFAULT '{}'`。DB は常に値を返す。
     attributes: {},
     ...overrides,
   };

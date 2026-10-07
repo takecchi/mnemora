@@ -1,7 +1,7 @@
 import type { NewMemory } from "../memory.js";
 
 /**
- * ADR 0630: 書いたら読み戻したときに `MemorySchema` を通らなくなる `NewMemory` の形（拒む側）と、
+ * 書いたら読み戻したときに `MemorySchema` を通らなくなる `NewMemory` の形（拒む側）と、
  * その境界のすぐ内側の形（通す側）。core の単体テスト・Fake の歯・`@mnemora/postgres` の歯が共有する。
  *
  * ⚠ `packages/testkit/src/memory-store-conformance.ts` は、同じ形を自前で持つ（core のテストの
@@ -139,7 +139,6 @@ export const MALFORMED_NEW_MEMORY_CASES: ReadonlyArray<NewMemoryCase> = [
     field: /provenance\.batchId/,
     over: () => ({ provenance: { kind: "imported" } as never }),
   },
-  // 変異試験（2026-10-06）で、欄の検査は残ったまま「その形だけ見逃す」変異が生き残った形。
   {
     label: "provenance: stated で sourceObservationId が空文字",
     field: /provenance\.sourceObservationId/,
@@ -244,7 +243,7 @@ export const WELL_FORMED_NEW_MEMORY_CASES: ReadonlyArray<{
   { label: "claimKey が1文字ずつ", over: () => ({ claimKey: { subject: "s", predicate: "p" } }) },
   { label: "attributes が空のオブジェクト", over: () => ({ attributes: {} }) },
   { label: "attributes が省略", over: () => ({ attributes: undefined }) },
-  // `null` の `attributes` は「無い」として扱われ、`{}` で書かれる（ADR 0630 決定2）。
+  // `null` の `attributes` は「無い」として扱われ、`{}` で書かれる。
   { label: "attributes が null", over: () => ({ attributes: null as never }) },
   { label: "extractorVersion が省略", over: () => ({ extractorVersion: undefined }) },
   { label: "attributes の値が空文字", over: () => ({ attributes: { a: "" } }) },
@@ -277,12 +276,12 @@ export const WELL_FORMED_NEW_MEMORY_CASES: ReadonlyArray<{
     label: "provenance: imported で batchId が1文字",
     over: () => ({ provenance: { kind: "imported", batchId: "b" } }),
   },
-  // ADR 0630 の「拒みすぎない」側（独立確認の指摘）: 今は通る形。`MemorySchema` が拒まない形は、入口も拒まない。
+  // 今は通る形。`MemorySchema` が拒まない形は、入口も拒まない。
   {
     label: "claimKey が空白だけ（subject が半角空白・predicate がタブ）",
     over: () => ({ claimKey: { subject: " ", predicate: "\t" } }),
   },
-  // 孤立サロゲートは保存時に U+FFFD へ置き換わる（ADR 0543）。ここは「拒まない」ことと、読み戻しが通ることだけ。
+  // 孤立サロゲートは保存時に U+FFFD へ置き換わる。ここは「拒まない」ことと、読み戻しが通ることだけ。
   {
     label: "claimKey に孤立サロゲートを含む",
     over: () => ({ claimKey: { subject: "a\uD800b", predicate: "p\uDC00q" } }),

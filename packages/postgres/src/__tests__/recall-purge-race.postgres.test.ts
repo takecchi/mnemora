@@ -22,14 +22,10 @@ import {
 } from "./test-db.js";
 
 /**
- * `recall` の途中（`createRecall` に着く前）で、目次帯（`indexBand.digestBand`）に載る記憶が
- * `forget` → `purge` されたときの振る舞い（ADR 0375 決定の表: purge は `recalls.index_band` の
- * digest をトゥームストーンへ書き換える）。
+ * `recall` の途中（`createRecall` に着く前）で、目次帯（`indexBand.digestBand`）に載る記憶が `forget` → `purge` されたときの振る舞い。
  *
- * `purge` が書き換えるのは「purge の時点で在る `recalls` の行」だけである。`recall` は目次帯を
- * 組んだ後で `createRecall` が行を INSERT するため、その間に purge が終わると、purge 前の digest が
- * INSERT される。ADR 0375 が約束しているのは「purge より前に撃った recall」で、同時に走っている
- * recall は書かれていない。
+ * `purge` が書き換えるのは「purge の時点で在る `recalls` の行」だけである。`recall` は目次帯を組んだ後で `createRecall` が行を INSERT するため、
+ * その間に purge が終わると、purge 前の digest が INSERT される。約束しているのは「purge より前に撃った recall」で、同時に走っている recall は書かれていない。
  */
 
 const llm: LLMProvider = {
@@ -54,7 +50,6 @@ interface Gate {
   resume: () => void;
 }
 
-/** `createRecall` の呼び出しを、書き込む直前で止める store。 */
 function gateCreateRecall(store: MemoryStore): { store: MemoryStore; holdNext: () => Gate } {
   let holding = false;
   let release: () => void = () => {};
@@ -142,14 +137,9 @@ afterAll(async () => {
 for (const [name, makeKit] of KITS) {
   describe(`${name}: recall が createRecall に着く前に、目次帯の記憶が forget → purge されたとき`, () => {
     // ⚠ 負債（望ましい姿ではなく、今の振る舞いを縛っている）。
-    // 望ましいのは「purge が終わった後に記録された recall にも、元の digest は残らない」だが、直すには
-    // (a) `createRecall` の後に Runtime が書き換える——`recalls` を書き換える公開の口（`MemoryStore` の新メソッド）が要る、
-    // (b) adapter の `createRecall` が、目次帯の記憶行を `FOR SHARE` で読んで purge 済みなら digest を伏せて書く——
-    //     ADR 0395 が1文に縮めた `createRecall` の経路に、recall ごとの行ロックと2文目を足し、`NewRecallRecord` を
-    //     「渡したとおりに保存する」から外す（InMemory も揃える）、
-    // (c) purge が実行中の recall を待つ——recall 側に居場所の登録が要る、
-    // のどれも公開の約束（store 契約）か recall の熱い経路を動かすため、ここでは直さない。
-    // 直したらこの it は「元の digest が残らない」へ書き換える（ADR 0375 に「同時に走る recall」の扱いも追記すること）。
+    // 望ましいのは「purge が終わった後に記録された recall にも、元の digest は残らない」だが、
+    // 直すには公開の約束（store 契約）か recall の熱い経路を動かす必要があるため、ここでは直さない。
+    // 直したらこの it は「元の digest が残らない」へ書き換える。
     it("【負債】purge 後に記録された recall の digestBand には、purge 前の digest が残る（今の振る舞い）", async () => {
       const kit = await makeKit();
       const first = await kit.runtime.observe(ctx, { kind: "utterance", text: "猫は3匹いる" });

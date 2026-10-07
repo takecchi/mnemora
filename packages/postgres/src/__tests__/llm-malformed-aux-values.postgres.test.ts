@@ -16,16 +16,6 @@ import {
   TEST_EMBEDDING_SPACE,
 } from "./test-db.js";
 
-/**
- * ADR 0456（ADR 0443 の続き）: LLM が返した値のうち、Postgres が保存できない形（NUL・孤立サロゲート）のものを、
- * 実 DB で縛る。
- *
- * - 抽出の候補の `subjectId`（`subjectCandidates` を渡さない経路）: 直す前は `createMemoryWithOutbox` が
- *   `MalformedIdentifierError` を投げ、`observe`（同期の抽出）が例外で終わった（observation は残り、記憶は0件）。
- * - 統合・内省の `digest`・`tags`: 直す前は `DrizzleQueryError`（`invalid byte sequence … 0x00`）で例外になった
- *   （統合元・内省の材料は active のまま）。
- */
-
 const NUL = "ab\u0000cd";
 const LONE = "ab\ud800cd";
 const hashContent = (content: string) => createHash("sha256").update(content).digest("hex");
@@ -64,7 +54,7 @@ async function setup(opts: { acceptLlmSubjectId?: boolean } = {}) {
     embeddingProvider: new DeterministicEmbeddingProvider(TEST_EMBEDDING_SPACE),
     hashContent,
     clock: { now: () => now },
-    // 問15: LLM の subjectId は既定で捨てられる。ADR 0456 の「保存できない値を弾く」歯を保つため、受ける側で当てる。
+    // LLM の subjectId は既定で捨てられるので、保存できない値を弾く歯を保つために、受ける側で当てる。
     ...(opts.acceptLlmSubjectId ? { config: { acceptLlmSubjectIdWithoutCandidates: true } } : {}),
   });
   return { runtime, memoryStore, eventStore, now };
@@ -103,7 +93,7 @@ describe("observe: LLM が返した subjectId が保存できない値", () => {
       text: "発話",
       externalId: "e1",
       subjectId: "alice",
-      // 問15: 一覧が無いと LLM の subjectId は既定で捨てられる。一覧に入れた保存できる値は、そのまま使われる。
+      // 一覧が無いと LLM の subjectId は既定で捨てられる。一覧に入れた保存できる値は、そのまま使われる。
       subjectCandidates: ["bob"],
       extract: "sync",
     });

@@ -2,41 +2,26 @@ import { Pool } from "pg";
 import { afterAll, describe, expect, it } from "vitest";
 import { requireDatabaseUrl } from "./test-db.js";
 
-// `scale-bench.ts` はモジュールの末尾で `main()`（本物のベンチ全体、既定で
-// 10k/100k/1M 行の投入を含む）を無条件に呼ぶ——他の `bench/*.ts`（`cli.ts` も
-// 含め）と同じ、CLI から `tsx` で直接実行される前提のスクリプトの作法である
-// （`src/bench/scale-bench.ts` の末尾のゲート参照）。**static import は
-// トップレベルの他の文より先に評価される**ため、先に環境変数を立ててから
-// dynamic import する（テストから安全に `createScaleDatabase` だけを呼ぶための、
-// このファイル固有の手当て）。
+// `scale-bench.ts` はモジュールの末尾で `main()`（本物のベンチ全体、既定で 10k/100k/1M 行の投入を含む）を無条件に呼ぶ。
+// 他の `bench/*.ts`（`cli.ts` も含め）と同じ、CLI から `tsx` で直接実行される前提のスクリプトの作法である（`src/bench/scale-bench.ts` の末尾のゲート参照）。
+// static import はトップレベルの他の文より先に評価されるため、先に環境変数を立ててから dynamic import する
+// （テストから安全に `createScaleDatabase` だけを呼ぶための、このファイル固有の手当て）。
 process.env.MNEMORA_SCALE_BENCH_SKIP_MAIN = "1";
 const { createScaleDatabase, teardownScaleDatabase } = await import("../bench/scale-bench.js");
 
 /**
- * Issue #936: `createScaleDatabase`（`scale-bench.ts`）は `admin`/`pool` という
- * 2本の `Pool` を作った*後*、`ScaleDatabase`（両方を含む）を返す*前*に、
+ * `createScaleDatabase`（`scale-bench.ts`）は `admin`/`pool` という2本の `Pool` を作った後、`ScaleDatabase`（両方を含む）を返す前に、
  * 失敗しうる `await`（`CREATE DATABASE` / `runMigrations`）を複数段挟んでいる。
- * 呼び出し元（`runSubjectSizeBench` / `main`）はどちらも
- * `const handle = await createScaleDatabase(...); try { ... } finally { await
- * teardownScaleDatabase(handle); }` という形——**`await createScaleDatabase(...)`
- * 自体は `try` の外にある。** ここで reject すると `handle` を受け取れず、
- * `teardownScaleDatabase` を呼びようがない。
+ * 呼び出し元（`runSubjectSizeBench` / `main`）はどちらも `const handle = await createScaleDatabase(...); try { ... } finally { await teardownScaleDatabase(handle); }` という形で、
+ * `await createScaleDatabase(...)` 自体は `try` の外にある。ここで reject すると `handle` を受け取れず、`teardownScaleDatabase` を呼びようがない。
+ * `CREATE DATABASE` が成功した後に `runMigrations` が失敗すると、`Pool` 2本のリークに加え、一時データベース自体も `DROP` されずに残る。
  *
- * `examples/chat` の `createExampleRuntime`（Issue #934）と同じ形の穴だが、
- * こちらは一時データベース自体の後始末も絡む——`CREATE DATABASE` が成功した
- * *後*に `runMigrations` が失敗すると、`Pool` 2本のリークに加え、一時データベース
- * 自体も `DROP` されずに残る。
+ * ## 失敗の注入口
  *
- * ## 失敗の注入口（既存の関数の形を大きく変えずに試す最小の方法）
- *
- * `createScaleDatabase` に、本番の呼び出しでは省略される任意の第3引数
- * `migrationsDir` を足した（既定は `runMigrations` 自身の既定にそのまま委譲、
- * 挙動は無変更）。存在しないディレクトリを渡すと、`Pool` を作り一時データベースも
- * 作った*後*の `runMigrations` が実際に（モックではなく）失敗する——
- * `CREATE DATABASE` が成功した後に何かが失敗する経路を、`Pool`/接続を
- * 模倣せずに再現する唯一の現実的な注入口だった（`runMigrations` 自体は
- * 冪等な `IF NOT EXISTS` 系なので、正常なディレクトリを渡す限り再実行で
- * 失敗させる方法が無い）。
+ * `createScaleDatabase` は、本番の呼び出しでは省略される任意の第3引数 `migrationsDir` を受ける（既定は `runMigrations` 自身の既定にそのまま委譲）。
+ * 存在しないディレクトリを渡すと、`Pool` を作り一時データベースも作った後の `runMigrations` が実際に（モックではなく）失敗する。
+ * `runMigrations` 自体は冪等な `IF NOT EXISTS` 系なので、正常なディレクトリを渡す限り再実行で失敗させる方法が無く、
+ * `CREATE DATABASE` が成功した後に何かが失敗する経路を `Pool`/接続を模倣せずに再現する唯一の現実的な注入口である。
  */
 describe("packages/postgres: createScaleDatabase は Pool 構築後の失敗で Pool と一時 DB を残す（本物の Postgres）", () => {
   const baseUrl = requireDatabaseUrl();
@@ -44,8 +29,6 @@ describe("packages/postgres: createScaleDatabase は Pool 構築後の失敗で 
   let admin: Pool | undefined;
 
   afterAll(async () => {
-    // 歯自身の後始末（各 it 内で失敗時の後始末を検査しているが、検査に使った
-    // 接続 `admin` は別途ここで閉じる）。
     if (admin) {
       await admin.end();
     }
@@ -74,13 +57,11 @@ describe("packages/postgres: createScaleDatabase は Pool 構築後の失敗で 
       createScaleDatabase(baseUrl, database, "/nonexistent/mnemora-scale-bench-migrations-dir"),
     ).rejects.toThrow();
 
-    // 失敗直後、`admin`/`pool` どちらのコネクションも新規使い捨て DB 側に残っていない
-    // ——`pool` はそもそも一時 DB 自体に対する接続、`admin` は常に baseUrl 側のはずだが、
+    // 失敗直後、`admin`/`pool` どちらのコネクションも新規使い捨て DB 側に残っていない。
     // `pg_stat_activity` の `datname` 列を見れば新しい `database` に居ないことが分かる。
     const remaining = await countConnections(admin, database);
     expect(remaining).toBe(0);
 
-    // `CREATE DATABASE` は成功していたはずなので、後始末が効いていれば消えている。
     const exists = await databaseExists(admin, database);
     expect(exists).toBe(false);
   });

@@ -3,14 +3,8 @@ import { describe, expect, it } from "vitest";
 import { omitParamsFromError } from "../omit-params.js";
 
 /**
- * `omitParamsFromError`（`../omit-params.ts`、ADR 0504）の doc が約束する2つを、**DB 無しで**偽の例外で縛る歯（ADR 0586）。
- *
- * - `cause` の連鎖にも掛ける——連鎖の深いところの例外の `message`・`stack` からも、`params:` より後ろが消える。
- * - `stack` も書き換える——書き換えより前に `stack` を読んでおいた例外でも、`stack` の中の params が置き換わる。
- *
- * 本物の drizzle の例外（`*.postgres.test.ts` の歯）では、`cause` は pg のエラーで `params:` を持たず、
- * `stack` も書き換えより前には読まれていない。そのため、この2つは本物の例外の歯では縛れない
- * （どちらを外す変異も、`error-message-omits-params.postgres.test.ts` などは緑のままだった。ADR 0586）。
+ * `cause` の連鎖にも掛ける（連鎖の深いところの例外の `message`・`stack` からも `params:` より後ろが消える）。`stack` も書き換える（書き換えより前に `stack` を読んでおいた例外でも置き換わる）。
+ * 本物の drizzle の例外では、`cause` は pg のエラーで `params:` を持たず、`stack` も書き換えより前には読まれていないので、この2つは本物の例外の歯では縛れない。
  */
 
 const SECRET = "mnemora-omit-params-secret-7f3a";
@@ -52,7 +46,6 @@ describe("omitParamsFromError: cause の連鎖にも掛ける（ADR 0504 の doc
         /\nparams: \(omitted by mnemora, \d+ chars\)$/,
       );
     });
-    // 連鎖の形（同じ例外のオブジェクト）は変えない。
     expect((top as { cause?: unknown }).cause).toBe(middle);
     expect((middle as { cause?: unknown }).cause).toBe(deepest);
   });
@@ -82,7 +75,6 @@ describe("omitParamsFromError: 先に読まれていた stack も書き換える
 
     expect(error.stack ?? "").not.toContain(SECRET);
     expect(error.stack ?? "").toMatch(/\nparams: \(omitted by mnemora, \d+ chars\)/);
-    // SQL の文と、呼び出し位置の行は残る。
     expect(error.stack ?? "").toContain(`${SQL} -- stack`);
     expect(error.stack ?? "").toContain("omit-params.test.ts");
   });
@@ -101,12 +93,8 @@ describe("omitParamsFromError: 先に読まれていた stack も書き換える
 });
 
 /**
- * ADR 0592（ADR 0586 の歯の穴、確かめ直し）: 上の歯がどれも捕まえなかった3つ。
- *
- * - 循環する `cause` でも止まる（`seen` の歯止め。外すと無限ループ）。無限ループは同期なので vitest の
- *   時間切れでは止まらない。`node:vm` の `timeout` で打ち切り、赤として観測できる形にする。
- * - 書き換えられない（凍結された）例外は、投げずにそのまま返す（`catch` で握る）。
- * - 冪等——2回掛けても1回と同じ（印済みの検査。外すと、印の中の文字数が毎回書き変わる）。
+ * 上の歯がどれも捕まえなかった3つ。循環する `cause` でも止まる（`seen` の歯止め。外すと無限ループ）。無限ループは同期なので vitest の時間切れでは止まらないので、`node:vm` の `timeout` で打ち切り、赤として観測できる形にする。
+ * 書き換えられない（凍結された）例外は、投げずにそのまま返す。冪等（2回掛けても1回と同じ）。
  */
 describe("omitParamsFromError: 取りこぼしていた3つ（ADR 0592）", () => {
   it("cause が循環していても止まり、輪の全員の params が消える", () => {

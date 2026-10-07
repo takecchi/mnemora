@@ -22,7 +22,7 @@ import {
 } from "./test-db.js";
 
 /**
- * ADR 0444 BG-2: drizzle-orm 0.45.2 の `NodePgSession.transaction` は
+ * drizzle-orm 0.45.2 の `NodePgSession.transaction` は
  * `catch { await rollback; throw error }` で、`rollback` が投げると元のエラーを消す
  * （呼び出し側に `Failed query: rollback` しか残らない）。`createPostgresClient` が包んで、
  * `rollback` の失敗は握り、**元のエラー（`code` 付き）を優先して投げる**。`rollback` の失敗は
@@ -67,10 +67,8 @@ describe("db.transaction(): rollback が失敗しても元のエラーを投げ�
         throw original;
       })
       .catch((e: unknown) => e);
-    // 同じ例外オブジェクトのまま（型も作り替えない）。
     expect(error).toBe(original);
     expect((error as { code?: string }).code).toBe("57P01");
-    // rollback の失敗は、元のエラーの cause に残る。
     const cause = (error as Error).cause as Error | undefined;
     expect(cause).toBeInstanceOf(Error);
     expect(String(cause?.message)).toMatch(/connection|terminat/i);
@@ -108,7 +106,6 @@ describe("db.transaction(): rollback が失敗しても元のエラーを投げ�
     expect(error).toBe(original);
     expect((error as Error).cause).toBeUndefined();
     expect("rollbackError" in (error as object)).toBe(false);
-    // 接続は健全なまま pool に戻り、使い回せる。
     expect(client.pool.idleCount).toBe(1);
     await client.db.transaction(async (tx) => {
       await tx.execute(sql`SELECT 1`);

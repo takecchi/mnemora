@@ -8,10 +8,10 @@ import { PostgresMemoryStore } from "../memory-store.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
 /**
- * ADR 0503（ADR 0447 の材料3〜5・ADR 0450 の材料1・2）: `supersededById`（置き換えた側）の約束を壊す入力。
+ * `supersededById`（置き換えた側）の約束を壊す入力。
  *
  * - `resolveContestedPair`・`resolveContestedGroup` で `status: "superseded"` に `supersededById` を付けない
- *   → 戻せない敗者（`restoreSuperseded` の群に入らない）ができていた。
+ *   （戻せない敗者になる。`restoreSuperseded` の群に入らない）。
  * - `supersededById` に自分自身（自己置換）、2者版で互いを指す・群版で輪になる（循環）、群版で群の外の
  *   `forgotten` な記憶を指す、`active` のメンバーに `supersededById` を付ける。
  * - `updateStatus(T, "superseded", { supersededById: T })`・`updateStatus(T, "superseded")`
@@ -49,7 +49,7 @@ async function inMemoryKit(): Promise<Kit> {
   return { store, eventCount: async () => store.events.length };
 }
 
-/** ADR 0557: core の Fake（`FakeMemoryStore`）。イベント数は Fake の裏の events を読む（`fake-cas-purged-row.test.ts` と同じ）。 */
+/** core の Fake（`FakeMemoryStore`）。イベント数は Fake の裏の events を読む。 */
 async function fakeKit(): Promise<Kit> {
   const store = createFakeRuntimeStores().memoryStore;
   const backing = (store as unknown as { backing: { events: unknown[] } }).backing;

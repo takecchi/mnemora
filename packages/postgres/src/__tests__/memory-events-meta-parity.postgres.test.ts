@@ -22,18 +22,6 @@ import {
   TEST_EMBEDDING_SPACE,
 } from "./test-db.js";
 
-/**
- * `memory_events` の meta が、Postgres と testkit の InMemory で同じ形・同じ型になること。
- *
- * - `resolveContested`（`supersede`）で負けた側の `superseded` は、`meta.supersededById` に
- *   勝った側の id を持つ（consolidate・reextract の `superseded` と同じ形。ADR 0150 追記）。
- *   【実測 2026-09-27】以前は2実装とも `{ reason, resolution }` だけだった。
- * - `purgeExpiredEvents` が積む `events_purged` の meta の日時（`oldestPurgedAt`・
- *   `newestPurgedAt`・`olderThan`）は、ISO 8601 の文字列である。
- *   【実測 2026-09-27】Postgres は meta を JSON で保存するので読み戻すと文字列、testkit は
- *   `Date` のまま持っていた。fixture は Postgres を写すものなので、testkit を揃えた。
- */
-
 const llm: LLMProvider = {
   complete: async () => ({ content: "unused" }),
   completeStructured: async (_ctx, req) => {
@@ -144,8 +132,6 @@ describe.each(KITS)("memory_events の meta（%s）", (_name, build) => {
       contestedWithId: b.id,
       supersededById: b.id,
     });
-    // 勝者の updated には supersededById を足さない（置き換えられていないため）。相手は
-    // contestedWithId で引ける（Issue #1160）。
     const winner = (await eventStore.list(ctx, { memoryId: b.id, kind: "updated" })).filter(
       (e) => e.meta.reason === "contested_resolved",
     );
@@ -178,7 +164,6 @@ describe.each(KITS)("memory_events の meta（%s）", (_name, build) => {
       expect(meta[key], key).toMatch(ISO_8601);
     }
     expect(meta.olderThan).toBe(olderThan.toISOString());
-    // 戻り値のほうは今までどおり Date（型は変えない）。
     expect(result.oldestPurgedAt).toBeInstanceOf(Date);
   });
 });

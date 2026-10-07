@@ -8,16 +8,8 @@ import { createRuntime } from "../runtime.js";
 import type { NewMemory } from "../memory.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * #980 の確かめ直し（#1774）。`observe({kind:'memory_usage'})` が `recordUsageAndReinforce` を使うとき、
- * 強化の時刻と活動時計の読み（`ReinforceOptions`）を、従来の2段（`recordUsage` → `reinforceMany`）と
- * 同じ形で渡す。既存の歯（`memory-usage-record-and-reinforce.test.ts`）は再送で強化が完了するかしか見ず、
- * 渡す引数を見ない（`reinforceOpts` を渡さない実装は全部の既存の歯をすり抜けた）。
- *
- * - `wall`（既定）：opts は `undefined`。
- * - `activity`：opts は `{ nowSeq }`（テナントの活動カウンタの「いま」）。
- * - 強化の時刻は、`clock.now()`。
- */
+// 既存の歯は再送で強化が完了するかしか見ず、渡す引数を見ない（`reinforceOpts` を渡さない実装はすり抜ける）ので、
+// 強化の時刻と活動時計の読み（`ReinforceOptions`）を、従来の2段（`recordUsage` → `reinforceMany`）と同じ形で渡すことをここで見る。
 
 const ctx: Ctx = { tenantId: "tenant-1" };
 const NOW = new Date("2026-06-01T00:00:00.000Z");

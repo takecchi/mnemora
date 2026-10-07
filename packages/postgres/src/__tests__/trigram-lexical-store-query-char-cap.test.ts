@@ -13,12 +13,10 @@ import {
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
 /**
- * Issue #878（2026-09-26、クローン miku の判断）: `PostgresTrigramLexicalStore.search` の
- * 文字数の上限（ASCII 側: {@link LEXICAL_QUERY_MAX_WORD_CHARS}、日本語側:
- * {@link TRIGRAM_JAPANESE_QUERY_MAX_CHARS}）の実測。
+ * `PostgresTrigramLexicalStore.search` の文字数の上限（ASCII 側: {@link LEXICAL_QUERY_MAX_WORD_CHARS}、
+ * 日本語側: {@link TRIGRAM_JAPANESE_QUERY_MAX_CHARS}）の実測。
  *
- * **⚠ この歯は UTF8 の `server_encoding` を前提とする**（`trigram-lexical-store.postgres.test.ts`
- * と同じ前提の測り方、ADR 0103）。前提を満たさない環境では中身をスキップする。
+ * **⚠ この歯は UTF8 の `server_encoding` を前提とする。**前提を満たさない環境では中身をスキップする。
  */
 
 const TENANT = "trigram-query-char-cap-tenant";
@@ -73,8 +71,7 @@ describe("PostgresTrigramLexicalStore.search: クエリの文字数の上限（I
     const memoryStore = new PostgresMemoryStore(db);
     // 閾値をほぼ1（自己一致でなければ通らない値）にする——既定の閾値（0.3）では、
     // word_similarity が「部分一致」にも十分寛容な値を返すため、切り詰めの有無で
-    // 一致/不一致が割れない（実測: 上限ちょうどの文字列と、それに30文字足した文字列との
-    // word_similarity は 0.3 を大きく超える）。ほぼ1にすることで、「本文の語と完全に
+    // 一致/不一致が割れない。ほぼ1にすることで、「本文の語と完全に
     // 同じ文字列になったときだけ通る」ようにし、切り詰めが実際に起きたかどうかの
     // 判定に使う。
     const trigramStore = await PostgresTrigramLexicalStore.create(db, { threshold: 0.95 });

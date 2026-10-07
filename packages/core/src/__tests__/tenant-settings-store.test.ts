@@ -29,15 +29,7 @@ import type {
   TenantSettingsStore,
 } from "../interfaces/tenant-settings-store.js";
 
-/**
- * [ADR 0165](../../../docs/decisions/0165-decay-activity-clock.md) 決めたこと13の歯。
- *
- * `readDecayClock`/`readActivitySeq`/`readDefaultHalfLifeRecalls`/`writeDecayClock` は
- * `packages/core` が `TenantSettingsStore` の4つの省略可能メソッドへ読み書きする
- * **唯一の通り道**である。フォールバックの規律はここにしか無い——呼び出し側
- * （`runtime.ts`/`recall-runtime.ts`）にこの分岐を散らさないための1箇所であることを
- * この歯で固定する。
- */
+/** フォールバックの規律はここにしか無い。呼び出し側（`runtime.ts`/`recall-runtime.ts`）にこの分岐を散らさないための1箇所であることを固定する。 */
 
 const ctx: Ctx = { tenantId: "tenant-1" };
 
@@ -286,12 +278,6 @@ describe("isHalfLifeRecallsInRange（ADR 0125 と同じ値域、halfLifeHours �
   });
 });
 
-/**
- * Issue #201 / [ADR 0318](../../../docs/decisions/0318-taxonomy-labels.md) の歯。
- * `readDecayClock`/`writeDecayClock` の歯（このファイル冒頭）と同じ形——
- * `readTaxonomyMode`/`writeTaxonomyMode` が `TenantSettingsStore` の2つの省略可能
- * メソッドへ読み書きする唯一の通り道であることを固定する。
- */
 describe("readTaxonomyMode", () => {
   it("getTaxonomyMode を持たない adapter では DEFAULT_TAXONOMY_MODE（'open'）へ倒す", async () => {
     const mode = await readTaxonomyMode(minimalStore(), ctx);
@@ -351,7 +337,7 @@ describe("assertValidTaxonomyMode", () => {
     expect(() => assertValidTaxonomyMode("")).toThrow(TAXONOMY_MODE_INVALID_MESSAGE);
   });
 
-  // Issue #1775 の #717（変異19）: 2値に近い綴りも通さない（値は 'open'/'strict' の2値だけ。ADR 0318 決定）。
+  // 2値に近い綴りも通さない（値は 'open'/'strict' の2値だけ）。
   it.each(["Strict", "OPEN", "closed", " open", "strict ", "enforced"])(
     "2値に近い綴り %j も TAXONOMY_MODE_INVALID_MESSAGE を含む Error で失敗する",
     (value) => {

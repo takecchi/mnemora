@@ -11,18 +11,9 @@ import { PostgresMemoryStore } from "../memory-store.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
 /**
- * 語彙チャンネルのクエリで、語の途中の `"` を空白として扱う（本文と同じ規則で語に分ける）。
- *
- * `mnemora_lexical_query_tsqueries`（`migrations/0009`）は、各語を `"…"` で囲んで
- * `websearch_to_tsquery` に渡す前に、語の中の `"` を取り除いていた。取り除くときに
- * **空白ではなく詰めていた**ので、`x"y` は1語 `xy` になり、本文側（`to_tsvector` は `x"y` を
- * `x` と `y` に分ける）と噛み合わなかった——本文と同じ文字列で探しても0件だった。
- * 【実測 2026-09-27】testkit の `InMemoryLexicalStore` は一致する。語の端の `"`（`"PROJ-1234"`）は
- * 詰めても影響が無い。`migrations/0023` で `"` を空白に置き換えた（関数の本体はその1か所だけ変えた）。
- *
- * trigram の語彙検索（`PostgresTrigramLexicalStore`）は ASCII 側で同じ関数を使うので、同じく直る。
- * SQL_ASCII の leg では `create()` が拒むので（ADR 0319）、その leg の trigram の組では `create()` の
- * 拒否だけを確かめ、検索は飛ばす（`trigram-lexical-store-threshold-param.postgres.test.ts` と同じ扱い）。
+ * 語の途中の `"` は空白として扱う（本文と同じ規則で語に分ける）。詰めると、`x"y` が1語 `xy` になり、本文側（`to_tsvector` は `x"y` を `x` と `y` に分ける）と噛み合わない。
+ * 語の端の `"` は詰めても影響が無い。
+ * SQL_ASCII の leg では trigram の `create()` が拒むので、その leg の trigram の組では `create()` の拒否だけを確かめ、検索は飛ばす。
  */
 
 const ctx: Ctx = { tenantId: "lexical-query-inner-quote" };
@@ -87,7 +78,7 @@ const KITS: Array<[string, Make]> = [
       const { db } = await getTestClient();
       const probe = await probeTrigramLexicalSupport(db);
       if (!probe.ok) {
-        // SQL_ASCII など: create() が拒むことだけを確かめる（ADR 0319）。
+        // SQL_ASCII など: create() が拒むことだけを確かめる。
         await expect(PostgresTrigramLexicalStore.create(db)).rejects.toThrow();
         return null;
       }
@@ -121,7 +112,6 @@ for (const [name, make] of KITS) {
       expect(hits[0]!.coverage).toBe(1);
     });
 
-    // 各語を `"…"` で囲む約束（0009 から続く）: `-` や `or` が検索記法として効かない。
     it("-1234 で探すと、-1234 を含む記憶だけが当たる（NOT として効かない）", async () => {
       const kit = await make();
       if (kit === null) return;
@@ -145,8 +135,6 @@ for (const [name, make] of KITS) {
   });
 }
 
-// `mnemora_lexical_query_tsqueries` の宣言（0023 は `IMMUTABLE PARALLEL SAFE`・引数 `(text)` を
-// 0009 から変えていない）と、`mnemora_lexical%` の同名の多重定義が無いこと。
 describe("mnemora_lexical_query_tsqueries の宣言", () => {
   it("IMMUTABLE・PARALLEL SAFE・引数は (text) だけ", async () => {
     const { pool } = await getTestClient();

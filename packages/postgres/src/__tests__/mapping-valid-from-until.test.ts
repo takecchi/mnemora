@@ -1,23 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { rowToMemory, type MemoryRow } from "../mapping.js";
 
-/**
- * `rowToMemory`（`../mapping.ts`）が `valid_from`/`valid_until`（Issue #202、ADR 0145）を
- * `Date`/`null` へ正しく変換することを検査する歯。
- *
- * ⚠ **DB を要求しない。** `rowToMemory` は純関数（DB 接続を一切持たない、
- * `MemoryRow` → `Memory` の変換だけを行う）であり、`memory-store-contested-write-guard.test.ts`
- * の doc コメントが説明する族——「本物の Postgres + pgvector を要求する既存の
- * `*.postgres.test.ts`／DB 依存の `*.test.ts` では、この作業環境（`DATABASE_URL` 無し、
- * Issue #247）では一切実行できない」——には当たらない。ただし `packages/postgres` は
- * `test:db`（DB 必須）以外の plain `test` script を持たないため（`package.json` 参照）、
- * このファイルも `pnpm run test`（ルート）経由では実行されない。
- *
- * ⚠ **手元でDB無しに実行するときは、このファイルを名指しで直接 vitest に渡すこと**
- * （`memory-store-contested-write-guard.test.ts` と同じ理由・同じ手順）:
- * `pnpm --filter @mnemora/postgres exec vitest run src/__tests__/mapping-valid-from-until.test.ts`
- */
-
 function baseRow(overrides: Partial<MemoryRow> = {}): MemoryRow {
   return {
     id: "11111111-1111-1111-1111-111111111111",
@@ -49,7 +32,6 @@ function baseRow(overrides: Partial<MemoryRow> = {}): MemoryRow {
     half_life_recalls: null,
     embedding_status: "pending",
     purged_at: null,
-    // Issue #152/#153（ADR 0312）: `jsonb NOT NULL DEFAULT '{}'`。DB は常に値を返す。
     attributes: {},
     created_at: "2026-01-01 00:00:00+00",
     updated_at: "2026-01-01 00:00:00+00",

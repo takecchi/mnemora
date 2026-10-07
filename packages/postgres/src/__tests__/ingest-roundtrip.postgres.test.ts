@@ -17,19 +17,7 @@ import {
   TEST_EMBEDDING_SPACE,
 } from "./test-db.js";
 
-/**
- * roadmap.md 段階3の完了条件を、本物の Postgres に対して実際に往復させて確認する
- * （PR 本文「擬似物の扱い」参照）。
- *
- * **正直に書く**: ここで使う `LLMProvider` / `EmbeddingProvider` は
- * `@mnemora/testkit` の決定的な擬似実装（`DeterministicLLMProvider` /
- * `DeterministicEmbeddingProvider`）である。本物の OpenAI を CI から叩くことはできない
- * （API キーが無い）ため、このテストが検査しているのは「runtime → MemoryStore →
- * VectorStore → outbox という配線が実際の Postgres に対して正しく動くか」であり、
- * 「LLM/埋め込みの抽出結果そのものの品質」ではない。後者は `packages/openai` の
- * 翻訳検査（zod → JSON Schema）と、`OPENAI_API_KEY` がある場合だけ走る live テストに
- * 分離してある。
- */
+/** ここで使う `LLMProvider` / `EmbeddingProvider` は testkit の決定的な擬似実装なので、検査しているのは runtime → MemoryStore → VectorStore → outbox という配線であり、抽出結果そのものの品質ではない。 */
 function buildRuntime() {
   return getTestClient().then(({ db }) => {
     return createRuntime({
@@ -61,13 +49,11 @@ describe("observe → recall 前段の往復（roadmap.md 段階3、本物の Po
     expect(result.extraction).toBe("ok");
     expect(result.memoryIds).toHaveLength(1);
 
-    // 1. observations 行
     const observationRows = await db.execute(sql`
       SELECT * FROM observations WHERE id = ${result.observationId}
     `);
     expect(observationRows.rows).toHaveLength(1);
 
-    // 2. memories 行（digest は NOT NULL 制約を満たしている＝ INSERT 自体が成功している）
     const memoryId = result.memoryIds[0]!;
     const memoryRows = await db.execute(sql`
       SELECT * FROM memories WHERE id = ${memoryId}
@@ -84,15 +70,12 @@ describe("observe → recall 前段の往復（roadmap.md 段階3、本物の Po
     expect(memoryRow.embedding_status).toBe("pending");
     expect(memoryRow.source_observation_id).toBe(result.observationId);
 
-    // 3. embed ジョブが outbox に積まれている（sync 抽出でも embed は常に非同期）
     const outboxRows = await db.execute(sql`
       SELECT * FROM outbox WHERE tenant_id = ${ctx.tenantId} AND kind = 'embed' AND completed_at IS NULL
     `);
     expect(outboxRows.rows).toHaveLength(1);
 
-    // 4. tick で embed ジョブを消化する
-    // このテストはリースの境界を検査しない(それは outbox-claim-lease-index.test.ts /
-    // outbox-store-conformance.ts の役目)ので、十分に長く固定した値を使う。
+    // このテストはリースの境界を検査しないので、十分に長く固定した値を使う。
     const tickResult = await runtime.tick(ctx, { kinds: ["embed"], leaseMs: 60_000 });
     expect(tickResult).toEqual({
       processed: 1,
@@ -101,12 +84,10 @@ describe("observe → recall 前段の往復（roadmap.md 段階3、本物の Po
       leaseConflicts: [],
     });
 
-    // 5. embeddingStatus が 'ready' に遷移している
     const memoryStore = new PostgresMemoryStore(db);
     const updatedMemory = await memoryStore.get(ctx, memoryId);
     expect(updatedMemory?.embeddingStatus).toBe("ready");
 
-    // 6. memory_embeddings_<space> に実際に行がある
     const table = embeddingSpaceTableName(TEST_EMBEDDING_SPACE);
     const embeddingRows = await db.execute(sql`
       SELECT * FROM ${sql.identifier(table)}
@@ -157,11 +138,8 @@ describe("observe → recall 前段の往復（roadmap.md 段階3、本物の Po
     const before = await memoryStore.get(ctx, memoryId);
     expect(before?.lastReinforcedAt).toBeNull();
 
-    // `recall_usages.recall_id` は `recalls(id)` への外部キー。recall() 自体は
-    // roadmap.md 段階4の範囲であり、ここでは使用報告を試すための行を直接用意する。
-    // Issue #298 / ADR 0155: `returned_memories` は NOT NULL・DEFAULT 無し（意図的）。
-    // ここは外部キーの相手が要るだけで内訳の中身は問わないため、
-    // 「内訳ありの新規行」の最小形を渡す。
+    // `recall_usages.recall_id` は `recalls(id)` への外部キーで、`returned_memories` は NOT NULL・DEFAULT 無し。
+    // ここは外部キーの相手が要るだけで内訳の中身は問わないので、「内訳ありの新規行」の最小形を渡す。
     const recallRow = await db.execute(sql`
       INSERT INTO recalls (id, tenant_id, query, usage, index_band, returned_memories)
       VALUES (
@@ -182,14 +160,6 @@ describe("observe → recall 前段の往復（roadmap.md 段階3、本物の Po
     expect(after?.lastReinforcedAt).not.toBeNull();
   });
 
-  /**
-   * Issue #870: `ObserveMemoryUsageInput` は他3種と違い `externalId` を持たず、
-   * `handleMemoryUsage` は `externalId: null` を固定で渡していたため、`observations`
-   * 行の冪等化が構造的に効かなかった——同じ使用報告を再送するたびに `observations` 行が
-   * 増え続ける（`recall_usages`/`reinforce` 自体は元から冪等）。本物の Postgres に対して
-   * 同じ externalId で2回 `observe({kind:'memory_usage', ...})` を送っても、
-   * `observations` の usage 行が1件のまま・`observationId` が同じであることを確かめる。
-   */
   it("同じ externalId の memory_usage を2回 observe() しても observations の usage 行は1件のまま（本物の Postgres）", async () => {
     await resetTestDatabase();
     const { db } = await getTestClient();
@@ -237,13 +207,6 @@ describe("observe → recall 前段の往復（roadmap.md 段階3、本物の Po
   });
 });
 
-/**
- * Issue #753（#449 の残り）: `RuntimeDeps.embeddingInput`（opt-in フック）が、本物の
- * Postgres の `MemoryStore`/`VectorStore` に対しても同じ形で回復の口として働くことを
- * 確認する。`packages/core/src/__tests__/runtime.test.ts` の「embeddingInput opt-in
- * フック」節（擬似 store）と同じ筋を、実 DB で1本だけなぞる——ここでは配線の確認に
- * 留め、境界条件（フックが例外を投げた場合の扱い等）は core 側の歯に任せる。
- */
 class OverLimitEmbeddingProvider implements EmbeddingProvider {
   readonly space = TEST_EMBEDDING_SPACE;
   async embed(_ctx: Ctx, texts: string[]): Promise<number[][]> {
@@ -272,8 +235,6 @@ describe("embeddingInput opt-in フック（Issue #753、本物の Postgres）",
       llmProvider: new DeterministicLLMProvider(),
       embeddingProvider: provider,
       hashContent: sha256Hex,
-      // embeddingInput 省略——最初の observe/tick は今までどおり memory.content を
-      // そのまま送る（既定の挙動を確かめる側）。
     });
 
     const observeResult = await runtime.observe(ctx, { kind: "utterance", text: hugeContent });
@@ -287,21 +248,6 @@ describe("embeddingInput opt-in フック（Issue #753、本物の Postgres）",
     const afterFailureStatus = (await memoryStore.get(ctx, memoryId))?.embeddingStatus;
     expect(afterFailureStatus).toBe("failed");
 
-    // 運用側が opt-in フックを足した runtime を、同じ DB に対して新たに立てる
-    // （`ingest-roundtrip.postgres.test.ts` の他の it と同じく、runtime 自体は状態を
-    // 持たない——状態は DB 側にある）。
-    //
-    // `clock` に 1 秒だけ未来を返す `Clock` を渡す。これは歴史的な理由で残している。かつて
-    // `PostgresMemoryStore.requeueEmbedJobs` が積む outbox 行の `available_at` は DB 側の
-    // `now()`（マイクロ秒精度）で書かれ、`runtime.tick` の `Clock` は JavaScript の `Date`
-    // （ミリ秒までしか持たない）だったので、この直後の `reembed()` → `tick()` のように
-    // 同じミリ秒の中で両方が起きると、`available_at = 12:00:00.123456` に対して
-    // `new Date()` が `12:00:00.123`（切り捨て）になり、積んだばかりの行を claim できなかった
-    // （ADR 0079「測ったこと」4。この it が CI の `server_encoding=UTF8` 脚だけで
-    // `processed: 0` になって落ちた）。今は `requeueEmbedJobs` も runtime が渡す
-    // `clock.now()` 由来の `now`（ミリ秒）を `available_at` に入れる（ADR 0355・0559）。
-    // 1秒は `leaseMs`（60秒）よりずっと小さいので、既に claim 済みの行がリース切れとして
-    // 再取得されることはない。
     const healingRuntime = createRuntime({
       memoryStore: new PostgresMemoryStore(db),
       outboxStore: new PostgresOutboxStore(db),
@@ -323,7 +269,6 @@ describe("embeddingInput opt-in フック（Issue #753、本物の Postgres）",
 
     const healed = await memoryStore.get(ctx, memoryId);
     expect(healed?.embeddingStatus).toBe("ready");
-    // memories.content は全文のまま——フックは embed() へ送る文字列だけを差し替える。
     expect(healed?.content).toBe(hugeContent);
 
     const table = embeddingSpaceTableName(TEST_EMBEDDING_SPACE);

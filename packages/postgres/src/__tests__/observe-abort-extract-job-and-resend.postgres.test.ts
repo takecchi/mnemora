@@ -22,20 +22,6 @@ import {
   TEST_EMBEDDING_SPACE,
 } from "./test-db.js";
 
-/**
- * ADR 0454（穴探し30巡目）:
- *
- * 1. `extract: 'sync'` の `observe` が abort された後の extract ジョブは、**未 claim ではなく、observe が claim したまま**
- *    （`claimed_by: "runtime.observe:sync"`・`attempts: 1`）残る（ADR 0407）。`leaseMs` の内側の `tick` は拾わず、
- *    リースが切れた後の `tick` が取り直して処理する。`Runtime.observe` の TSDoc は以前「claim もされていないまま」と書いていた。
- * 2. その間に同じ `externalId` で再送しても抽出はやり直されない（`skipped`・`memoryIds: []`。#897 と同じ分岐）。
- * 3. 冪等な再送の戻り値にも、`subjectCandidates`・`claimKey` を渡していれば `rejectedSubjectIds: []`・
- *    `claimKeyFailure: null`・`contestedDetection: []` が付く（`ObserveResult` の各欄の doc の「渡したら常に」。
- *    以前は欄が無く、全 Runtime 呼び出しに掛かる出力契約の検査が赤になっていた）。
- *
- * testkit の InMemory と Postgres の両方に同じ入力を当てる。
- */
-
 let contents: string[] = ["X"];
 let gate: (() => Promise<void>) | undefined;
 
@@ -171,14 +157,11 @@ for (const [name, makeKit] of KITS) {
       release();
       gate = undefined;
 
-      // 未 claim ではなく、observe が claim したまま（attempts: 1）。
       expect(await kit.extractJobs()).toEqual(["runtime.observe:sync:1:open"]);
 
-      // リースの内側の tick は拾わない。
       const inside = await kit.runtime.tick(ctx, { leaseMs: 60_000, kinds: ["extract"] });
       expect(inside.processed).toBe(0);
 
-      // 同じ externalId の再送は、抽出をやり直さない。
       const resend = await kit.runtime.observe(ctx, {
         kind: "utterance",
         text: "u",
@@ -189,7 +172,6 @@ for (const [name, makeKit] of KITS) {
         await kit.memoryStore.listBySourceObservationAllVersions(ctx, resend.observationId),
       ).toHaveLength(0);
 
-      // リースが切れた後の tick は取り直し（attempts: 2）、処理する。
       await sleep(30);
       const after = await kit.runtime.tick(ctx, { leaseMs: 5, kinds: ["extract"] });
       expect(after.processed).toBe(1);
@@ -210,7 +192,6 @@ for (const [name, makeKit] of KITS) {
         claimKey: { enabled: true, detectContested: true },
       };
       const first = await kit.runtime.observe(ctx, input);
-      // 対照: 最初の呼び出しは3つの欄を持つ。
       expect(first).toHaveProperty("claimKeyFailure");
       expect(first).toHaveProperty("contestedDetection");
       expect(first).toHaveProperty("rejectedSubjectIds");
@@ -224,7 +205,6 @@ for (const [name, makeKit] of KITS) {
         claimKeyFailure: null,
         contestedDetection: [],
       });
-      // 対照: 渡していない再送には、この3欄は付かない。
       const plain = await kit.runtime.observe(ctx, {
         kind: "utterance",
         text: "u",

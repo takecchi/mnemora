@@ -10,11 +10,9 @@ import { requireDatabaseUrl } from "./test-db.js";
 import { dropTempDatabase } from "./temp-database.js";
 
 /**
- * ADR 0430 決定1: `PostgresTrigramLexicalStore.create()`（と、公開の `probeTrigramLexicalSupport`）の
+ * `PostgresTrigramLexicalStore.create()`（と、公開の `probeTrigramLexicalSupport`）の
  * 同時呼び出しは、`migrate.ts` の `EXTENSION_LOCK_KEY` の advisory lock（トランザクション内の
- * `pg_advisory_xact_lock`）で直列になる。
- *
- * 直す前の実測（別々の pool から同時に呼ぶ）:
+ * `pg_advisory_xact_lock`）で直列になる。直列にならないと、別々の pool から同時に呼んだとき:
  * - 拡張が無い DB: `CREATE EXTENSION IF NOT EXISTS pg_trgm` が 23505（`pg_extension_name_index`）で
  *   落ち、`TrigramLexicalStoreUnavailableError(extension_create_failed)` になる。
  * - 拡張も関数も在る DB: `CREATE OR REPLACE FUNCTION` が XX000（`tuple concurrently updated`）で落ち、
@@ -47,7 +45,7 @@ afterAll(async () => {
 
 /**
  * SQL_ASCII のクラスタでは `pg_trgm` を日本語の語彙照合に使えない（`server_encoding_not_utf8`）ので、
- * この脚は飛ばす（`trigram-probe-dedicated-schema.postgres.test.ts` の `isUtf8` と同じ扱い）。
+ * この脚は飛ばす。
  */
 async function isUtf8(): Promise<boolean> {
   const { rows } = await admin().query<{ server_encoding: string }>("SHOW server_encoding");

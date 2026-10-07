@@ -3,24 +3,10 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 /**
- * Issue #878（2026-09-26、クローン miku の判断）: クエリの異なる語数
- * （`LEXICAL_QUERY_MAX_DISTINCT_WORDS`）・1語あたりの文字数（`LEXICAL_QUERY_MAX_WORD_CHARS`）・
- * クエリ全体の文字数（`LEXICAL_QUERY_MAX_TOTAL_CHARS`）の上限は、
- * 3つの実装（`packages/postgres`/`packages/testkit`/`packages/core`）が
- * それぞれ独立に持つ定数であり、import では共有できない
- * （`packages/core` は `packages/postgres`/`packages/testkit` に依存せず、
- * `packages/testkit`/`packages/postgres` は互いに依存しない——`package.json` の
- * `dependencies` 参照）。**手で値を揃えている**ため、ずれを検出する歯が要る。
+ * 上限の定数は3つの実装（`packages/postgres`/`packages/testkit`/`packages/core`）がそれぞれ独立に持ち、依存関係の都合で import では共有できない。
+ * 手で値を揃えているので、ずれを検出する歯が要る。ソースをテキストとして読み、定数の右辺を正規表現で取り出して突き合わせる（依存関係も公開 API も増やさない）。
  *
- * **ソースをテキストとして読み、定数の右辺を正規表現で取り出して突き合わせる**——
- * どの package からも import せず（依存関係を新しく作らない）、公開 API も増やさない
- * 形で3値の一致を見る。`packages/postgres` 側にこの歯を置いているのは、
- * この Issue の作業が `packages/postgres` から始まった経緯によるもので、他に理由は無い
- * （どの package に置いても同じことが検査できる）。
- *
- * ⚠ この歯は「3ファイルの定数の**値**が一致しているか」だけを見る——各実装が実際に
- * その値を**使っているか**（配線されているか）は、各 package の
- * `*-query-word-cap.test.ts`/`*-query-char-cap.test.ts`（結果ベースの歯）が別に検査する。
+ * ⚠ この歯は定数の値が一致しているかだけを見る。各実装が実際にその値を使っているか（配線）は、各 package の結果ベースの歯が別に検査する。
  */
 
 const REPO_ROOT = join(import.meta.dirname, "../../../..");
