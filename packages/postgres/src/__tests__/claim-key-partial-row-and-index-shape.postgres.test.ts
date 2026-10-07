@@ -6,18 +6,9 @@ import { PostgresMemoryStore } from "../memory-store.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
 /**
- * claimKey の Postgres の2つの約束の歯（Issue #1775 の #736）。
- *
- * 1. **片方だけ NULL の行を鍵として読まない**（`mapping.ts` の doc・`memory.ts` の `claimKey` の doc、
- *    migration の「CHECK で強制しない」決定）。書き込みの口は片方だけの鍵・空文字の鍵を拒む（ADR 0630）が、
- *    以前の行や生 SQL の行は片方だけ NULL でありうる。読み戻した Memory は `claimKey: null` で、
- *    `findActiveByClaimKey` に一致せず、`listActiveClaimPredicates` に数えられない。
- *    migration に CHECK を足すと、生 SQL の INSERT が落ちてこの歯が赤になる。
- * 2. **索引 `idx_memories_claim_key` の形**（PR 本文・ADR 0320 決定7・8、ADR 0378）: 列順は
- *    `(tenant_id, subject_id, claim_key_subject, claim_key_predicate)`、部分索引
- *    （`WHERE claim_key_subject IS NOT NULL`）、`status` を列に含めない汎用索引。
- *    4列とも等値の検索では計画が列順に依らず索引を使うので、計画の歯（`claim-key-index.postgres.test.ts`）は
- *    これを見ない。カタログ（`pg_index`・`pg_attribute`）から読む（`pg_get_indexdef` の整形は版で変わる）。
+ * 片方だけ NULL の行は、migration に CHECK を足すと生 SQL の INSERT が落ちてこの歯が赤になる（CHECK で強制しない）。
+ * 索引の形は、4列とも等値の検索では計画が列順に依らず索引を使うので、計画の歯（`claim-key-index.postgres.test.ts`）では見られない。
+ * カタログ（`pg_index`・`pg_attribute`）から読む（`pg_get_indexdef` の整形は版で変わる）。
  */
 
 const TENANT = "claim-key-partial-row";
@@ -62,7 +53,6 @@ describe("claimKey: 片方だけ NULL の行（生 SQL）は鍵として読ま�
     await insertRaw(pool, onlyPredicate, null, "orphan_predicate");
     await insertRaw(pool, complete, "user", "favorite_food");
 
-    // 読み戻し: 片方だけ NULL の行は、鍵なしの Memory になる。
     expect((await store.get(ctx, onlySubject))?.claimKey ?? null).toBeNull();
     expect((await store.get(ctx, onlyPredicate))?.claimKey ?? null).toBeNull();
     expect((await store.get(ctx, complete))?.claimKey).toEqual({
@@ -83,7 +73,6 @@ describe("claimKey: 片方だけ NULL の行（生 SQL）は鍵として読ま�
     expect(matchedComplete.map((m) => m.id)).toEqual([complete]);
     expect(await store.findActiveByClaimKey(ctx, query("orphan_predicate"))).toEqual([]);
 
-    // predicate 一覧: 完全な鍵の行だけが数えられる。
     const predicates = await store.listActiveClaimPredicates(ctx, { subjectId: null, limit: 100 });
     expect(predicates).toEqual(["favorite_food"]);
   });

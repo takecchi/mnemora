@@ -4,16 +4,6 @@ import type { NewMemory } from "../memory.js";
 import type { NewRecallRecord } from "../recall.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * core の `FakeMemoryStore.eraseTenant` を、testkit の `InMemoryMemoryStore.eraseTenant` と
- * `PostgresMemoryStore.eraseTenant` に揃える（ADR 0604）。
- *
- * 1. `recall_usages` はテナントの完全一致で消す。tenantId は不透明な文字列で `:` を含んでよいので、
- *    鍵 `${tenantId}:${recallId}:${memoryId}` の前方一致で消すと、`acme` を消したときに `acme:eu` の行まで消える。
- * 2. `tenant_subject_activity` は `(tenant_id, subject_id)` が主キーで、テナントあたり subject の数だけ行がある。
- *    `deleted` も `limit` の budget も、その行数で数える（testkit の InMemory は ADR 0426 で揃えた）。
- */
-
 function newMemory(tenantId: string): NewMemory {
   return {
     tenantId,
@@ -75,7 +65,6 @@ describe("FakeMemoryStore.eraseTenant — recall_usages はテナントの完全
     expect(erasedAcme).toMatchObject({ deleted: 0, reachedLimit: false });
     expect(usages.has(euUsageKey)).toBe(true);
 
-    // 対照: acme:eu 自身を消すと、その recall_usages は消える。
     await memoryStore.eraseTenant(eu, { limit: 1000 });
     expect(usages.has(euUsageKey)).toBe(false);
   });
@@ -105,7 +94,6 @@ describe("FakeMemoryStore.eraseTenant — tenant_subject_activity を subject �
       await memoryStore.createRecall(ctx, subjectRecall(ctx, subjectId));
     }
 
-    // recalls 3行 + subject 行のうち2行 = 5。残りの subject 行1行は次の呼び出しへ。
     const first = await memoryStore.eraseTenant(ctx, { limit: 5 });
     expect(first).toMatchObject({ deleted: 5, reachedLimit: true });
     const second = await memoryStore.eraseTenant(ctx, { limit: 1000 });

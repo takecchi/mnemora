@@ -22,17 +22,6 @@ import {
   TEST_EMBEDDING_SPACE,
 } from "./test-db.js";
 
-/**
- * ADR 0420 の確かめ直し（Issue #1734、PR #1523）で見つかった穴の歯。
- *
- * 1. `abortIfForgotten` と `abortIfSuperseded` の両方に当たる id が混ざるときは、forgotten の見直しが先で
- *    `SourceMemoryForgottenError` になる（ADR 0420 決定3）。順番が逆になっても、他の歯は赤にならなかった。
- * 2. `abortIfSuperseded` の見直しの `changed` は id の昇順（`ORDER BY id ASC`。行ロックの順と、testkit の
- *    実装の並びに揃える）。適合テストは並べ替えてから比べるので、並びは縛られていなかった。
- * 3. `reextract` は `abortIfAllConflicted` を渡さない（ADR 0420 決定5）。置き換え元が全件 CAS に弾かれても、
- *    例外にならず `skipped` の `status_changed_concurrently` として返る。
- */
-
 afterAll(async () => {
   await closeTestClient();
 });

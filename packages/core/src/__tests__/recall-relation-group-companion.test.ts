@@ -7,17 +7,7 @@ import type { MemoryId } from "../ids.js";
 import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * Issue #207/#933 PR2（ADR 0292 決定2・3、ADR 0381、この回のマネージャー指示）: 段3
- * （必須の同伴取得、`contradiction_resolution`）を多者間の `contested` 群にも広げた歯。
- *
- * `contestedWithId` を持たない `contested`（3件以上の群のメンバー）は、
- * `RelationStore.listRelated` で1段だけ辿って仲間を同伴として拾う——2者間の対
- * （`recall-companion-status-gate.test.ts`・`contested-pair-invariant.test.ts` が
- * 縛る既存の `contestedWithId` 経路）は1バイトも変えていない。
- *
- * `@mnemora/testkit` には依存しない（`runtime-fakes.ts` 冒頭のコメントと同じ理由）。
- */
+/** `@mnemora/testkit` には依存しない（`runtime-fakes.ts` 冒頭と同じ理由）。 */
 
 const ctx: Ctx = { tenantId: "tenant-relation-group" };
 const NOW = new Date("2026-06-01T00:00:00.000Z");
@@ -96,7 +86,6 @@ describe("recall() — 段3が多者間の contested 群も同伴として拾う
     expect(ids).toContain(a.id);
     expect(ids).toContain(b.id);
     expect(ids).toContain(c.id);
-    // 隣接性: 3件が並び順で連続している（間に他の候補が挟まらない）。
     const positions = [a.id, b.id, c.id].map((id) => ids.indexOf(id)).sort((x, y) => x - y);
     expect(positions[2]! - positions[0]!).toBe(2);
 
@@ -104,15 +93,12 @@ describe("recall() — 段3が多者間の contested 群も同伴として拾う
     const cResult = result.memories.find((m) => m.memoryId === c.id);
     expect(bResult?.retrievedVia).toBe("mandatory_companion");
     expect(cResult?.retrievedVia).toBe("mandatory_companion");
-    // affinity を測っていない（`fetchMandatoryCompanions` と同じ規律）。
     expect(bResult?.score.affinityMeasured).toBe(false);
 
     const stage = result.explain.stages.find((s) => s.stage === "contradiction_resolution");
     expect(stage?.executed).toBe(true);
     expect(stage?.detail).toEqual({ companionsAdded: 2 });
 
-    // 2者間の対（`contestedWith`）とは別物——群のメンバーは contestedWithId を
-    // 持たないので `contestedWith` は付かない。
     expect(bResult?.contestedWith).toBeUndefined();
   });
 
@@ -124,7 +110,6 @@ describe("recall() — 段3が多者間の contested 群も同伴として拾う
     await runtime.markContestedGroup!(ctx, [a.id, b.id, c.id]);
     await stores.vectorStore.upsert(ctx, stores.embeddingProvider.space, a.id, [1, 0]);
 
-    // b を forget で群から離脱させる（関係の行は残る——decision10）。
     await runtime.forget(ctx, { memoryIds: [b.id] });
 
     const result = await runtime.recall(ctx, { vector: [1, 0] });
@@ -138,9 +123,6 @@ describe("recall() — 段3が多者間の contested 群も同伴として拾う
   it("上限（DEFAULT_RECALL_ASSOCIATION.maxCount = 10）を超えた分は validFrom の新しい順→id の順で切り、over_limit(stage:'relation') に件数を積む", async () => {
     const { runtime, stores } = buildRuntime({ withRelationStore: true });
     const owner = await stores.memoryStore.createMemory(ctx, newMemory({ digest: "owner" }));
-    // owner との対で12件の群を作る（owner + 12 = 13件、markContestedGroup 自体は
-    // 3件以上なら何件でもよい）。各メンバーの validFrom をずらし、新しい順の並びを
-    // 決定的に作る。
     const members: { id: MemoryId; validFrom: Date }[] = [];
     for (let i = 0; i < 12; i++) {
       const validFrom = new Date(Date.UTC(2020, 0, 1 + i));
@@ -157,8 +139,6 @@ describe("recall() — 段3が多者間の contested 群も同伴として拾う
     const ids = new Set(result.memories.map((m) => m.memoryId));
 
     expect(ids).toContain(owner.id);
-    // validFrom 降順（新しい順）で上位10件だけが残る——member-11 が最新、member-2 が
-    // 10番目に新しい（12件中、古い2件 member-0・member-1 が切られる）。
     const expectedKept = [...members].sort((a, b) => b.validFrom.getTime() - a.validFrom.getTime());
     const keptIds = expectedKept.slice(0, 10).map((m) => m.id);
     const droppedIds = expectedKept.slice(10).map((m) => m.id);
@@ -194,13 +174,8 @@ describe("recall() — 段3が多者間の contested 群も同伴として拾う
 
   it("2026-09-30 のさらなる直し: A-B・A-C がつながり B-C はつながっていない形で、B を引くと A と C まで幅優先で並ぶ（1段では止まらない）", async () => {
     const { runtime, stores } = buildRuntime({ withRelationStore: true });
-    // b は候補生成（ANN）で見つかる「owner」——NOW（2026-06-01）の時点で有効な窓
-    // （[2026-01-01, 無期限)）を持たせる（同伴〔a・c〕は survivesAttributesFilter だけを
-    // 通り、validAt では検査されないため、期限切れの窓でもよい——`fetchMandatoryCompanions`
-    // の doc コメントと同じ規律）。a は無期限（null-null、誰とでも重なる）、c は
-    // b より前に終わる過去の窓（b の validFrom より前に validUntil が来る）——
-    // markContestedGroup の fix1（重なる組だけに行を張る）により、a-b・a-c の辺だけが
-    // 張られ、b-c には辺が無い。
+    // 同伴〔a・c〕は `survivesAttributesFilter` だけを通り validAt では検査されないので、期限切れの窓でもよい。
+    // `markContestedGroup` は重なる組だけに辺を張るので、a-b・a-c の辺だけが張られ b-c には無い。
     const b = await stores.memoryStore.createMemory(
       ctx,
       newMemory({
@@ -229,14 +204,11 @@ describe("recall() — 段3が多者間の contested 群も同伴として拾う
     const related = await stores.relationStore.listRelated(ctx, b.id, "contradicts");
     expect(related.map((r) => r.memoryId)).toEqual([a.id]); // 前提: b は a とだけ直接つながる。
 
-    // b だけを候補生成（ANN）で拾えるようにする——a・c は埋め込みを持たない。
     await stores.vectorStore.upsert(ctx, stores.embeddingProvider.space, b.id, [1, 0]);
 
     const result = await runtime.recall(ctx, { vector: [1, 0] });
     const ids = result.memories.map((m) => m.memoryId);
 
-    // 1段（b の直接の隣接）だけなら a までしか見つからない。幅優先で a から先も
-    // 辿ることで、c（b からは2ホップ先）まで同伴取得される。
     expect(ids).toContain(a.id);
     expect(ids).toContain(b.id);
     expect(ids).toContain(c.id);
@@ -246,8 +218,7 @@ describe("recall() — 段3が多者間の contested 群も同伴として拾う
 
   it("鎖 a-b-c の真ん中の b が（archived で）群を離れていれば、a を引いても b の先の c は同伴に入らない", async () => {
     const { runtime, stores } = buildRuntime({ withRelationStore: true });
-    // b は無期限（null-null、誰とでも重なる）、a は今も有効な窓、c は a と重ならない過去の窓——
-    // a-b・b-c の辺だけが張られ、a-c には辺が無い。c へ届く道は b を通る道だけになる。
+    // a-b・b-c の辺だけが張られ a-c には無い。c へ届く道は b を通る道だけになる。
     const a = await stores.memoryStore.createMemory(
       ctx,
       newMemory({
@@ -272,8 +243,7 @@ describe("recall() — 段3が多者間の contested 群も同伴として拾う
     const related = await stores.relationStore.listRelated(ctx, a.id, "contradicts");
     expect(related.map((r) => r.memoryId)).toEqual([b.id]); // 前提: a は b とだけ直接つながる。
 
-    // forget 済みの記憶は getMany が返さない（そもそも探索に入らない）ので、status の門に当たるのは
-    // 「まだ読める記憶が contested でなくなった」場合——ここでは archived にして群を離れさせる。
+    // forget 済みは getMany が返さず探索に入らないので、status の門に当たるのは contested でなくなった場合（archived にして離れさせる）。
     await stores.memoryStore.updateStatus(ctx, b.id, "archived");
     expect((await stores.memoryStore.get(ctx, b.id))?.status).toBe("archived");
     await stores.vectorStore.upsert(ctx, stores.embeddingProvider.space, a.id, [1, 0]);
@@ -351,18 +321,7 @@ describe("recall() — relationStore が配線されていなければ、群の�
   });
 });
 
-/**
- * 2026-09-30 の3つ目の直し（ADR 0381 決定4・§5.5）: 段3の上限（10件）と探索の安全弁
- * （100件）は**群ごと**に効き、安全弁は1件たどるごとに確かめる。
- *
- * 2段先まで含めて11件以上になる群の形（`buildTwoHopGroup`）:
- * - owner（候補生成で見つかる）は a とだけ重なる。
- * - a は owner とも c0〜c10 とも重なる。
- * - c0〜c10 は互いに重なるが、owner とは重ならない。
- * ⟹ 関係の行は owner-a・a-ci・ci-cj だけ。owner から見て a は1段先、ci は2段先。
- * 同伴の候補は a と c0〜c10 の12件。`validFrom` の新しい順で a（2025）→ c10 … c0（2020）と
- * 並ぶので、10件で切ると c1・c0 の2件が落ちる。
- */
+/** 2段先まで含めて11件以上になる群: owner は a とだけ、a は owner と c0〜c10 と、c0〜c10 は互いに重なる。validFrom の新しい順は a → c10 … c0 なので、10件で切ると c1・c0 が落ちる。 */
 async function buildTwoHopGroup(
   runtime: ReturnType<typeof buildRuntime>["runtime"],
   stores: ReturnType<typeof buildRuntime>["stores"],
@@ -400,7 +359,6 @@ async function buildTwoHopGroup(
   const related = await stores.relationStore.listRelated(ctx, owner.id, "contradicts");
   expect(related.map((r) => r.memoryId)).toEqual([a.id]); // 前提: owner は a とだけ直接つながる。
   await stores.vectorStore.upsert(ctx, stores.embeddingProvider.space, owner.id, [1, 0]);
-  // 新しい順: a、c10、c9 … c2 が残り、c1・c0 が落ちる。
   const kept = [a.id, ...[...cs].reverse().slice(0, 9)];
   const dropped = [cs[1]!, cs[0]!];
   return { owner, kept, dropped };
@@ -417,14 +375,11 @@ describe("recall() — 段3の上限と安全弁は群ごとに効く（2026-09-
     expect(ids).toContain(owner.id);
     for (const id of kept) expect(ids).toContain(id);
     for (const id of dropped) expect(ids).not.toContain(id);
-    // 残った同伴は、新しい順の上位10件とちょうど同じ集合（多くも少なくもない）。
-    // ⚠ 提示の並び（単位の中の順）は `collectGroupComponent` が owner から辺をたどる順で
-    // 決まり、validFrom の順ではない——ここで縛るのは「どれを残したか」の順である。
+    // 提示の並び（単位の中の順）は owner から辺をたどる順で決まり validFrom の順ではない。ここで縛るのは「どれを残したか」である。
     const companionIds = result.memories
       .filter((m) => m.retrievedVia === "mandatory_companion")
       .map((m) => m.memoryId);
     expect([...companionIds].sort()).toEqual([...kept].sort());
-    // 群は1つの単位として隣接する（owner と同伴10件の11件が連続する）。
     const positions = [owner.id, ...kept].map((id) => ids.indexOf(id)).sort((p, q) => p - q);
     expect(positions[positions.length - 1]! - positions[0]!).toBe(kept.length);
     expect(result.omitted.filter((o) => o.kind === "over_limit" && o.stage === "relation")).toEqual(
@@ -435,8 +390,7 @@ describe("recall() — 段3の上限と安全弁は群ごとに効く（2026-09-
   it("群が2つ見つかり片方が11件以上でも、もう片方の群は削られない（上限と切った件数は群ごと）", async () => {
     const { runtime, stores } = buildRuntime({ withRelationStore: true });
     const big = await buildTwoHopGroup(runtime, stores, "big");
-    // 小さい群: x（候補生成で見つかる）・y・z。y・z は大きい群のどれよりも古い validFrom を
-    // 持つ——全体を合わせた数で切ると、y・z が真っ先に落ちる形。
+    // y・z は大きい群のどれより古い validFrom: 全体を合わせた数で切ると真っ先に落ちる形にする。
     const x = await stores.memoryStore.createMemory(
       ctx,
       newMemory({ digest: "x", validFrom: new Date("2010-01-01T00:00:00Z"), validUntil: null }),
@@ -461,15 +415,12 @@ describe("recall() — 段3の上限と安全弁は群ごとに効く（2026-09-
     expect(ids).toContain(big.owner.id);
     for (const id of big.kept) expect(ids).toContain(id);
     for (const id of big.dropped) expect(ids).not.toContain(id);
-    // 切ったのは大きい群の2件だけで、over_limit はその群の分の1件だけ。
     expect(result.omitted.filter((o) => o.kind === "over_limit" && o.stage === "relation")).toEqual(
       [{ kind: "over_limit", stage: "relation", count: 2, countKind: "exact" }],
     );
   });
 
   it("探索の安全弁（100件）は1件たどるごとに確かめる: 100件ちょうどの群は exact、101件の群は100件で止まり lower_bound", async () => {
-    // owner を含めて n 件の、全員が互いに重なる群（validFrom・validUntil とも null）。
-    // 同伴の候補は n-1 件、10件に切るので切った件数は n-11 件。
     async function recallGroupOfSize(n: number) {
       const { runtime, stores } = buildRuntime({ withRelationStore: true });
       const ids: MemoryId[] = [];
@@ -486,12 +437,9 @@ describe("recall() — 段3の上限と安全弁は群ごとに効く（2026-09-
       return result.omitted.filter((o) => o.kind === "over_limit" && o.stage === "relation");
     }
 
-    // 100件ちょうど: 訪れた数は owner を含めて100件で、安全弁に届かずに尽きる。
     expect(await recallGroupOfSize(100)).toEqual([
       { kind: "over_limit", stage: "relation", count: 89, countKind: "exact" },
     ]);
-    // 101件: 101件目をたどる前に止まる——訪れた数は100件を1件も超えない。
-    // 見つかった同伴の候補は99件なので、切った件数は89件（下限）。
     expect(await recallGroupOfSize(101)).toEqual([
       { kind: "over_limit", stage: "relation", count: 89, countKind: "lower_bound" },
     ]);
@@ -501,8 +449,7 @@ describe("recall() — 段3の上限と安全弁は群ごとに効く（2026-09-
 describe("recall() — 群の単位の中の見せる順（2026-09-30、ADR 0381 決定4）", () => {
   it("起点の後ろの同伴は、たどる順ではなく validFrom の新しい順→id の順に並ぶ（2段先の記憶のほうが新しい形）", async () => {
     const { runtime, stores } = buildRuntime({ withRelationStore: true });
-    // owner は a とだけ重なる。a（古い）は c1・c2（新しい）と重なる。c1・c2 は owner と
-    // 重ならない。⟹ たどる順は owner → a → c1・c2 だが、新しい順は c2 → c1 → a。
+    // たどる順は owner → a → c1・c2 だが、新しい順は c2 → c1 → a（両者を食い違わせる）。
     const owner = await stores.memoryStore.createMemory(
       ctx,
       newMemory({
@@ -545,9 +492,7 @@ describe("recall() — 群の単位の中の見せる順（2026-09-30、ADR 0381
 });
 
 describe("recall() — 同じ段で複数の親から届く同伴の companionOf は id の小さい親に決まる（Issue #1449 項目7）", () => {
-  // 菱形: O が起点、O-B・O-C・B-D・C-D。D へは B からも C からも同じ段で届く。
-  // `RelationStore.listRelated` の順は契約が規定しない（InMemory は挿入順）ので、
-  // 関係を張る順を入れ替えた2通りで作り、どちらでも D の companionOf が同じになることを縛る。
+  // `listRelated` の順は契約が規定しない（InMemory は挿入順）ので、関係を張る順を入れ替えた2通りで作り、D の companionOf が同じになることを縛る。
   const orders: Array<[string, boolean]> = [
     ["O-B, O-C, B-D, C-D の順に張る", false],
     ["O-C, O-B, C-D, B-D の順に張る（逆）", true],
@@ -582,7 +527,6 @@ describe("recall() — 同じ段で複数の親から届く同伴の companionOf
       const byId = new Map(result.memories.map((m) => [m.memoryId, m]));
       expect(byId.get(d.id)?.retrievedVia).toBe("mandatory_companion");
       expect(byId.get(d.id)?.companionOf).toBe(smaller);
-      // B・C は O の直接の同伴。
       expect(byId.get(b.id)?.companionOf).toBe(o.id);
       expect(byId.get(c.id)?.companionOf).toBe(o.id);
     },

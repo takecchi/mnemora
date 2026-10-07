@@ -13,19 +13,7 @@ import {
 } from "./foreign-realm-errors.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * Issue #1734（2026-09-30 マージ分の確かめ直し）の #1509 のすり抜け R1・R3・I2〜I5（ADR 0418）。
- * `foreign-realm-store-errors.test.ts`（PR の歯）は `tick` の complete 経路と `restoreArchived` の2か所だけを、
- * 別の realm の store 例外（`vm` で定義し直したクラス。本物のクラスの `instanceof` では false）で見ていた。
- * ここでは、報告で「判定を `instanceof` に戻す／常に偽にする」と緑のままだった6か所を、同じ形で縛る。
- *
- * - R1: `tick` の、処理できない kind のジョブの `fail()` がリース競合になった枝
- * - R3: `tick` の、ハンドラ失敗後の `fail()` がリース競合になった枝
- * - I2: `purge` の `MemoryPurgeConflictError`
- * - I3: `resolveContestedGroup` の `ContestedGroupMembershipMismatchError`
- * - I4: `reextract` の `SourceMemoryForgottenError`（口ありの経路と、口なしのループの両方）
- * - I5: `classifySupersedeFailure` の `MemoryStatusConflictError`
- */
+/** 別の realm の store 例外（`vm` で定義し直したクラスで、本物のクラスの `instanceof` では false）で見る。判定を `instanceof` に戻す／常に偽にすると赤になる。 */
 const ctx: Ctx = { tenantId: "tenant-foreign-remaining" };
 const NOW = new Date("2026-06-01T00:00:00.000Z");
 const CUSTOM_KIND = "custom:foreign-realm-probe";
@@ -112,7 +100,6 @@ describe.each(FOREIGN_VARIANTS)("別の realm の store 例外（残りの判定
     contents = ["本文"];
     const a = await runtime.observe(ctx, { kind: "utterance", text: "本文A" });
     const b = await runtime.observe(ctx, { kind: "utterance", text: "本文B" });
-    // 1件目の embed ジョブだけ provider が落ちる（ハンドラ失敗）。
     let embedCalls = 0;
     const realEmbed = stores.embeddingProvider.embed.bind(stores.embeddingProvider);
     stores.embeddingProvider.embed = async (c, texts) => {
@@ -136,7 +123,6 @@ describe.each(FOREIGN_VARIANTS)("別の realm の store 例外（残りの判定
       kind: "embed",
       attemptedOutcome: "fail",
     });
-    // 後続のジョブ（2件目）は、競合と無関係にいつもどおり処理されている。
     const statuses = [
       (await stores.memoryStore.get(ctx, a.memoryIds[0]!))?.embeddingStatus,
       (await stores.memoryStore.get(ctx, b.memoryIds[0]!))?.embeddingStatus,
@@ -147,7 +133,6 @@ describe.each(FOREIGN_VARIANTS)("別の realm の store 例外（残りの判定
   it("I2 purge: purgeMemory が別の realm の MemoryPurgeConflictError を投げても、再読の分類（already_purged）になり failed にならない", async () => {
     const { runtime, stores } = buildKit();
     const memory = await stores.memoryStore.createMemory(ctx, newMemory({ status: "forgotten" }));
-    // 別のワーカーが先に purge していた、という状況。store は別の realm の例外で競合を知らせる。
     stores.memoryStore.purgeMemory = async (_c, id) => {
       const live = stores.memoryStore.liveRowForTest(ctx, id)!;
       live.purgedAt = new Date();

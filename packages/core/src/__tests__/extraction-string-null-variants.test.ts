@@ -2,15 +2,7 @@ import { describe, expect, it } from "vitest";
 import { buildExtractionPrompt, sanitizeCandidateSubjectId } from "../extraction.js";
 import type { Observation } from "../observation.js";
 
-/**
- * 文字列 `"null"` の特例の「広がり過ぎ」を縛る歯（Issue #608・ADR 0304。Issue #1775 の #712）。
- *
- * ADR 0304 の特例は、一覧に無い **ちょうど `"null"`** だけを明示的な null として扱う。
- * PR 本文は「他の非標準表現は未確認」と書く。拾わない現在の動きを固定する——将来拾うと
- * 決めるなら、この歯が先に赤になって決め直すきっかけになる。
- * あわせて、候補一覧つきのプロンプトが「明示的に null を設定」を指示し、引用符つきの
- * `"null"` を指示しないこと（モデルへ文字列 `"null"` を返すよう教えない）を縛る。
- */
+/** 一覧に無い「ちょうど `"null"`」以外の非標準表現は拾わない現在の動きを固定する（将来拾うと決めるなら、この歯が先に赤になって決め直すきっかけになる）。 */
 
 function makeObservation(): Observation {
   return {

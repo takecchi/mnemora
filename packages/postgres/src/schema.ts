@@ -12,18 +12,10 @@ import {
 } from "drizzle-orm/pg-core";
 
 /**
- * Drizzle のテーブル定義（docs/memory-model.md §10）。
- *
- * **これらの定義はスキーマの生成には使わない。** テーブル・索引の実体は
- * `migrations/0001_init.sql`（手書き DDL、ADR 0001）が作る。この `schema.ts` は
- * `drizzle-orm` のクエリビルダに型を与えるためだけに存在し、`drizzle-kit push`
- * には一切渡さない。したがってここでの `CHECK` 制約や `DEFAULT` の宣言は
- * ドキュメントとしての意味しか持たず、実際の制約は `migrations/0001_init.sql` 側にある
- * （二重管理になるが、`drizzle-kit push` の operator class 欠落バグを踏まないための
- * 意図的なトレードオフ。ADR 0001 参照）。
- *
- * `memory_embeddings_<space>` は空間ごとに動的にテーブルが増えるため、ここでは
- * 定義しない（`./vector-space.ts` が生 SQL で扱う）。
+ * Drizzle のテーブル定義（docs/memory-model.md §10）。クエリビルダに型を与えるためだけにあり、スキーマの生成には使わない。
+ * テーブル・索引の実体は `migrations/` の手書き DDL が作り、ここの `CHECK` 制約や `DEFAULT` の宣言はドキュメントでしかない
+ * （二重管理は、`drizzle-kit push` の operator class 欠落バグを踏まないための意図的なトレードオフ。ADR 0001）。
+ * `memory_embeddings_<space>` は空間ごとに動的に増えるので定義しない（`vector-space.ts` が生 SQL で扱う）。
  */
 
 export const observations = pgTable("observations", {
@@ -35,7 +27,6 @@ export const observations = pgTable("observations", {
   payload: jsonb("payload").notNull(),
   occurredAt: timestamp("occurred_at", { withTimezone: true, mode: "date" }),
   recordedAt: timestamp("recorded_at", { withTimezone: true, mode: "date" }).notNull(),
-  // Issue #280: `migrations/0014_observations_valid_from_until.sql` が足す。
   validFrom: timestamp("valid_from", { withTimezone: true, mode: "date" }),
   validUntil: timestamp("valid_until", { withTimezone: true, mode: "date" }),
 });
@@ -56,17 +47,10 @@ export const memories = pgTable(
     digestSource: text("digest_source").notNull(),
 
     /**
-     * `provenance.kind`（jsonb 側）と**意図的に二重で持つ、書き込み専用の列**
-     * （Issue #206 / [ADR 0117](../../../docs/decisions/0117-unreachable-union-values-inventory.md) で棚卸し済み）。
-     *
-     * **`rowToMemory`（`./mapping.ts`）はこの列を読み戻さない。** core の `Memory` 型は
-     * `provenance: Provenance` だけを持ち、`provenanceKind` という別欄を持たない
-     * （jsonb の `provenance.kind` が正）。この列の役割は**フィルタ述語**であり、
-     * `vector-store.ts` / `lexical-store.ts` の `excludeProvenanceKinds` が
-     * `provenance_kind <> ALL(...)` という形でこの列を直接引く——jsonb を都度展開せず、
-     * `idx_memories_provenance_kind`（`tenant_id, provenance_kind`）に載せるためにある。
-     * **読み戻す側が増えると、書き込みでの不一致（jsonb とこの列がずれる）が
-     * 静かに result へ混入する経路が生まれる**——増やさない。
+     * `provenance.kind`（jsonb 側が正）と意図して二重に持つ、書き込み専用の列（ADR 0117）。
+     * `rowToMemory` はこの列を読み戻さない。役割はフィルタ述語で、`excludeProvenanceKinds` が
+     * `provenance_kind <> ALL(...)` で直接引き、`idx_memories_provenance_kind` に載せるためにある。
+     * 読み戻す側が増えると、jsonb とこの列のずれが結果へ静かに混入する経路ができるので、増やさない。
      */
     provenanceKind: text("provenance_kind").notNull(),
     provenance: jsonb("provenance").notNull(),
@@ -87,10 +71,6 @@ export const memories = pgTable(
     halfLifeHours: real("half_life_hours").notNull(),
     decayFloorAt: timestamp("decay_floor_at", { withTimezone: true, mode: "date" }).notNull(),
 
-    // ADR 0165（Issue #305）: 活動時計の3つ組。壁時計の
-    // recordedAt/lastReinforcedAt → decayFloorAt → halfLifeHours と1対1に対応する。
-    // すべて NULL 許容——NULL は「この軸には床が無い＝活動時計では沈まない」を意味する
-    // （migrations/0015_decay_activity_clock.sql）。
     decayBaseSeq: bigint("decay_base_seq", { mode: "number" }),
     decayFloorSeq: bigint("decay_floor_seq", { mode: "number" }),
     halfLifeRecalls: real("half_life_recalls"),
@@ -127,9 +107,6 @@ export const recalls = pgTable("recalls", {
   usage: jsonb("usage").notNull(),
   indexBand: jsonb("index_band").notNull(),
   explain: jsonb("explain").notNull(),
-  // Issue #298 / ADR 0155: 旧 `returned_memory_ids uuid[]`（memoryId だけ）を置き換えた。
-  // 内訳（score/retrievedVia/companionOf/associationOf）を含む jsonb。
-  // `migrations/0013_recall_returned_memories_jsonb.sql` 参照。
   returnedMemories: jsonb("returned_memories").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull(),
 });
@@ -165,31 +142,20 @@ export const tenantSettings = pgTable("tenant_settings", {
   defaultHalfLifeHours: real("default_half_life_hours").notNull(),
   eventRetentionDays: integer("event_retention_days"),
   taxonomyMode: text("taxonomy_mode").notNull(),
-  // ADR 0165（Issue #305）: どちらの時計を使うか、と活動時計の既定の半減期。
   decayClock: text("decay_clock").notNull(),
   defaultHalfLifeRecalls: real("default_half_life_recalls").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).notNull(),
 });
 
-/**
- * ADR 0165（Issue #305）: テナントごとに1行の活動カウンタ。`tenant_settings` の行に
- * 相乗りさせない（recall のたびの UPDATE が設定の読み出しまで行ロックで待たせないため。
- * `migrations/0015_decay_activity_clock.sql` 参照）。
- */
+/** テナントごとに1行の活動カウンタ。`tenant_settings` に相乗りさせない（recall のたびの UPDATE が設定の読み出しまで行ロックで待たせるため。ADR 0165）。 */
 export const tenantActivity = pgTable("tenant_activity", {
   tenantId: text("tenant_id").primaryKey(),
   activitySeq: bigint("activity_seq", { mode: "number" }).notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).notNull(),
 });
 
-/**
- * Issue #201 / ADR 0318: taxonomy の語彙（docs/memory-model.md §8、
- * `migrations/0020_taxonomy_labels.sql`）。テナントごとの語彙名と、その状態
- * （`registered` | `proposed`）を持つ。`UNIQUE (tenant_id, name)` は移行側で宣言する
- * （drizzle-kit push には渡さないため、ここでは型のためだけの宣言。`./schema.ts` 冒頭の
- * doc コメント参照）。
- */
+/** taxonomy の語彙（docs/memory-model.md §8）。`UNIQUE (tenant_id, name)` は migration 側で宣言する。 */
 export const labels = pgTable("labels", {
   id: uuid("id").primaryKey(),
   tenantId: text("tenant_id").notNull(),
@@ -200,10 +166,7 @@ export const labels = pgTable("labels", {
   createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull(),
 });
 
-/**
- * Issue #201 / ADR 0318: Memory と label の多対多の結び付け
- * （`migrations/0020_taxonomy_labels.sql`）。
- */
+/** Memory と label の多対多の結び付け。 */
 export const memoryLabels = pgTable(
   "memory_labels",
   {

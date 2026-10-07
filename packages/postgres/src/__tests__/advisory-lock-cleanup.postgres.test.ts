@@ -11,17 +11,6 @@ import { runMigrations } from "../migrate.js";
 import { registerEmbeddingSpace } from "../vector-space.js";
 import { requireDatabaseUrl, TEST_EMBEDDING_SPACE } from "./test-db.js";
 
-/**
- * `advisory-lock.ts` の TSDoc が約束していて、どのテストも縛っていなかった後始末を縛る
- * （4回目の TSDoc の棚卸しの B1・B2・B4・B6）。
- *
- * - B1: `acquireAdvisoryLock` → `releaseAdvisoryLock` を繰り返しても、借りた接続に `error` リスナーが積み上がらず、
- *   `lock_timeout` は `'0'` へ戻る（`NOOP_CLIENT_ERROR_HANDLER` の doc、`releaseAdvisoryLock` の doc）。
- * - B2: 待ち時間切れで失敗したときも、接続を pool へ返してから投げ、リスナーと `lock_timeout` を片付ける。
- * - B4: `releaseAdvisoryLockOnClient` はロックを外すだけで、`lock_timeout` も接続の返却も触らない。
- * - B6: `runMigrations`・`registerEmbeddingSpace` は、`lockTimeoutMs` を省くと `DEFAULT_LOCK_TIMEOUT_MS` で待つ。
- */
-
 const errors: AdvisoryLockErrorFactories = {
   timeout: (waitedMs, cause) => Object.assign(new Error(`timeout after ${waitedMs}ms`), { cause }),
   unavailable: (cause) => Object.assign(new Error("unavailable"), { cause }),
@@ -67,7 +56,6 @@ describe("acquireAdvisoryLock・releaseAdvisoryLock の後始末", () => {
     );
     await releaseAdvisoryLock(held.client, 9_330_002n);
 
-    // 2本とも pool に戻っている（貸し出したままの接続が無い）。
     expect(pool.totalCount).toBe(2);
     expect(pool.idleCount).toBe(2);
     const clients = await Promise.all([pool.connect(), pool.connect()]);
@@ -114,10 +102,8 @@ describe("B4: releaseAdvisoryLockOnClient はロックを外すだけ", () => {
     const { client } = await acquireAdvisoryLock(pool, 9_330_004n, 4_321, errors);
     await releaseAdvisoryLockOnClient(client, 9_330_004n);
     try {
-      // 接続は借りたまま（pool の空きは0）で、lock_timeout は取得のときの値のまま。
       expect(pool.idleCount).toBe(0);
       expect(await lockTimeoutOf(client)).toBe("4321ms");
-      // ロックは外れている（同じキーを別の接続から取れる状態）。
       const held = await client.query<{ n: number }>(
         "SELECT count(*)::int AS n FROM pg_locks WHERE locktype = 'advisory' AND pid = pg_backend_pid()",
       );

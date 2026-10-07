@@ -5,18 +5,6 @@ import type { NewMemory } from "../memory.js";
 import type { NewObservation } from "../observation.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * core の Fake（`FakeMemoryStore`・`FakeEventStore`）を、testkit の fixture と `@mnemora/postgres` が拒む3つの形に揃え、
- * `updateStatusWithEvent` を原子的にした歯（9回目の棚卸し）:
- * - Observation の日時（`recordedAt`・`occurredAt`・`validFrom`・`validUntil`）が Invalid Date → 投げる
- * - イベントの `kind` が列挙に無い → 投げる
- * - `kind: "events_purged"` なのに `memoryId` が `null` でない → 投げる
- * - `updateStatusWithEvent` で、イベントが書けない（上の2つや Invalid Date の `at`）ときは、状態を書き換えない
- *   （Postgres は1トランザクションで巻き戻り、fixture は状態を書き換える前に検査する）。
- *
- * Postgres と fixture の側の歯は `packages/postgres/src/__tests__/observation-event-input-current-behaviour.postgres.test.ts`。
- */
-
 const ctx: Ctx = { tenantId: "fake-observation-event" };
 
 function observationInput(over: Partial<NewObservation>): NewObservation {

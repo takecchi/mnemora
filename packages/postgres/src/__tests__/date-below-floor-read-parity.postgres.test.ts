@@ -38,13 +38,10 @@ import {
 } from "./test-db.js";
 
 /**
- * ADR 0547: 読みの経路の日時が `timestamptz` の下限（4714-11-24 BC 00:00:00 UTC）より前でも、Postgres は
- * 生の `22008 timestamp out of range` で落ちず、下限に寄せてからいつもどおり比べる。InMemory（testkit）と Fake（core）は
- * 同じ入力に同じ答えを返す。3実装に**同じデータ・同じ入力**を流し、(1) 3者が一致すること、(2) 答えが「全件」か「0件」か
+ * 読みの経路の日時が `timestamptz` の下限（4714-11-24 BC 00:00:00 UTC）より前でも、Postgres は生の `22008 timestamp out of range` で落ちず、
+ * 下限に寄せてからいつもどおり比べる。3実装に同じデータ・同じ入力を流し、(1) 3者が一致すること、(2) 答えが「全件」か「0件」か
  * （`since` 系は全件、`until` 系は0件）という意味どおりであることを縛る。Fake は検査をせず意味どおりに答える（参照実装）。
- *
- * 書き込みの口（約35口）と Invalid Date（`22007`）は ADR 0547 の対象外で、ここでは見ない。
- * 下限ちょうどに行がある場合の食い違い（下限へ寄せることの限界）は ADR 0547 の「引き受けた負債」。この歯のデータは下限に行を置かない。
+ * この歯のデータは下限に行を置かない（下限ちょうどに行がある場合の食い違いは既知の限界）。
  */
 
 const FLOOR_MS = Date.UTC(-4713, 10, 24);
@@ -63,7 +60,6 @@ interface Kit {
   ev: EventStore;
   ob: OutboxStore;
   settings: TenantSettingsStore;
-  /** Postgres の trigram 版（InMemory と Fake の答えに突き合わせる）。 */
   trigram?: LexicalStore;
   name: string;
 }
@@ -72,8 +68,7 @@ let tenantSeq = 0;
 const nextCtx = (): Ctx => ({ tenantId: `date-floor-${++tenantSeq}` });
 
 /**
- * trigram 版は、server_encoding が UTF8 でない DB（CI の SQL_ASCII の脚）では `create` が
- * `TrigramLexicalStoreUnavailableError` を投げる（日本語の語彙照合に使えない。この歯の本文は ASCII だが、store の前提が満たされない）。
+ * server_encoding が UTF8 でない DB（CI の SQL_ASCII の脚）では trigram 版の `create` が `TrigramLexicalStoreUnavailableError` を投げるので、
  * そのときは trigram 版の比較を外す（`undefined`。tsvector 版は SQL_ASCII でも走る）。それ以外の例外は握りつぶさない。
  */
 async function createTrigramIfAvailable(
@@ -130,17 +125,9 @@ afterAll(async () => {
   await closeTestClient();
 });
 
-/** 本文 → id（結果の id を本文に直して並べ替える）。 */
 type Seeded = { ctx: Ctx; idToName: Map<string, string> };
 
-/**
- * 同じ5件の記憶を入れる。いずれも `recordedAt` は 2026 年で、下限の近くには行を置かない。
- * - alpha: occurredAt 2026-03-01、有効期間なし
- * - bravo: occurredAt なし、validFrom 2026-01-01
- * - charlie: occurredAt 2026-02-01、validUntil 2030-01-01
- * - delta: claimKey (s, p)、active、validFrom 2026-01-01
- * - echo・foxtrot: claimKey (s, p)、contested のペア、validFrom 2026-01-01
- */
+/** 同じ5件の記憶を入れる。いずれも `recordedAt` は 2026 年で、下限の近くには行を置かない。 */
 async function seed(kit: Kit): Promise<Seeded> {
   const ctx = nextCtx();
   const idToName = new Map<string, string>();
@@ -175,7 +162,6 @@ async function seed(kit: Kit): Promise<Seeded> {
     claimKey: { subject: "s", predicate: "p" },
     validFrom: new Date("2026-01-01T00:00:00.000Z"),
   });
-  // 有効期間なしの鍵つき記憶（開始・終了とも無限）。両端が下限より前の区間とも重なる。
   await make("golf", { claimKey: { subject: "s", predicate: "p" } });
   const echo = await make("echo", {
     claimKey: { subject: "s", predicate: "p" },
@@ -242,7 +228,6 @@ function describeThrown(e: unknown): string {
 
 interface Case {
   name: string;
-  /** 下限より前の日時 `d` を渡したときの答え。 */
   expected: unknown;
   run: (kit: Kit, s: Seeded, d: Date) => Promise<unknown>;
 }
@@ -317,7 +302,6 @@ const cases: Case[] = [
       expected: expected.length,
       run: async (k, s, d) => {
         const agg = await k.mem.aggregateScope(s.ctx, { [field]: d } as never);
-        // ステータス active の件数（echo は contested）。
         return agg.totalInScope;
       },
     },
@@ -341,7 +325,6 @@ const cases: Case[] = [
       run: (k, s, d) => lexSearch(k.trigram ?? k.lex, s, { [field]: d }),
     },
   ]),
-  // 空の区間は何とも重ならない。validFrom だけが下限より前なら、delta（validFrom 2026・validUntil なし）と重なる。
   {
     name: "findActiveByClaimKey validFrom のみ",
     expected: ["delta", "golf"],
@@ -351,7 +334,6 @@ const cases: Case[] = [
         (await k.mem.findActiveByClaimKey!(s.ctx, CLAIM(d, null))).map((m) => m.id),
       ),
   },
-  // validUntil だけが下限より前: delta の validFrom（2026）は validUntil より後なので重ならない。
   {
     name: "findActiveByClaimKey validUntil のみ",
     expected: ["golf"],
@@ -494,8 +476,7 @@ describe("下限ちょうどに行がある場合", () => {
     }
   });
 
-  // 既知の限界（ADR 0547「引き受けた負債」）: 下限へ寄せると、下限ちょうどの行が until 系（<=）に当たってしまう。
-  // 意味どおりなら 0件（InMemory・Fake はそう答える）。下限ちょうどに行が無ければ起きない。
+  // 既知の限界: 下限へ寄せると、下限ちょうどの行が until 系（<=）に当たってしまう。意味どおりなら0件（InMemory・Fake はそう答える）。
   it("既知の限界: 下限より前の until 系は、下限ちょうどの行があるとき Postgres だけがその行を返す", async () => {
     const answers: Record<string, unknown> = {};
     for (const kit of await kits()) {
@@ -559,7 +540,6 @@ describe("OutboxStore.claimBatch の opts.now", () => {
           leaseMs: HUGE_LEASE_MS,
         })
         .then(shape, (e: unknown) => ({ threw: describeThrown(e) }));
-      // claimed_at は 2100 年、境界は下限へ寄る。claimed_at <= 境界 にはならないので、取り直せない。
       const second = await kit.ob
         .claimBatch(ctx, {
           limit: 5,
@@ -648,8 +628,7 @@ describe("Runtime.recall の日時の絞り込み", () => {
 });
 
 describe("OutboxStore.claimBatch: 下限ちょうどに available な job（Postgres だけ）", () => {
-  // 既知の限界（ADR 0547）と同じ形: now を下限へ寄せると、available_at が下限ちょうどの行が claim できる。
-  // そのとき行に書く claimed_at・available_at も寄せた値でなければならない（寄せずに書くと UPDATE が 22008 になる）。
+  // now を下限へ寄せると、available_at が下限ちょうどの行が claim できる。そのとき行に書く claimed_at・available_at も寄せた値でなければならない（寄せずに書くと UPDATE が 22008 になる）。
   it("now が下限より前でも、下限ちょうどに available な job の claim は 22008 にならず、claimed_at は下限になる", async () => {
     const { db } = await getTestClient();
     const memory = new PostgresMemoryStore(db);
@@ -696,8 +675,6 @@ describe("purge の olderThan が下限より前（0件。以前から同じ）"
   }
 });
 
-// ADR 0547 の追記（変異試験の再確認で見つけた穴を塞ぐ歯）。
-// 変異 C2: findContestedByClaimKey の空の区間の判定を、寄せた後の値で決める（findActive は既存の歯が縛っていた）。
 describe("findContestedByClaimKey: 両端とも下限より前でも、空の区間の判定は寄せる前の値で行う（決めたこと3）", () => {
   /** 有効期間の無い contested のペアを1組入れる（開始も終了も無い行は、どの区間とも重なる）。 */
   async function seedContestedOpen(kit: Kit): Promise<Seeded> {
@@ -778,7 +755,6 @@ describe("findContestedByClaimKey: 両端とも下限より前でも、空の区
   }
 });
 
-// 変異 A2・A3: 寄せるのは「下限より前」だけ。下限の直後（+1ms・+1日 未満）の日時は、寄せずにそのまま比べる。
 describe("下限より後の日時は寄せない（下限の直後の行を、その日時を境に比べる）", () => {
   const DAY_MS = 86_400_000;
   const AT = [
@@ -787,7 +763,6 @@ describe("下限より後の日時は寄せない（下限の直後の行を、�
     ["m2", new Date(FLOOR_MS + DAY_MS)],
   ] as const;
 
-  /** 下限ちょうど・下限+1ms・下限+1日 に occurredAt（と事象の時刻）がある行を1件ずつ入れる。 */
   async function seedNear(kit: Kit): Promise<Seeded> {
     const ctx = nextCtx();
     const idToName = new Map<string, string>();
@@ -849,9 +824,6 @@ describe("下限より後の日時は寄せない（下限の直後の行を、�
   }
 });
 
-// 変異 D2: purge の早い return は「下限より前」だけ。下限以後の olderThan は問い合わせる（決めたこと4）。
-// 既存の purge の歯（retention-purge-parity・outbox-first-terminal-wins・store-boundary-diff・conformance）は、
-// olderThan が 2026 年前後で、早い return を1990 年未満まで広げる変異を見逃した。
 describe("purgeCompletedJobs: 下限以後の olderThan は、早い return をせず問い合わせる（Postgres）", () => {
   it("紀元1000年に完了した job は、olderThan が紀元1500年（下限より後）なら消える", async () => {
     const { db } = await getTestClient();

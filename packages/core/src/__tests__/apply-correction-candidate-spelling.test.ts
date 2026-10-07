@@ -7,17 +7,7 @@ import { defaultDecayStrategy } from "../strategies/decay.js";
 import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * `Runtime.applyCorrection` が、`correctedId` を候補の id と照合するときの綴り（大文字小文字）の扱いの歯。
- * 約束の出所は、`applyCorrection` の実装のコメントと `ApplyCorrectionResult` の TSDoc
- * （「完全一致が無くても、大文字小文字を無視してちょうど1件の候補に一致し、store の `get` が両者を同じ記憶と言えば、
- * その候補として扱う」）。
- *
- * 本物の Postgres とテスト用の fixture に当てる歯は
- * `packages/postgres/src/__tests__/apply-correction-case-and-no-partial-write.postgres.test.ts`。
- * そこでは「store が別の記憶を返す」「候補が大文字小文字だけ違う2件」「store が記憶を知らない」を作れないので、
- * この歯は core の Fake の `memoryStore` の `get` を差し替えて作る（`resolve-contested-id-spelling.test.ts` と同じ流儀）。
- */
+/** store が別の記憶を返す・候補が大文字小文字だけ違う2件・store が記憶を知らない、を作るため、core の Fake の `memoryStore.get` を差し替える。 */
 
 const ctx: Ctx = { tenantId: "tenant-ac-spelling" };
 const NOW = new Date("2026-06-01T00:00:00.000Z");
@@ -64,7 +54,6 @@ const notUsedLlm: LLMProvider = {
 
 type Stores = ReturnType<typeof createFakeRuntimeStores>;
 
-/** Fake の `memoryStore` の `get` だけを差し替えた store で Runtime を組む。 */
 function buildRuntime(getOverride?: (stores: Stores) => Stores["memoryStore"]["get"]) {
   const stores = createFakeRuntimeStores();
   const memoryStore = Object.create(stores.memoryStore) as Stores["memoryStore"];
@@ -225,7 +214,6 @@ describe("applyCorrection: correctedId と候補の id の綴りの照合", () =
     const a = await stores.memoryStore.createMemory(ctx, newMemory({ digest: "A" }));
     const b = await stores.memoryStore.createMemory(ctx, newMemory({ digest: "B" }));
 
-    // 候補に同じ記憶の2つの綴りが並び、渡した綴りはどちらとも文字列では一致しない。
     const lowerOnly = a.id.toLowerCase();
     const upperOnly = a.id.toUpperCase();
     const given = [...a.id].map((ch, i) => (i % 2 === 0 ? ch.toUpperCase() : ch)).join("");

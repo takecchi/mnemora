@@ -3,15 +3,6 @@ import type { Ctx } from "../ctx.js";
 import type { NewMemory } from "../memory.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * ADR 0597:`FakeOutboxStore.complete`・`fail` は、`opts.at` が `timestamptz` の下限（紀元前4714年11月24日 00:00 UTC）より
- * 前なら、`jobId` の形・行の有無を見る前に `RangeError` で断る（`InMemoryOutboxStore` と同じ型・同じ文面）。
- * 以前の Fake は断らず、実在の `jobId` なら下限より前の日時を `completedAt`・`failedAt` へ書いていた
- * （`@mnemora/postgres` は `22008` で書けない値）。下限ちょうどは書ける（対照）。
- *
- * `packages/testkit` の適合テスト（`outbox-store-conformance.ts`）は Fake を通らない（Issue #768）ので、同じ期待をここで当てる。
- */
-
 const ctx: Ctx = { tenantId: "tenant-1" };
 const FLOOR_MS = Date.UTC(-4713, 10, 24);
 const BELOW = new Date(FLOOR_MS - 1);
@@ -89,7 +80,7 @@ describe("FakeOutboxStore.complete・fail: opts.at が timestamptz の下限よ�
       expect(how === "complete" ? after?.completedAt : after?.failedAt).toEqual(FLOOR);
     });
 
-    // 下限より後は、紀元前でも西暦9999年より後でも通る（ADR 0605。断りすぎる実装を縛る。下限ちょうどの1点だけでは縛れない）。
+    // 下限ちょうどの1点だけでは、断りすぎる実装を縛れない。紀元前でも西暦9999年より後でも通ることを見る。
     for (const [label, at] of [
       ["紀元前100年", new Date(Date.UTC(-99, 0, 1))],
       ["西暦10000年", new Date(Date.UTC(10000, 0, 1))],

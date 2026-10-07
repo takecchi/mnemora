@@ -6,20 +6,7 @@ import type { RecallResult } from "../recall.js";
 import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * 段3で多者間の群を `relationMaxCount` で切った候補（`relationOverLimitIds`）が、段3.5 の連想の
- * 必須の同伴取得（`getMany` による id 引き。連想の候補生成の除外集合が効かない）で結果集合へ
- * 戻ると、同じ1件が `memories`（または段4の `budget_dropped`）と `over_limit(stage:"relation")` の
- * 両方に数えられていた（Issue #1794）。
- *
- * 「最後にその候補を落とした段で1回だけ数える」（ADR 0203 追記3・7）を `over_limit(relation)` にも当てる。
- * 戻った先で返れば `memories` にだけ、予算で落ちれば `budget_dropped` にだけ数える。
- *
- * 形の作り方: ペア P–Q の Q に、`RelationStore.link` で群の owner からの `contradicts` の辺を直接張る
- * （Runtime の口 `markContested`/`markContestedGroup` では作れない形。`link` は公開メソッドである）。
- * Q は群の探索で拾われ、validFrom が最も古いので `relationMaxCount` で切られる。連想がアンカー近傍の
- * P を選ぶと、P の対向として Q が取り戻される。
- */
+/** ペア P–Q の Q に `RelationStore.link` で群の owner からの辺を直接張る（`markContested`/`markContestedGroup` では作れない形）。Q は群の探索で拾われ、validFrom が最も古いので `relationMaxCount` で切られる。連想がアンカー近傍の P を選ぶと、P の対向として Q が取り戻される。 */
 
 const ctx: Ctx = { tenantId: "tenant-1" };
 const NOW = new Date("2026-06-01T00:00:00.000Z");
@@ -176,7 +163,6 @@ describe("recall() — 群の上限で切られた候補が段3.5 の必須同�
   it("(d) 戻った先で予算に落ちたら、budget_dropped にだけ数える", async () => {
     const { runtime, q, p } = await build({ extraCut: false });
 
-    // 本体（O・G1・G2・ANCH、各4字）だけが収まる予算。連想の P と同伴の Q は段4で最初に落ちる。
     const result = await runtime.recall(ctx, {
       vector: [1, 0, 0],
       limit: 2,

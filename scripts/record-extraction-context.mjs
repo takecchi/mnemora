@@ -46,7 +46,7 @@ for (const c of cases) {
     };
     const prompt = buildExtractionPrompt(observation);
     const format = translateForOpenAIStructuredOutput("extraction", ExtractionResultSchema);
-    // Conservative byte-based input bound; reserve output before sending. Rates: official GPT-4.1 mini model page.
+    // Conservative byte-based input bound; reserve output before sending.
     const inputBound = Buffer.byteLength(JSON.stringify({ prompt, format })) + 4096;
     const reserve = (inputBound * 0.4) / 1e6 + (1500 * 1.6) / 1e6;
     if (usd + reserve > 0.25) throw new Error("Recording budget exceeded");

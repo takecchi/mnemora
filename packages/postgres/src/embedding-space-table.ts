@@ -1,41 +1,23 @@
 import { createHash } from "node:crypto";
 import type { EmbeddingSpaceId } from "@mnemora/core";
 
-/**
- * PostgreSQL の識別子は 63 バイトまで（NAMEDATALEN - 1）。
- * スラグがこれを超える場合は末尾を切り詰め、衝突を避けるためのハッシュ片を足す。
- */
+/** PostgreSQL の識別子は 63 バイトまで（NAMEDATALEN - 1）。超えるスラグは末尾を切り、衝突を避けるハッシュ片を足す。 */
 const MAX_IDENTIFIER_BYTES = 63;
 // ⚠ `scripts/readme-postgres-objects-lib.mjs` が次の行を、文字列リテラルを直接代入する形として
 // 正規表現で読み、README の接頭辞と突き合わせる。別の定数からの代入などに書き換えないこと。
 const TABLE_PREFIX = "memory_embeddings_";
-/**
- * 埋め込み空間ごとのテーブル名の接頭辞。`deleteAcrossSpaces`（`vector-store.ts`、
- * Issue #1425、ADR 0382）が、カタログ（`pg_class`）からこの接頭辞で始まるテーブルを
- * 列挙する条件の1つとして参照するため export する。
- */
+/** 埋め込み空間ごとのテーブル名の接頭辞。 */
 export const EMBEDDING_SPACE_TABLE_PREFIX = TABLE_PREFIX;
 const HNSW_INDEX_PREFIX = "idx_memory_embeddings_hnsw_";
 /**
- * Issue #956: HNSW（cosine 距離）は norm が0のベクトルをそもそも索引へ入れない
- * （pgvector の README「Why are there less results for a query after adding an
- * HNSW index?」——"Also, note that `NULL` vectors are not indexed (as well as
- * zero vectors for cosine distance)."／実装は `HnswFormIndexValue`・`HnswCheckNorm`、
- * `src/hnswutils.c`）。この部分索引（`WHERE vector_norm(embedding) = 0`）は、
- * `search()`/`searchMany()` がその取りこぼしを別枝で拾うために使う
- * （`vector-store.ts` の `withRelaxedOrderScan` 呼び出し元の doc 参照）。
+ * HNSW（cosine 距離）は norm が0のベクトルを索引へ入れない（pgvector の仕様）。この部分索引
+ * （`WHERE vector_norm(embedding) = 0`）は、`search()`/`searchMany()` がその取りこぼしを別枝で拾うために使う。
  */
 const ZERO_NORM_INDEX_PREFIX = "idx_memory_embeddings_zero_norm_";
 /**
- * Issue #1207 / [ADR 0383](../../../docs/decisions/0383-erase-tenant.md): `(memory_id)`
- * 単一列索引。`memory_embeddings_<space>` の主キーは `(tenant_id, memory_id)`——
- * `tenant_id` 先頭の複合索引であり、`memory_id` だけで（`tenant_id` を条件に含まずに）
- * 行を探す向きには使えない（ADR 0062 が `memories.contested_with_id` について
- * 指摘したのと同じ形）。`memory_id uuid NOT NULL REFERENCES memories(id) ON DELETE
- * CASCADE`（`vector-space.ts` の `registerEmbeddingSpace` の DDL）があるため、
- * `memories` の行を1件削除するたびに Postgres はこの参照整合性を検査・CASCADE
- * 削除する——この索引が無いと、その検査が空間テーブルの Seq Scan になる
- * （`docs/decisions/0383-erase-tenant.md` の実測節参照）。
+ * `(memory_id)` 単一列索引（ADR 0383）。主キーは `(tenant_id, memory_id)` で、`memory_id` だけで行を探す向きには
+ * 使えない。`memories` の行を消すたびに外部キーの検査・CASCADE 削除が走るので、この索引が無いと空間テーブルの
+ * Seq Scan になる。
  */
 const MEMORY_ID_INDEX_PREFIX = "idx_memory_embeddings_memory_id_";
 
@@ -48,12 +30,10 @@ function sanitizeSlugPart(value: string): string {
 
 /**
  * `EmbeddingSpaceId` からテーブル名スラグを導出する（docs/memory-model.md §10・ADR 0002 D8）。
- * `<space>` は `(provider, model, dimensions)` の組から導出する。
  *
- * ⚠ この導出は単射ではない——正規化（小文字化・英数字以外を `_`）の後に同じ綴りになる組は、
- * 同じテーブル名になる（[Issue #1151](https://github.com/takecchi/mnemora/issues/1151)）。⛔ 導出を変えないこと
- * ——既存のデプロイのテーブル名が変わる。衝突は `registerEmbeddingSpace` がテーブルのコメントの記録で
- * 検出して拒む（同関数の doc）。
+ * この導出は単射ではない。正規化（小文字化・英数字以外を `_`）の後に同じ綴りになる組は同じテーブル名になる。
+ * 導出を変えてはならない（既存のデプロイのテーブル名が変わる）。衝突は `registerEmbeddingSpace` が
+ * テーブルのコメントの記録で検出して拒む。
  */
 export function embeddingSpaceTableName(space: EmbeddingSpaceId): string {
   const rawSlug = [
@@ -67,7 +47,6 @@ export function embeddingSpaceTableName(space: EmbeddingSpaceId): string {
     return fullName;
   }
 
-  // 63バイトを超える場合は切り詰め、内容から導いた短いハッシュを足して衝突を避ける。
   const hash = createHash("sha256").update(rawSlug).digest("hex").slice(0, 8);
   const budget = MAX_IDENTIFIER_BYTES - TABLE_PREFIX.length - hash.length - 1;
   const truncated = rawSlug.slice(0, Math.max(budget, 0));
@@ -87,10 +66,7 @@ export function embeddingSpaceIndexName(space: EmbeddingSpaceId): string {
   return `${HNSW_INDEX_PREFIX}${suffix.slice(0, Math.max(budget, 0))}_${hash}`;
 }
 
-/**
- * ゼロベクトル（norm=0）専用の部分索引名（Issue #956）。テーブル名・HNSW 索引名と
- * 同じ導出規則（63バイト超で切り詰め＋ハッシュ）から機械的に決める。
- */
+/** ゼロベクトル（norm=0）専用の部分索引名。導出規則はテーブル名・HNSW 索引名と同じ。 */
 export function embeddingSpaceZeroNormIndexName(space: EmbeddingSpaceId): string {
   const table = embeddingSpaceTableName(space);
   const suffix = table.slice(TABLE_PREFIX.length);
@@ -103,10 +79,7 @@ export function embeddingSpaceZeroNormIndexName(space: EmbeddingSpaceId): string
   return `${ZERO_NORM_INDEX_PREFIX}${suffix.slice(0, Math.max(budget, 0))}_${hash}`;
 }
 
-/**
- * `(memory_id)` 単一列索引の名前（Issue #1207、ADR 0383）。テーブル名・他の索引名と
- * 同じ導出規則（63バイト超で切り詰め＋ハッシュ）から機械的に決める。
- */
+/** `(memory_id)` 単一列索引の名前（ADR 0383）。導出規則はテーブル名・他の索引名と同じ。 */
 export function embeddingSpaceMemoryIdIndexName(space: EmbeddingSpaceId): string {
   const table = embeddingSpaceTableName(space);
   const suffix = table.slice(TABLE_PREFIX.length);

@@ -22,15 +22,6 @@ import {
   TEST_EMBEDDING_SPACE,
 } from "./test-db.js";
 
-/**
- * Issue #1160: markContested・resolveContested・resolveOrphanedContested が積むイベントの `meta` に、
- * 対向の id（`contestedWithId`）が入る——監査ログだけで「誰と対だったか」を追えるようにする。
- *
- * 【実測 2026-09-27、修正前】どのイベントにも対向の id が無く（敗者の `superseded` の
- * `supersededById` だけ）、`both_active` で解いた対は状態（`contested_with_id` はクリアされる）からも
- * 監査ログからも、誰と対だったかが消えていた。Postgres と testkit で同じだった。
- */
-
 interface Kit {
   runtime: Runtime;
   memoryStore: MemoryStore;

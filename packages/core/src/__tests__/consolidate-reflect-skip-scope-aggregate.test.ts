@@ -7,17 +7,6 @@ import type { NewMemory } from "../memory.js";
 import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * consolidate / reflect が内部で呼ぶ `recall()` は、`memories` しか読まない
- * （`totalInScope`・目次帯・`filtered*` は読まない）。**それなのに `scopeAggregate` の既定 `"exact"` のまま
- * `MemoryStore.aggregateScope` を呼ぶと、100万行では `GROUP BY subject_id` の件数集計が毎回走る**
- * （ADR 0415）。この歯は、consolidate / reflect の各形（`{ seedMemoryId }`・`{ query }`）と、
- * tick の consolidate / reflect ジョブが、`aggregateScope` を `"skip"` で呼ぶことを縛る。
- *
- * 逆側の歯（読む側は変えない）: `findCorrectionCandidates` は `omitted`・`explain` を利用者へ返すので
- * `"exact"` のまま、`runtime.recall()` の直接呼び出しも `"exact"` のままである。
- */
-
 const ctx: Ctx = { tenantId: "tenant-1" };
 const NOW = new Date("2026-06-01T00:00:00.000Z");
 
@@ -163,7 +152,6 @@ describe("consolidate / reflect の内部 recall は aggregateScope を skip で
     calls.length = 0;
     const result = await runtime.tick(ctx, { leaseMs: 60_000 });
     expect(result.processed).toBeGreaterThanOrEqual(2);
-    // consolidate と reflect の2ジョブ分の recall。どちらも skip。
     expect(calls.length).toBeGreaterThanOrEqual(2);
     expect(calls.map((c) => c?.scopeAggregate)).toEqual(calls.map(() => "skip"));
   });

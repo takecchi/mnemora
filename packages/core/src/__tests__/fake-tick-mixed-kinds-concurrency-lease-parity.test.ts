@@ -9,11 +9,7 @@ import type { OutboxJobRecord } from "../outbox.js";
 import { createRuntime, type Runtime, type TickResult } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * ADR 0529: `tick` が `extract`・`embed`・`consolidate`・`reflect` を混ぜて回るとき、並行する複数の `tick`、リースが切れた後の再取得（Fake）。
- * 同じ `EXPECTED` を実 Postgres と InMemory の側（`packages/postgres/src/__tests__/tick-mixed-kinds-concurrency-lease-parity.postgres.test.ts`）が縛る。
- * 並行する `tick` の「どちらが何件取るか」は縛らない（Postgres の実の並行で転ぶ。ADR 0529）。
- */
+// 並行する `tick` の「どちらが何件取るか」は縛らない: Postgres の実の並行で転ぶため。同じ `EXPECTED` を実 Postgres と InMemory の側も縛る。
 interface Env {
   runtime: Runtime;
   mem: MemoryStore;
@@ -36,12 +32,8 @@ interface Env {
 type Result = Record<string, unknown>;
 
 /**
- * ADR 0529（ADR 0526 の「測っていないこと」の実測）: (b) `tick` が `extract`・`embed`・`consolidate`・`reflect` を混ぜて回るとき、
- * (c) 並行する複数の `tick` と、リースが切れた後の再取得（Runtime の層）。
- *
  * 決定的にできる部分だけを縛る。順序は時計（`setClockOffset`）と門（Promise）で決める。
- * 並行する `tick` の「どちらが何件取るか」は Postgres の実の並行で転ぶので縛らず、**どう転んでも成り立つ不変条件**
- * （全件が1回ずつ処理される・リース競合が無い・embed の呼び出しが件数と同じ）だけを縛る。
+ * 並行する `tick` は、どう転んでも成り立つ不変条件（全件が1回ずつ処理される・リース競合が無い・embed の呼び出しが件数と同じ）だけを縛る。
  */
 async function scenario(env: Env): Promise<Result> {
   const {
@@ -71,7 +63,6 @@ async function scenario(env: Env): Promise<Result> {
   const inOrder = async (ctx: Ctx) =>
     (await rows(ctx)).map((r) => [r["kind"], r["done"], r["attempts"]]);
 
-  // (b) 種類を混ぜた tick
   {
     setClockOffset(0);
     const ctx = fresh();
@@ -179,7 +170,6 @@ async function scenario(env: Env): Promise<Result> {
     };
   }
 
-  // (c) リースの期限切れ: A が止まり、B が再取得し、A が戻る
   for (const lateOutcome of ["complete", "fail"] as const) {
     setClockOffset(0);
     const ctx = fresh();
@@ -280,7 +270,6 @@ const llm = {
   },
   completeStructured: async <T>(_ctx: Ctx, req: StructuredRequest<T>): Promise<T> =>
     req.schema.parse({
-      // reflect・consolidate・extract のどの schema にも通る、決め打ちの応答（LLM の実 API は使わない）
       outcome: "reflected",
       content: "CANNED merged",
       digest: "canned digest",

@@ -8,44 +8,16 @@ import { FILTERED_CONDITION_SCOPE_RELATION } from "../recall.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
 /**
- * Issue #352 / [ADR 0174](../../../../docs/decisions/0174-filtered-omission-scope-relation.md):
- * `FilteredOmission.condition` が分かれる2群（`scopeRelation`）の歯。
- *
- * **この歯が検査すること（2本）:**
- *
- * 1. `FILTERED_CONDITION_SCOPE_RELATION` が `FilteredOmission["condition"]` の
- *    **全メンバーを網羅している**こと。型（このファイル自身が持つ
- *    `Record<FilteredOmission["condition"], true>`）と、実行時（そのキー集合と
- *    `FILTERED_CONDITION_SCOPE_RELATION` のキー集合を突き合わせる）の両方で見る
- *    ——`omission-kind-generation.test.ts` が `Omission["kind"]` に対してやっている
- *    「二重の歯」と同じ形（型だけでは zod 側・実装側の緩みに気づけない）。
- * 2. `recall()` が実際に返す `omitted` の各 `filtered` エントリが、その `condition` に
- *    対応する `scopeRelation` を実際に持っていること——**本番の生成経路
- *    （`recall-runtime.ts`）を駆動して**確認する。値を手で組み立てて schema に通す
- *    だけでは、`recall-runtime.ts` 側が定数を読み忘れて別の値を push する事故を
- *    捕まえられない。
- *
- * **この歯の限界**: 各 `condition` について1状況ずつしか駆動していない
- * （`decayed`・`archived`・`superseded`・`forgotten`・`period`・`expired`・
- * `not_yet_valid` の7つ。`tenant`/`taxonomy` は本番コードが生成しない値であり
- * ADR 0117 の棚卸しの対象——ここでも駆動しない）。境界値・複数条件の組み合わせは
- * 個々の `recall-decay-gate.test.ts` / `recall-validity.test.ts` / `recall-pipeline.test.ts`
- * が持つ。
+ * 網羅性は型（このファイル自身が持つ `Record<FilteredOmission["condition"], true>`）と実行時の両方で見る（型だけでは zod 側・実装側の緩みに気づけない）。
+ * `recall()` の `omitted` は本番の生成経路（`recall-runtime.ts`）を駆動して確かめる: 値を手で組み立てて schema に通すだけでは、`recall-runtime.ts` 側が定数を読み忘れて別の値を push する事故を捕まえられない。
+ * 各 `condition` について1状況ずつしか駆動しない（`tenant`/`taxonomy` は本番コードが生成しない値）。境界値・複数条件の組み合わせは `recall-decay-gate.test.ts` / `recall-validity.test.ts` / `recall-pipeline.test.ts` が持つ。
  */
 
 const ctx: Ctx = { tenantId: "tenant-1" };
 const NOW = new Date("2026-06-01T00:00:00.000Z");
 
-// ---------------------------------------------------------------------------
-// 歯1: 網羅性（型 + 実行時）
-// ---------------------------------------------------------------------------
-
 describe("FILTERED_CONDITION_SCOPE_RELATION の網羅性", () => {
-  // 型: このオブジェクトが `Record<FilteredOmission["condition"], true>` であること自体が、
-  // `condition` の union に値を足したのにここへ足し忘れると tsc で落ちる
-  // （`recall.test.ts` の `ALL_FILTERED_CONDITIONS` と同じ形。ここでは独立に持つ
-  // ——`FILTERED_CONDITION_SCOPE_RELATION` 自身の宣言を検査対象にするテストが、
-  // 同じ宣言を「正解」として借りると自明になってしまうため）。
+  // `recall.test.ts` の `ALL_FILTERED_CONDITIONS` と同じ形だが独立に持つ: `FILTERED_CONDITION_SCOPE_RELATION` 自身の宣言を検査対象にするテストが、同じ宣言を「正解」として借りると自明になってしまうため。
   const ALL_FILTERED_CONDITIONS: Record<FilteredOmission["condition"], true> = {
     tenant: true,
     superseded: true,
@@ -82,10 +54,6 @@ describe("FILTERED_CONDITION_SCOPE_RELATION の網羅性", () => {
     expect(withinScope).toEqual(["decayed"]);
   });
 });
-
-// ---------------------------------------------------------------------------
-// 歯2: recall() が実際に返す omitted.filtered が、正しい scopeRelation を持つ
-// ---------------------------------------------------------------------------
 
 function buildRuntime() {
   const stores = createFakeRuntimeStores();
@@ -173,7 +141,6 @@ describe("recall() が返す omitted.filtered の scopeRelation（本番の生�
     const filteredOmissions = result.omitted.filter(
       (o): o is FilteredOmission => o.kind === "filtered",
     );
-    // 前提: 期待した7条件が実際にすべて発生していること（fixture がずれていないことの検算）。
     const seenConditions = filteredOmissions.map((o) => o.condition).sort();
     expect(seenConditions).toEqual(
       [
@@ -187,13 +154,10 @@ describe("recall() が返す omitted.filtered の scopeRelation（本番の生�
       ].sort(),
     );
 
-    // ⭐ 本題: 各エントリの scopeRelation が、唯一の出所である
-    // FILTERED_CONDITION_SCOPE_RELATION と一致する。
     for (const omission of filteredOmissions) {
       expect(omission.scopeRelation).toBe(FILTERED_CONDITION_SCOPE_RELATION[omission.condition]);
     }
 
-    // 非対称そのものも固定する: decayed だけ within_scope、残り6つは outside_scope。
     const decayedOmission = filteredOmissions.find((o) => o.condition === "decayed");
     expect(decayedOmission?.scopeRelation).toBe("within_scope");
     const outsideScopeOmissions = filteredOmissions.filter((o) => o.condition !== "decayed");

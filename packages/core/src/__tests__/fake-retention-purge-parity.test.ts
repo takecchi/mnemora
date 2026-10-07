@@ -8,11 +8,6 @@ import type { Memory, NewMemory } from "../memory.js";
 import type { NewRecallRecord } from "../recall.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * ADR 0538（ADR 0536 の「次の候補」の2つ目）: 保持と掃除の口（`purgeExpiredEventsByRetention`・`purgeExpiredRecalls`・`purgeCompletedJobs`）を Fake で縛る。
- * 同じ `EXPECTED` を実 Postgres と InMemory の側（`packages/postgres/src/__tests__/retention-purge-parity.postgres.test.ts`）が縛る。
- * `scrubPurged` は Fake が実装しない任意メソッド（ADR 0375・0437）なので、ここでは実装が無いことだけを縛る。
- */
 interface Env {
   mem: MemoryStore;
   ts: TenantSettingsStore;
@@ -27,12 +22,7 @@ interface Env {
 
 type Result = Record<string, unknown>;
 
-/**
- * ADR 0538（ADR 0536 の「次の候補」の2つ目）: 保持と掃除の口を3者（core の Fake・testkit の InMemory・Postgres）に同じ入力で流す。
- * `MemoryStore.purgeExpiredEventsByRetention`（テナントごとの保持の設定を読んで掃除）・`purgeExpiredRecalls`・`OutboxStore.purgeCompletedJobs`。
- * 見るのは、日時の境界（ちょうど・1ms 前後・ミリ秒の端数）、`limit` と `reachedLimit`、`dryRun`、`events_purged` の記録、保持の設定、
- * 別テナントに触れないこと、時刻の注入（`now`）。`scrubPurged`（Fake は実装しない任意メソッド）は、この歯の外（ADR 0538 の「scrubPurged の扱い」）。
- */
+/** 保持と掃除の口を、同じ入力で流して平らなデータにする。同じ `EXPECTED` を実 Postgres と InMemory の側も縛る。`scrubPurged` は Fake が実装しない任意メソッドなので、この歯の外。 */
 async function scenario(env: Env): Promise<Result> {
   const { mem, ts, ev, ob, rows, mk, fresh } = env;
   const out: Result = {};
@@ -70,12 +60,9 @@ async function scenario(env: Env): Promise<Result> {
         : [e.kind, iso(e.at), e.meta["tag"]],
     );
 
-  // ---- purgeExpiredEventsByRetention ----
   {
     const ctx = fresh();
-    // cutoff の前後（1ms・ミリ秒の端数）と、ちょうど。at は cutoff + n ms
     for (const [i, n] of [-1000, -1, 0, 1, 999, 1000].entries()) await appendAt(ctx, eventAt(n), i);
-    // 古い `events_purged`（掃除の記録）は、掃除の対象にならない（記録を消し続けない）
     await ev.append(ctx, {
       tenantId: ctx.tenantId,
       memoryId: null,
@@ -123,7 +110,6 @@ async function scenario(env: Env): Promise<Result> {
       again.kind,
       again.kind === "executed" ? result(again.result) : null,
     ];
-    // now を進めると cutoff も進む（注入した時刻で決まる）
     const later = await mem.purgeExpiredEventsByRetention!(ctx, {
       now: new Date(NOW.getTime() + 1000 * 60 * 60 * 24 * 31),
       limit: 100,
@@ -135,7 +121,6 @@ async function scenario(env: Env): Promise<Result> {
     ];
   }
   {
-    // テナントごとの保持: 別のテナントには触れない。保持を変えると次の掃除が変わる
     const a = fresh();
     const b = fresh();
     for (const c of [a, b])
@@ -156,7 +141,6 @@ async function scenario(env: Env): Promise<Result> {
     ];
   }
   {
-    // 日数が大きいときは、表せる最も古い時刻へ寄せる（何も消さず、例外にもしない）
     const ctx = fresh();
     await appendAt(ctx, eventAt(-1), 1);
     await ts.setEventRetention(ctx, { kind: "days", days: 2_000_000_000 });
@@ -167,7 +151,6 @@ async function scenario(env: Env): Promise<Result> {
     ];
   }
 
-  // ---- purgeExpiredRecalls ----
   {
     const ctx = fresh();
     const other = fresh();
@@ -247,7 +230,6 @@ async function scenario(env: Env): Promise<Result> {
     out["recalls: another tenant is purged only by its own call"] = [o.purged, o.purgedUsages];
   }
 
-  // ---- OutboxStore.purgeCompletedJobs ----
   {
     const ctx = fresh();
     const other = fresh();
@@ -262,7 +244,6 @@ async function scenario(env: Env): Promise<Result> {
         leaseMs: 60_000,
       });
     const claimed = await claimAll(ctx);
-    // 5本を、T の前後（1ms・ちょうど）で完了させる。1本は claim したまま（完了しない）
     const offsets = [-1000, -1, 0, 1, 1000];
     for (const [i, j] of claimed.slice(0, 5).entries())
       await ob.complete(ctx, j.id, j.attempts, { at: new Date(T.getTime() + offsets[i]!) });

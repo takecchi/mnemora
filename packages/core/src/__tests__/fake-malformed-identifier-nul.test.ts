@@ -5,20 +5,6 @@ import type { NewMemory } from "../memory.js";
 import type { NewObservation } from "../observation.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * ADR 0563: `FakeMemoryStore` が識別子（`subjectId`・`externalId`）の NUL を、素の `Error` ではなく
- * `InMemoryMemoryStore`・`PostgresMemoryStore` と同じ `MalformedIdentifierError`（`kind: "malformed_identifier"`、
- * message に入力値を載せない）で断ること。`FakeOutboxStore.fail` が `error` の NUL を、目に見える6文字の `\u0000` に
- * 置き換えて `lastError` に残すこと。
- *
- * 直す前は、識別子の孤立サロゲートは `MalformedIdentifierError` で断っていたが、NUL は先に走る素の `Error` の検査
- * （`assertObservationHasNoNul` など）が断っていたため、`kind` が無かった。
- *
- * 対応する適合テスト: 「NULを含む識別子は、書き込みも読み出しも断る」（`memory-store-conformance.ts`）、
- * 「fail は error の NUL を、6文字の \u0000 に置き換えて lastError に残す」（`outbox-store-conformance.ts`）。
- * **適合テストの対象ではない**（Issue #768 コメント2）。
- */
-
 const ctx: Ctx = { tenantId: "tenant-1" };
 let n = 0;
 

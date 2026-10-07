@@ -12,18 +12,9 @@ import {
 } from "./test-db.js";
 
 /**
- * [ADR 0353](../../../docs/decisions/0353-activity-counting-per-call.md)
- * （Issue #338）: `packages/core` の `activity-counting-per-call.test.ts`（in-memory の
- * `Fake` 実装）が既に確かめた「recall のたびの前進」の意味論を、**本物の Postgres の
- * SQL**（段1 ANN ゲートの相関サブクエリ）に対しても確かめる。
- *
- * `packages/core` 側のテストは、後置フィルタ（`recall-runtime.ts` の
- * `activityAxisAlive`）という多層防御があるため、**段1 SQL 自体が
- * `decayFloorSeqUsesSubjectCounters` を無視しても検出できない**（実際に確かめた——
- * `effectiveNowSeqFor` を壊さず `scope.decayFloorSeqUsesSubjectCounters` だけを
- * `false` に固定する変異を core 側のテストに当てたところ、後置フィルタが同じ判定を
- * 再現するため赤くならなかった）。この歯は `PostgresVectorStore.search` を直接呼び、
- * 後置フィルタを経由せずに段1 SQL 単体の挙動を確かめる。
+ * 段1 SQL 自体が `decayFloorSeqUsesSubjectCounters` を無視しても、core 側のテストは後置フィルタ
+ * （`recall-runtime.ts` の `activityAxisAlive`）が同じ判定を再現するため赤くならない。
+ * そのため `PostgresVectorStore.search` を直接呼び、後置フィルタを経由しない。
  */
 describe("PostgresVectorStore.search — decayFloorSeqUsesSubjectCounters（ADR 0353、Issue #338）", () => {
   afterAll(async () => {
@@ -38,7 +29,6 @@ describe("PostgresVectorStore.search — decayFloorSeqUsesSubjectCounters（ADR 
     const tenantSettingsStore = new PostgresTenantSettingsStore(db);
     const ctx: Ctx = { tenantId: `acpc-${Date.now()}` };
 
-    // 床 9（狭義の `>` なので nowSeq=9 でちょうど沈む）。
     const alice = await memoryStore.createMemory(
       ctx,
       buildNewMemoryFixture({
@@ -62,7 +52,6 @@ describe("PostgresVectorStore.search — decayFloorSeqUsesSubjectCounters（ADR 
     );
     await vectorStore.upsert(ctx, TEST_EMBEDDING_SPACE, bob.id, [0, 1, 0]);
 
-    // S_bob = 10（bob のカウンタだけを進める。tenant_activity には触れない）。
     for (let i = 0; i < 10; i += 1) {
       await memoryStore.createRecall(ctx, {
         tenantId: ctx.tenantId,
@@ -88,8 +77,6 @@ describe("PostgresVectorStore.search — decayFloorSeqUsesSubjectCounters（ADR 
       bob: 10,
     });
 
-    // decayFloorSeqUsesSubjectCounters: true で、T=0 を渡す。bob（S_bob=10、床9）は
-    // 9 <= 10 なので沈む。alice（S_alice=0、床9）は 9 > 0 なので生き残る。
     const hits = await vectorStore.search(ctx, TEST_EMBEDDING_SPACE, [1, 1, 0], {
       limit: 10,
       filter: {
@@ -142,8 +129,6 @@ describe("PostgresVectorStore.search — decayFloorSeqUsesSubjectCounters（ADR 
       });
     }
 
-    // decayFloorSeqUsesSubjectCounters を渡さない（省略）。T=0 のみと比較するので、
-    // S_bob=10 を無視して bob は生き残る——本 ADR 以前と1バイトも変わらない SQL。
     const hits = await vectorStore.search(ctx, TEST_EMBEDDING_SPACE, [0, 1, 0], {
       limit: 10,
       filter: { tenantId: ctx.tenantId, decayFloorSeqAfter: 0 },

@@ -5,9 +5,6 @@ import type { PromptSpec, LLMProvider } from "../interfaces/llm-provider.js";
 import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-// ADR 0440: extractionContext.timeZone + occurredAt から作る「観測者の現地の暦日」（observedLocalDate と
-// relativeDates）が、年が 1000 未満・10000 以上・紀元前のとき Invalid time value で落ちていた。
-
 const ctx = { tenantId: "local-date-test" };
 
 function observationAt(occurredAt: Date, timeZone: string | undefined): Observation {
@@ -90,7 +87,6 @@ describe("Intl の年の書き方（組み直しの前提）", () => {
     const min = parsedPrompt(new Date("-271821-04-20T00:00:00Z"), "UTC").parsed;
     expect(min.observation.observedLocalDate).toBe("-271821-04-20");
     expect(min.observation.relativeDates["昨日"]).toBeNull();
-    // 現地の暦日が Date の範囲の外になる（UTC-8 で 4/19）場合も、落ちずに null
     const outside = parsedPrompt(new Date("-271821-04-20T00:00:00Z"), "America/Los_Angeles").parsed;
     expect(outside.observation.observedLocalDate).toBe("-271821-04-19");
     expect(outside.observation.relativeDates["今日"]).toBeNull();
@@ -146,7 +142,6 @@ describe("偽の LLM が呼ばれる（全文フォールバックへ黙って�
 });
 
 describe("1000〜9999年と timeZone なしは、プロンプトの content が直す前と1バイトも変わらない", () => {
-  // 下の固定値は、直す前の実装（main 2d0a399a）の出力を写したもの。
   const golden: Array<[string, string | undefined, string]> = [
     [
       "1969-12-31T23:59:59.999Z",

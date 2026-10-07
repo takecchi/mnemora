@@ -4,13 +4,6 @@ import type { EmbeddingSpaceId } from "../embedding.js";
 import type { NewMemory } from "../memory.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * `FakeMemoryStore` の抽出の冪等キーと `FakeVectorStore` のベクトルのキーが、区切り文字（`:`）を
- * 含む値で別の対象と衝突しない。`packages/testkit` の InMemory と同じ直し（キーを
- * `JSON.stringify` の配列にする）を、別系統のこちらにも当てた。2実装に当てる歯は
- * `packages/postgres/src/__tests__/joined-string-keys.postgres.test.ts`。
- */
-
 let counter = 0;
 function newMemory(tenantId: string, overrides: Partial<NewMemory> = {}): NewMemory {
   counter += 1;
@@ -100,7 +93,6 @@ describe("Fake のキーは区切り文字を含む値で衝突しない", () =>
     expect(hits).toEqual([]);
   });
 
-  // #1146: 空間の3欄（provider・model・dimensions）は、どれも完全一致で比べる。
   it.each<[string, EmbeddingSpaceId]>([
     ["dimensions だけ違う", { provider: "p", model: "m", dimensions: 4 }],
     ["provider だけ違う", { provider: "q", model: "m", dimensions: 3 }],

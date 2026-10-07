@@ -22,12 +22,6 @@ import {
   TEST_EMBEDDING_SPACE,
 } from "./test-db.js";
 
-/**
- * `consolidate`・`reflect` の `{ query }`・`{ seedMemoryId }` は、doc が「書き込みゼロ」と書く枝でも、手順1の
- * `recall()` が recall の記録を1件書き、活動時計を進める——今の振る舞いを縛る（Issue #1248。両メソッドの doc の
- * 2026-09-27 追記）。振る舞いは変えていない。`{ memoryIds }` はどちらも起こさない。Postgres と testkit の fixture で同じ。
- */
-
 let llmFails = false;
 const llm: LLMProvider = {
   complete: async () => ({ content: "unused" }),

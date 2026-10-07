@@ -6,17 +6,6 @@ import type { VectorFilter, VectorStore } from "../interfaces/vector-store.js";
 import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores, withSearchMany } from "./runtime-fakes.js";
 
-/**
- * #932 の確かめ直し（#1774）。`recall-association-search-many.test.ts` が見ていない3つ：
- *
- * 1. 束ねる経路（`searchMany`）に渡す `limit`・`filter` は、search に戻る経路でアンカーごとに渡すものと同じ。
- *    （既存の歯は「`recall()` の結果が一致する」だけで、絞り込みの無いシナリオなので、filter を絞っても
- *    limit を1つ増やしても結果が変わらず通る）。
- * 2. `searchMany` が、渡した key を Map に返さなくても（契約の違反を `?? []` で受ける多層防御）、`recall()` は落ちない。
- * 3. 連想の起点になるアンカーが1つも `getVectors` で引けなければ、`searchMany` を呼ばない
- *    （空のクエリ列で往復を撃たない）。
- */
-
 const T0 = new Date("2026-06-01T00:00:00.000Z");
 const ctx: Ctx = { tenantId: "tenant-1", subjectId: "subject-1" };
 
@@ -109,7 +98,6 @@ describe("recall() 段3.5 — searchMany に渡す limit・filter は、search �
     expect(bundled.wrapped.searchManyCalls).toHaveLength(1);
     const manyOpts = bundled.wrapped.searchManyCalls[0]!.opts;
 
-    // 前提：絞り込みが実際に載っている
     expect(manyOpts.filter.tenantId).toBe("tenant-1");
     expect(manyOpts.filter.subjectId).toBe("subject-1");
     expect(manyOpts.filter.attributes).toEqual({ team: "x" });

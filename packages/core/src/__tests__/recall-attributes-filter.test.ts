@@ -8,23 +8,7 @@ import type { Memory, NewMemory } from "../memory.js";
 import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * `RecallQuery.attributes`（Issue #152/#153、ADR 0312）の歯。
- *
- * `recall-subjectless-filter.test.ts`（ADR 0286）・`recall-validity.test.ts`（ADR 0164）と
- * 同型の構え:
- * 1. 配線の歯——段1（ANN・語彙）と段3.5（連想枠）の filter に `attributes` が渡ること。
- * 2. 母集合を実際に減らす本命の歯——AND 等値、キー不一致・値不一致・キー不在のどれも落ちる。
- * 3. 空オブジェクトは「絞り込み無し」（省略と同じ）。
- * 4. `totalInScope` はこの絞り込みの内側だけを数える。**`omitted` には出ない**
- *    （`subjectId`/`tenant` と同じ「スコープの外側の境界」——ADR 0312 決定6）。
- * 5. `RecalledMemory.attributes` が返り値に載る。
- * 6. adapter が `attributes` を無視しても安全（取りこぼしはあるが混入は無い）——
- *    `AttributesFilterStrippingVectorStore` で段1の絞りを剥がし、後置フィルタ
- *    （`survivesAttributesFilter`）だけで正しく絞れることを確かめる。
- *
- * `packages/core` 自身のテストなので `@mnemora/testkit` には依存しない。
- */
+/** `@mnemora/testkit` には依存しない。 */
 
 const NOW = new Date("2026-06-01T00:00:00.000Z");
 const ctx: Ctx = { tenantId: "tenant-1" };
@@ -122,10 +106,6 @@ async function createEmbeddedMemory(
   return memory;
 }
 
-// ---------------------------------------------------------------------------
-// 1. 配線の歯。
-// ---------------------------------------------------------------------------
-
 describe("recall() — 段1の filter に attributes が載ること（配線の歯、Issue #152/#153）", () => {
   it("RecallQuery.attributes が VectorStore.search / LexicalStore.search の opts.filter.attributes に渡る", async () => {
     const { runtime, stores } = buildRuntime();
@@ -161,10 +141,6 @@ describe("recall() — 段1の filter に attributes が載ること（配線の
     expect(vectorFilters[0]?.attributes).toBeUndefined();
   });
 });
-
-// ---------------------------------------------------------------------------
-// 2. 本命の歯: 母集合を実際に減らす。
-// ---------------------------------------------------------------------------
 
 describe("recall() — attributes が実際に候補を落とす（AND 等値、Issue #152/#153）", () => {
   it("渡したキーと同じ値を持つ Memory だけが返る", async () => {
@@ -233,7 +209,6 @@ describe("recall() — attributes が実際に候補を落とす（AND 等値、
     });
 
     expect(result.omitted).toEqual([]);
-    // totalInScope はこの絞り込みの内側（1件）だけを数える——2件目は「そもそも問うていない」。
     expect(result.index.totalInScope).toBe(1);
   });
 
@@ -263,12 +238,7 @@ describe("recall() — attributes が実際に候補を落とす（AND 等値、
   });
 });
 
-// ---------------------------------------------------------------------------
-// 3. adapter がこの欄を無視しても安全である（取りこぼしはあるが、混入は無い）。
-// `FakeVectorStore` は attributes を実際に見る実装であり、`AttributesFilterStrippingVectorStore`
-// で段1の絞りを剥がすことで「対応していない adapter」を模す（`recall-subjectless-filter.test.ts`
-// の `SubjectFilterStrippingVectorStore` と同型）。
-// ---------------------------------------------------------------------------
+// `FakeVectorStore` は attributes を実際に見る実装なので、`AttributesFilterStrippingVectorStore` で段1の絞りを剥がして「対応していない adapter」を模す。
 
 class AttributesFilterStrippingVectorStore implements VectorStore {
   constructor(private readonly inner: VectorStore) {}
@@ -334,11 +304,6 @@ describe("recall() — 後置フィルタ（survivesAttributesFilter）が段1�
   });
 });
 
-// ---------------------------------------------------------------------------
-// 4. 連想枠（段3.5）にも同じ絞りが掛かる（ADR 0172/#347 の見落としを繰り返さない）。
-// ---------------------------------------------------------------------------
-
-/** Q=[1,0] に対して類似度 0.7071——段1で拾われ、連想のアンカーになる。 */
 const ANCHOR_VECTOR = [0.70710678, 0.70710678];
 /** アンカーとの類似度は 0.7071 だが、クエリとの類似度は0——連想枠でしか返ってこない。 */
 const ASSOCIATED_VECTOR = [0, 1];
@@ -391,14 +356,6 @@ describe("recall() — 連想枠（段3.5）にも attributes が掛かる（Iss
     expect(result.memories.map((m) => m.memoryId)).not.toContain(associated.id);
   });
 });
-
-// ---------------------------------------------------------------------------
-// 5. 後置フィルタの追加の歯（Issue #1775 の #724 の変異6・9）。
-//   - 後置フィルタは複数キーの条件で全キー一致（`every`）を要る。単一キーの条件しか通していなかったので、
-//     `some` にしても結果が変わらなかった（adapter の押し下げが正しいと、後置フィルタは何も落とさない）。
-//   - 連想枠（段3.5）の後置フィルタ。連想用の `search()` が `attributes` を無視して外の記憶を返しても、
-//     結果の連想枠に乗らない（ADR 0312 決定9の表が「段3.5：検査あり」と書く。ADR 0172 が踏んだ見落としと同じ形）。
-// ---------------------------------------------------------------------------
 
 describe("recall() — 後置フィルタ（survivesAttributesFilter）の追加の歯（#724）", () => {
   it("複数キーの条件: adapter が attributes を無視して、片方のキーだけ一致する記憶を返しても、結果に出ない（every）", async () => {

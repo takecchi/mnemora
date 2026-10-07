@@ -6,19 +6,7 @@ import { PostgresTenantSettingsStore } from "../tenant-settings-store.js";
 import * as schema from "../schema.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
-/**
- * [ADR 0395](../../../docs/decisions/0395-create-recall-activity-clock-single-statement.md):
- * `createRecall` の `advanceActivityClock` ありの分岐は、`recalls` の INSERT と活動カウンタの
- * UPSERT を **1つの SQL 文**（`WITH ... INSERT ... INSERT ...`）で撃つ。同じテナント（subject）への
- * 同時 createRecall がカウンタの行で直列になる時間を、往復2回分＋トランザクション開閉の分だけ
- * 短くするための変更で、意味は変えない。
- *
- * 2種類の歯:
- * - 意味の歯（変更前の実装でも緑。挙動を変えていないことを縛る）: 並列 N 件でカウンタ合計が
- *   ちょうど N（数え漏れ・二重計上なし）／返り値の id が書かれた行と一致／どちらの表への書き込みが
- *   失敗しても、もう片方も残らない。
- * - 形の歯（変更前は赤）: `recalls` を書く文が、カウンタ表にも触れる1文であること。
- */
+/** 形の歯: `recalls` を書く文が、カウンタ表にも触れる1文であること（`WITH ... INSERT ... INSERT ...`）。 */
 
 const usage = {
   chars: 0,

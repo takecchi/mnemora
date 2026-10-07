@@ -10,11 +10,7 @@ import type { OutboxJobRecord } from "../outbox.js";
 import { createRuntime, type Runtime, type TickResult } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * ADR 0530: 1回の `tick` の2件目の処理中にリースが切れたとき、別の `tick` が再 claim して二重に処理した結末を、種類ごと（embed・extract・
- * consolidate・reflect）に縛る（Fake）。`tick-batch-lease-expiry.test.ts`（Fake・embed・2件）の続き。同じ `EXPECTED` を実 Postgres と InMemory の側
- * （`packages/postgres/src/__tests__/tick-batch-exceeds-lease-parity.postgres.test.ts`）が縛る。
- */
+/** 同じ `EXPECTED` を実 Postgres と InMemory の側も縛る。 */
 interface Env {
   runtime: Runtime;
   mem: MemoryStore;
@@ -36,10 +32,9 @@ type Kind = "embed" | "extract" | "consolidate" | "reflect";
 type Result = Record<string, unknown>;
 
 /**
- * ADR 0530: 1回の `tick` が claim した2件のうち、2件目の処理中にリースが切れる（バッチの claim 時点から数えるので、1件あたりの処理が
- * `leaseMs` より短くても起きる。`TickOptions.leaseMs` の TSDoc）。順序は時計のオフセットと provider の前の門（Promise）で決める:
- * A の2件目が provider の門に着いたところで時計を進め、(1) 別の `tick` B が2件目を再 claim して最後まで処理する／(2) 誰も取り直さない、
- * のあと A の門を開ける。種類ごとに、二重に走った結末を比べる。
+ * 順序は時計のオフセットと provider の前の門（Promise）で決める: A の2件目が門に着いたところで時計を進め、
+ * (1) 別の `tick` B が2件目を再 claim して最後まで処理する／(2) 誰も取り直さない、のあと A の門を開ける。
+ * リースはバッチの claim 時点から数えるので、1件あたりの処理が `leaseMs` より短くても切れる。
  */
 async function scenario(env: Env): Promise<Result> {
   const {
@@ -116,7 +111,6 @@ async function scenario(env: Env): Promise<Result> {
       await run(fresh(), kind, false),
     );
   }
-  // extract: 二重に処理された observation の結末
   const fact = (content: string) => [{ content }];
   for (const [label, override] of [
     ["same candidate", (n: number) => (n === 2 || n === 3 ? fact("shared fact") : null)],
@@ -139,7 +133,6 @@ async function scenario(env: Env): Promise<Result> {
     }
   }
   {
-    // A の LLM が、B が完了したあとで落ちる（全文のフォールバックで書く）
     const ctx = fresh();
     setLlmOverride((n) => (n === 3 ? fact("B fact") : null));
     setClockOffset(0);
@@ -172,7 +165,6 @@ async function scenario(env: Env): Promise<Result> {
       setClockOffset(0);
     }
   }
-  // reflect: 二重に処理された種から、内省の記憶がいくつできるか
   {
     const ctx = fresh();
     const r = await run(ctx, "reflect", true);
@@ -211,7 +203,6 @@ const llm = {
     const override = llmOverride?.(n);
     const extracted = override ?? [{ content: "extracted fact" }];
     return req.schema.parse({
-      // reflect・consolidate・extract のどの schema にも通る、決め打ちの応答（LLM の実 API は使わない）
       outcome: "reflected",
       content: "CANNED merged",
       digest: "canned digest",

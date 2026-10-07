@@ -5,20 +5,6 @@ import type { NewMemory } from "../memory.js";
 import type { NewObservation } from "../observation.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * ADR 0578: ADR 0562 が「まだ store の行そのものを返す」と書き残した口（`createMemoryWithOutbox`・`list*`・
- * `updateStatus` などの返り値）を、写しを返す形に直した歯。
- *
- * 各口について「返り値を（配列・Date・ネストしたオブジェクトまで）書き換えても、その後に store から読み直した値は
- * 変わらない」を当てる。書き換えは {@link scribble} が、届く限りの値すべてに行う。
- * 比べる相手は `liveRowForTest`（store の中の行そのもの）と、公開の `get` / `list` の両方。
- *
- * 各 `describe` の最後は**対照の歯**——口が書いたことは store に届いている／`liveRowForTest` への書き込みは
- * 後の読みに見える／返り値は中身が正しく Date は Date のまま／凍結されていない、を縛る。
- * 「写しに書いてから別の写しを返す（store に届かない）」「浅い写しで配列を共有する」といった、写しの取りすぎ・
- * 取り足りなさで赤くなる。
- */
-
 const ctx: Ctx = { tenantId: "tenant-1" };
 const T0 = "2026-01-01T00:00:00.000Z";
 const T1 = "2026-02-01T00:00:00.000Z";
@@ -175,7 +161,7 @@ describe("Observation の口は、返り値の書き換えから行を守る（A
 
     const again = await memoryStore.createObservationWithOutbox(ctx, newObservation(), ["extract"]);
     expect(again.created).toBe(false);
-    // 再送は最初の Observation を指す（別の id の写しを返さない。Memory 側の createMemoryWithOutbox と揃える。ADR 0588）。
+    // 再送は最初の Observation を指す（別の id の写しを返さない）。
     expect(again.observation.id).toBe(result.observation.id);
     scribble(result.observation);
     scribble(result.jobs);
@@ -401,7 +387,7 @@ describe("状態を書く口（updateStatus ほか）は、返り値の書き換
     scribble(written);
     await expectRowUnchanged(stores, created.id, baseline);
 
-    // ready → failed は巻き戻しなので no-op（ADR 0048 と同じ理由）。現在の行の写しが返る。
+    // ready → failed は巻き戻しなので no-op。現在の行の写しが返る。
     const noop = await stores.memoryStore.setEmbeddingStatus(ctx, created.id, "failed");
     expect(noop.embeddingStatus).toBe("ready");
     scribble(noop);

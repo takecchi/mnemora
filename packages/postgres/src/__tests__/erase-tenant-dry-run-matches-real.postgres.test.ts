@@ -17,14 +17,9 @@ import {
 } from "./erase-tenant-test-helpers.js";
 
 /**
- * `eraseTenant`（PR #1444、ADR 0383）の `dryRun: true` は、同じ状態に本番で消したときの件数と
- * `reachedLimit` を、port ごとに返す（消すものは何も書かない）。
- *
- * 既存の歯は「`dryRun` で何も消えない」と「`deleted` が 0 より大きい」までしか見ない。表のどれか
- * 1つを数え損ねても、ほかの表が数えられていれば緑のままになる。ここでは、4つの port を1つずつ
- * 直接呼び、`dryRun` の `{ deleted, reachedLimit }` が本番の `{ deleted, reachedLimit }` と
- * 完全に一致することを見る。別テナントの行を同じ DB に置くのは、`dryRun` が別テナントの行まで
- * 数えないことを見るため。
+ * 既存の歯は、表のどれか1つを数え損ねても、ほかの表が数えられていれば緑のままになる。
+ * ここでは4つの port を1つずつ直接呼び、`dryRun` の `{ deleted, reachedLimit }` が本番と完全に一致することを見る。
+ * 別テナントの行を同じ DB に置くのは、`dryRun` が別テナントの行まで数えないことを見るため。
  */
 
 afterAll(async () => {
@@ -144,7 +139,6 @@ describe("eraseTenant の dryRun は、本番で消す件数と reachedLimit を
       reachedLimit: false,
     });
 
-    // 本番も同じ形で返す（上の dryRun は何も消していない）。
     expect(await stores.vector.eraseTenant(ctx, { limit: vectors + 1 })).toEqual({
       deleted: vectors,
       reachedLimit: false,

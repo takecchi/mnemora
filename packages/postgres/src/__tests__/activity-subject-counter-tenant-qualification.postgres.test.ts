@@ -5,13 +5,8 @@ import { PostgresMemoryStore } from "../memory-store.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
 /**
- * [ADR 0438](../../../docs/decisions/0438-tenant-boundary-teeth-and-purge-uuid-case.md) の実バグ:
- * subject 単位の活動カウンタ（`tenant_subject_activity`）を引く相関サブクエリに、修飾の無い
- * `tenant_id`/`subject_id` を渡していた（`aggregateScope`・`archiveDecayed` の2箇所）。サブクエリの中では
- * 修飾の無い列名は内側の `tenant_subject_activity` の列に解決され、`sa.tenant_id = tenant_id` は恒真になる。
- *
- * - 行が2本以上あるとき: 「more than one row returned by a subquery」で文が落ちる。
- * - 行が全体で1本だけのとき: 別テナント・別 subject のカウンタを黙って使う。
+ * 行が全体で1本だけのときは文が落ちず、別テナント・別 subject のカウンタを黙って使う。2本以上のときは
+ * 「more than one row returned by a subquery」で落ちる。1本の形と2本以上の形の両方を作る。
  */
 
 const A: Ctx = { tenantId: "counter-tenant-a" };
@@ -84,7 +79,6 @@ describe("archiveDecayed（subject カウンタ）: カウンタ行をテナン�
     await tick(mem, B, "s"); // S_B = 1
     const am = await make(A, "a1");
     const bm = await make(B, "b1");
-    // 4 + S_A(1) = 5 >= 床 5 なので沈んでいる。
     const res = await mem.archiveDecayed(A, archiveOpts(4));
     expect(res.archived.map((x) => x.memoryId)).toEqual([am.id]);
     expect((await mem.get(B, bm.id))!.status).toBe("active");
@@ -102,8 +96,6 @@ describe("archiveDecayed（subject カウンタ）: カウンタ行をテナン�
 });
 
 describe("subject 側の修飾: 同じテナントに別の subject のカウンタ行がある", () => {
-  // テナントは値で渡し、subject だけを列で修飾する。subject が修飾されていないと、内側の `tenant_subject_activity` の
-  // `subject_id` に解決されて恒真になり、同じテナントの別 subject の行を拾う（1本ならその値を使い、2本以上なら文が落ちる）。
   it("archiveDecayed: 同じテナントの別 subject のカウンタ行が1本だけでも、その値を使わない", async () => {
     const { mem, make } = await setup();
     for (let i = 0; i < 3; i++) await tick(mem, A, "other"); // S_other = 3、subject "s" の行は無い（S_s = 0）
@@ -119,7 +111,6 @@ describe("subject 側の修飾: 同じテナントに別の subject のカウン
     await tick(mem, A, "s"); // S_s = 1
     for (let i = 0; i < 3; i++) await tick(mem, A, "other"); // S_other = 3
     const am = await make(A, "a1");
-    // 4 + S_s(1) = 5 >= 床 5 なので沈んでいる。
     const res = await mem.archiveDecayed(A, archiveOpts(4));
     expect(res.archived.map((x) => x.memoryId)).toEqual([am.id]);
   });
@@ -139,7 +130,6 @@ describe("subject 側の修飾: 同じテナントに別の subject のカウン
     await tick(mem, A, "s"); // S_s = 1
     for (let i = 0; i < 3; i++) await tick(mem, A, "other"); // S_other = 3
     await make(A, "a1");
-    // 床 5 > 4 + S_s(1) = 5 は偽なので decayed に数える。
     const agg = await mem.aggregateScope(A, scopeOf(4));
     expect(agg.totalInScope).toBe(1);
     expect(agg.filteredDecayed?.count).toBe(1);

@@ -90,7 +90,6 @@ describe("packDigestBand — limitedBy の決め方", () => {
     // ちょうど maxChars に一致させておくと、3件目を足すと文字数も超える
     // ——「次の件を足すと件数も文字数も超える状態」を作る。
     const candidates = [entry("m1", "aaaaa"), entry("m2", "bbbbb"), entry("m3", "ccccc")];
-    // 1件のコスト = 63 + 5 + 1 = 69。2件で 138。maxChars を 138 ちょうどに設定する。
     const result = packDigestBand(candidates, 3, { limit: 2, maxChars: 138, maxEntryChars: 100 });
     expect(result.band).toHaveLength(2);
     expect(result.limitedBy).toBe("both");
@@ -149,9 +148,7 @@ describe("packDigestBand — maxEntryChars が負数（境界値）", () => {
 
 describe("packDigestBand — maxEntryChars が NaN（境界値）", () => {
   it("NaN の maxEntryChars は負数と同じ安全側（digest を空に切る）へ倒れ、無制限へ化けない", () => {
-    // `length > NaN` は常に false のため、修正前は切り詰めが一度も起きず「上限」が
-    // 無制限へ化けていた。`limit`/`maxChars` の NaN（Issue #803）・負数の `maxEntryChars`
-    // と同じく、NaN は上限0として扱う。予算の勘定（limitedBy を含む）も負数と一致する。
+    // `length > NaN` は常に false なので、NaN は上限0として扱う（負数の `maxEntryChars` と同じ）。
     const candidates = [entry("m1", "0123456789")];
     const opts = { limit: 10, maxChars: 10_000 };
     const nan = packDigestBand(candidates, 1, { ...opts, maxEntryChars: NaN });
@@ -163,11 +160,8 @@ describe("packDigestBand — maxEntryChars が NaN（境界値）", () => {
 
 describe("packDigestBand — 切り詰め位置が UTF-16 サロゲートペアの内側（境界値）", () => {
   it("サロゲートペアの内側で切ると孤立サロゲートを作ってしまうため、1文字手前で止める", () => {
-    // "😀" は UTF-16 では2コードユニット（サロゲートペア）。`digest.slice(0, 5)` を
-    // 素朴にやると "AAAA" + 高サロゲートだけが残り、対になる低サロゲートを失った
-    // 孤立サロゲートができる——UTF-8 へエンコードする経路（Postgres の digest 列へ
-    // 書き込むとき）で静かに U+FFFD（置換文字）へ壊れる（`extraction.test.ts` の
-    // `truncateForFallbackDigest` の同じ歯、Issue #816 とは別のケース）。
+    // "😀" は UTF-16 では2コードユニット（サロゲートペア）。`digest.slice(0, 5)` を素朴にやると孤立サロゲートができ、
+    // UTF-8 へエンコードする経路（Postgres の digest 列への書き込み）で静かに U+FFFD へ壊れる。
     const candidates = [entry("m1", "AAAA😀BBBB")];
     const { band } = packDigestBand(candidates, 1, {
       limit: 10,
@@ -200,10 +194,8 @@ describe("packDigestBand — 切り詰め位置が UTF-16 サロゲートペア�
 });
 
 describe("packDigestBand — limit/maxChars が NaN（境界値、Issue #803）", () => {
-  // `band.length >= opts.limit` / `runningChars + cost > opts.maxChars` は、比較の片方が
-  // NaN だと常に false になる——打ち切り条件が一度も成立せず、上限が実質「無制限」に
-  // 化けていた（負数を渡すと逆に安全側へ倒れるのと対照的）。NaN だけを負数と同じ
-  // 安全側（既に上限に達している扱い）に倒す。
+  // `band.length >= opts.limit` / `runningChars + cost > opts.maxChars` は比較の片方が NaN だと常に false になり、上限が実質無制限に化ける。
+  // NaN だけを負数と同じ安全側（既に上限に達している扱い）に倒す。
   const candidates = [entry("m1", "aaaaa"), entry("m2", "bbbbb"), entry("m3", "ccccc")];
 
   it("limit が NaN なら band は空で limitedBy === 'entry_limit'", () => {
@@ -236,8 +228,6 @@ describe("packDigestBand — limit/maxChars が NaN（境界値、Issue #803）"
     expect(result.limitedBy).toBe("both");
   });
 
-  // NaN は「負数と同じ安全側」。もう片方の上限が実際に当たっているときの `limitedBy` も、
-  // 負数を渡したときと同じ分岐（'both'）を通る——NaN の側だけで打ち切りを決めない。
   it("limit が NaN で、maxChars も実際に超えているなら 'both'（負数と同じ）", () => {
     const options = { maxChars: 0, maxEntryChars: 100 };
     const withNaN = packDigestBand(candidates, 3, { limit: NaN, ...options });
@@ -256,7 +246,6 @@ describe("packDigestBand — limit/maxChars が NaN（境界値、Issue #803）"
     expect(withNaN.limitedBy).toBe("both");
   });
 
-  // 載せる候補が無いなら、打ち切りは起きていない——NaN でも負数と同じく limitedBy は付かない。
   it("候補が無く eligible も 0 なら、limit・maxChars が NaN でも limitedBy は付かない（負数と同じ）", () => {
     for (const opts of [
       { limit: NaN, maxChars: 10_000, maxEntryChars: 100 },
@@ -274,7 +263,6 @@ describe("packDigestBand — limit/maxChars が NaN（境界値、Issue #803）"
 describe("packDigestBand — limit/maxChars が Infinity（境界値、Issue #803では変えない）", () => {
   // +Infinity は「上限なし」として意味が通るので、NaN とは違って今の挙動のまま
   // （呼び出し側が明示的に上限を外す手段として使っている可能性があるため、狭めない）。
-  // -Infinity は負数と同じ扱い（安全側、即座に打ち切り）のまま。
   const candidates = [entry("m1", "aaaaa"), entry("m2", "bbbbb"), entry("m3", "ccccc")];
 
   it("limit が +Infinity なら件数側では打ち切らず全件載る", () => {
@@ -334,7 +322,6 @@ describe("packDigestBand — 切り詰め位置が書記素の途中（穴 O-5�
   it("NFD の「が」（か + 結合濁点）を、濁点だけ落として「か」にしない", () => {
     const nfdGa = "が".normalize("NFD"); // "か" + U+3099（2コードユニット）
     expect(nfdGa).toHaveLength(2);
-    // "ab" + が(2) + "cd"。3文字目までの位置 3 は「か」と濁点のあいだ。
     expect(pack(`ab${nfdGa}cd`, 3)).toBe("ab");
     expect(pack(`ab${nfdGa}cd`, 4)).toBe(`ab${nfdGa}`);
   });
@@ -361,7 +348,6 @@ describe("packDigestBand — maxEntryChars の +Infinity と NaN の取りこぼ
 
   it("maxEntryChars: +Infinity は上限なし——digest を切らず、truncated も立てない", () => {
     // NaN を空に切る判定へ `+Infinity` が巻き込まれると、全件が空文字になる。
-    // 既存の歯は NaN と負数だけで、+Infinity の側は縛っていなかった。
     const long = "x".repeat(5000);
     const { band, limitedBy } = packDigestBand([entry("m1", long), entry("m2", "short")], 2, {
       ...opts,

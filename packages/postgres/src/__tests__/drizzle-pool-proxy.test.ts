@@ -1,20 +1,10 @@
 import { setTimeout as sleep } from "node:timers/promises";
 import { sql } from "drizzle-orm";
-import { Pool } from "pg";
+import { Pool, type PoolClient } from "pg";
 import { describe, expect, it } from "vitest";
 import { closePostgresClient, createPostgresClient } from "../client.js";
 import { requireDatabaseUrl } from "./test-db.js";
 
-/**
- * Issue #868: `createPostgresClient` は drizzle に、`connect` だけを包んだ Proxy を渡す。
- * `db-transaction-connection-loss.test.ts`（落ちないこと）と
- * `public-pool-connect-unwrapped.test.ts`（公開する pool は書き換えないこと）の隣で、
- * 残りの2点を縛る。
- *
- * - `db.$client`（公開の型 `Db` には載っていないが、drizzle が実行時に生やす欄）から見える面。
- *   同一性だけが変わり、それ以外は本物の pool に届く。
- * - 付けたリスナーが `release()` で外れること。外れないと、同じ物理接続を借り直すたびに積み上がる。
- */
 describe("createPostgresClient: drizzle に渡す Proxy", () => {
   it("db.$client は instanceof Pool で、totalCount・on・end() が本物の pool に届く。ただし === pool ではない", async () => {
     const client = createPostgresClient(requireDatabaseUrl());
@@ -23,12 +13,10 @@ describe("createPostgresClient: drizzle に渡す Proxy", () => {
     try {
       await client.db.execute(sql`SELECT 1`);
       expect($client).toBeInstanceOf(Pool);
-      // 決めた振る舞い（CHANGELOG [1.1.0]）: 同一性は変わる。
       expect($client === client.pool).toBe(false);
       expect($client.totalCount).toBe(client.pool.totalCount);
       expect($client.totalCount).toBeGreaterThan(0);
-      // ベースラインは0ではなく1——`createPostgresClient` が既定で付ける pool error
-      // リスナー（Issue #1213）が常に1本ある。
+      // ベースラインは0ではなく1——`createPostgresClient` が既定で付ける pool error リスナーが常に1本ある。
       const baseline = client.pool.listenerCount("error");
       expect(baseline).toBe(1);
       const noop = (): void => {};
@@ -39,8 +27,90 @@ describe("createPostgresClient: drizzle に渡す Proxy", () => {
     } finally {
       await $client.end();
     }
-    // `$client.end()` で本物の pool が閉じている（2回目は pg が reject する）。
     expect(client.pool.ended).toBe(true);
+  });
+
+  it("db.$client のメソッドは本物の pool に束縛されて呼ばれる（this を返すメソッドは、Proxy ではなく client.pool を返す）", async () => {
+    const client = createPostgresClient(requireDatabaseUrl());
+    const $client = (client.db as typeof client.db & { $client: Pool }).$client;
+    try {
+      const returned = $client.setMaxListeners($client.getMaxListeners());
+
+      expect(returned).toBe(client.pool);
+    } finally {
+      await closePostgresClient(client);
+    }
+  });
+
+  it("db.$client.connect(callback) は包まれず本物の pool に渡る（callback が呼ばれ、借りた接続に mnemora のリスナーは付かない）。promise 形は付く", async () => {
+    const client = createPostgresClient(requireDatabaseUrl(), { max: 1 });
+    const $client = (client.db as typeof client.db & { $client: Pool }).$client;
+    try {
+      const viaCallback = await Promise.race([
+        new Promise<PoolClient>((resolve, reject) => {
+          $client.connect((error, borrowed) =>
+            error !== undefined || borrowed === undefined
+              ? reject(error ?? new Error("接続が無い"))
+              : resolve(borrowed),
+          );
+        }),
+        sleep(2000).then((): never => {
+          throw new Error("callback 形の connect が callback を呼ばなかった");
+        }),
+      ]);
+      const listenersViaCallback = viaCallback.listenerCount("error");
+      viaCallback.release();
+
+      const viaPromise = await $client.connect();
+      const listenersViaPromise = viaPromise.listenerCount("error");
+      viaPromise.release();
+
+      expect({ listenersViaCallback, listenersViaPromise }).toEqual({
+        listenersViaCallback: 0,
+        listenersViaPromise: 1,
+      });
+    } finally {
+      await closePostgresClient(client);
+    }
+  });
+
+  it("借りた直後の同期の区間で接続に error が出ても、リスナーが付いていて投げない（付けるのが1 microtask 遅れる窓が無い）", async () => {
+    const client = createPostgresClient(requireDatabaseUrl(), { max: 1, onPoolError: () => {} });
+    const pool = client.pool as unknown as { connect: (...args: unknown[]) => unknown };
+    const realConnect = pool.connect.bind(client.pool);
+    const injected = new Error("INJECTED: 借りた直後の切断");
+    const thrown: unknown[] = [];
+    const emitAfterBorrow = (borrowed: PoolClient): void => {
+      try {
+        borrowed.emit("error", injected);
+      } catch (error) {
+        thrown.push(error);
+      }
+    };
+    pool.connect = (...args: unknown[]) => {
+      const callback = args[0];
+      if (typeof callback === "function") {
+        return realConnect(
+          (error: Error | undefined, borrowed: PoolClient | undefined, done: unknown) => {
+            callback(error, borrowed, done);
+            if (borrowed !== undefined) emitAfterBorrow(borrowed);
+          },
+        );
+      }
+      const promise = realConnect() as Promise<PoolClient>;
+      void promise.then(emitAfterBorrow);
+      return promise;
+    };
+    try {
+      await client.db.transaction(async (tx) => {
+        await tx.execute(sql`SELECT 1`);
+      });
+
+      expect(thrown).toEqual([]);
+    } finally {
+      pool.connect = realConnect;
+      await closePostgresClient(client);
+    }
   });
 
   it("commit と rollback を繰り返しても、同じ物理接続に mnemora のリスナーが残らない", async () => {

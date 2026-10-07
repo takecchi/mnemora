@@ -43,7 +43,6 @@ const planned = evalCases.map((c) => {
   const observation = buildObservation(c);
   const prompt = buildExtractionPrompt(observation);
   // Conservative byte-based input bound; reserve output before sending.
-  // Rates: official GPT-4.1 mini model page ($0.40/1M input, $1.60/1M output).
   const inputBound = Buffer.byteLength(JSON.stringify({ prompt, format })) + 4096;
   const reserve = (inputBound * 0.4) / 1e6 + (MAX_COMPLETION_TOKENS * 1.6) / 1e6;
   return { case: c, observation, prompt, reserve };

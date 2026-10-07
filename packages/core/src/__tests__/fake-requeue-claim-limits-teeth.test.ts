@@ -4,14 +4,6 @@ import { defaultDecayStrategy } from "../strategies/decay.js";
 import type { NewMemory } from "../memory.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * PR #1058（`FakeMemoryStore.requeueEmbedJobs` の `limit` のガード）と PR #1059
- * （`FakeOutboxStore.claimBatch` の `leaseMs` のガード）の確かめ直しで、既存の歯
- * （`fake-store-postgres-parity.test.ts`。壊れた値を断る側だけ）がすり抜けた変異を押さえる歯。
- * testkit の `InMemory*` 側には、同じ陽性対照が既にある（`in-memory-fixtures-requeue-embed-jobs-limit.test.ts`・
- * `in-memory-fixtures-claim-batch-lease-ms.test.ts`）。
- */
-
 const ctx: Ctx = { tenantId: "tenant-1" };
 const NOW = new Date("2100-01-01T00:00:00.000Z");
 
@@ -44,8 +36,7 @@ function failedMemory(i: number): NewMemory {
 }
 
 describe("FakeMemoryStore.requeueEmbedJobs: limit のガード（PR #1058）", () => {
-  // 変異（負数を先に見る）を捕まえる。約束: `archiveDecayed` と同じ2段で、非整数を先に、次に負数を見る
-  // （例外の文言も揃える）。-1.5 は「must be an integer」で断る。
+  // 非整数を先に、次に負数を見る（`archiveDecayed` と同じ2段。例外の文言も揃える）。-1.5 は「must be an integer」で断る。
   it("limit=-1.5 は「must be an integer」で断り、limit=-1 は「must not be negative」で断る", async () => {
     const { memoryStore } = createFakeRuntimeStores();
     await memoryStore.createMemory(ctx, failedMemory(0));
@@ -57,8 +48,7 @@ describe("FakeMemoryStore.requeueEmbedJobs: limit のガード（PR #1058）", (
     ).rejects.toThrow(/requeueEmbedJobs: limit must not be negative \(got -1\)/);
   });
 
-  // 変異（0 を断る・`isSafeInteger` で断る・2^62 以上を断る）を捕まえる。約束: 正常系は変えていない
-  // （0・1・ちょうど・+1・2^62 が Postgres と同じ件数になる。PR 本文）。
+  // 正常系（0・1・ちょうど・+1・2^62 が Postgres と同じ件数になる）。
   for (const [limit, expected] of [
     [0, 0],
     [1, 1],
@@ -77,8 +67,7 @@ describe("FakeMemoryStore.requeueEmbedJobs: limit のガード（PR #1058）", (
 });
 
 describe("FakeOutboxStore.claimBatch: leaseMs が小数でも断らない（PR #1059）", () => {
-  // 変異（`leaseMs` が整数でなければ断る）を捕まえる。約束: 有限の `leaseMs`（0・負数・小数を含む）の
-  // 挙動は変えていない（PR 本文）。core の既存の歯は 0・負数の陽性対照を持つが、小数は持っていなかった。
+  // 有限の `leaseMs`（0・負数・小数を含む）は断らない。
   it("leaseMs=0.5 は断らず、未 claim のジョブを claim する", async () => {
     const { memoryStore, outboxStore } = createFakeRuntimeStores();
     await memoryStore.createMemory(ctx, failedMemory(0));

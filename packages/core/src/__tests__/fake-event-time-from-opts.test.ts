@@ -4,18 +4,6 @@ import type { NewMemory } from "../memory.js";
 import type { NewMemoryEvent } from "../event.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * ADR 0563: `FakeMemoryStore` の `archiveDecayed` が積む `archived` イベントの `at` と、`purgeMemory` の `purgedAt` の時刻を、
- * `InMemoryMemoryStore`・`PostgresMemoryStore` と同じ値にする歯。
- *
- * - `archiveDecayed`: 積む `archived` イベントの `at` は `opts.now`（壁時計ではない）。
- * - `purgeMemory`: `event.at` を渡すと `purgedAt` にも同じ値を使う。省略すると、`purgedAt` と `event.at` は壁時計を1回だけ読んだ同じ値。
- * - 対照: `event.at` を省略しても断らない（渡されない時まで要求する実装は、ここで赤になる）。
- *
- * **testkit の適合テストの対象ではない**（Issue #768 コメント2: Fake は適合テストに通さず、直したものは専用の `fake-*.test.ts` で縛る）。
- * 対応する適合テストの名前は、各 `describe` の先頭に書いた。
- */
-
 const ctx: Ctx = { tenantId: "tenant-1" };
 let hashCounter = 0;
 
@@ -76,7 +64,6 @@ function purgeEvent(memoryId: string, digest: string, at?: Date): NewMemoryEvent
 }
 
 describe("FakeMemoryStore.archiveDecayed が積む archived イベントの at（ADR 0563）", () => {
-  // 適合テスト: 「archiveDecayed が積む archived イベントの at は opts.now と同じ値になる（壁時計ではない）」
   it("at は opts.now と同じ値になる（壁時計ではない）", async () => {
     const { memoryStore, eventStore } = createFakeRuntimeStores();
     const now = new Date("2031-01-01T00:00:00.000Z");
@@ -130,7 +117,6 @@ describe("FakeMemoryStore.archiveDecayed が積む archived イベントの at�
 });
 
 describe("FakeMemoryStore.purgeMemory の purgedAt（ADR 0563）", () => {
-  // 適合テスト: 「purgeMemory は event.at を渡すと、purgedAt にも同じ値を使う」
   it("event.at を渡すと、purgedAt にも同じ値を使う", async () => {
     const { memoryStore } = createFakeRuntimeStores();
     const memory = await memoryStore.createMemory(ctx, newMemory({ status: "forgotten" }));
@@ -148,11 +134,9 @@ describe("FakeMemoryStore.purgeMemory の purgedAt（ADR 0563）", () => {
     expect((await memoryStore.get(ctx, memory.id))?.purgedAt).toEqual(at);
   });
 
-  // 適合テスト: 「purgeMemory は event.at を省略すると、purgedAt と event.at は同じ壁時計の値になる」（Fake は元から通っていたが、直したあとも守る）
   it("対照: event.at を省略しても断らず、purgedAt と event.at は壁時計を1回だけ読んだ同じ値になる", async () => {
     const { memoryStore } = createFakeRuntimeStores();
     const memory = await memoryStore.createMemory(ctx, newMemory({ status: "forgotten" }));
-    // 読むたびに1ms進む壁時計。2回読むと purgedAt と event.at が割れる。
     const start = Date.UTC(2030, 5, 1);
     stubTickingWallClock(start);
 
@@ -185,10 +169,6 @@ describe("FakeMemoryStore.purgeMemory の purgedAt（ADR 0563）", () => {
 });
 
 describe("FakeMemoryStore.purgeMemory は recalls.index_band の digestBand から digest を伏せる（ADR 0375・0563）", () => {
-  // 適合テスト: 「purgeMemory は recalls.index_band の digestBand から、この memoryId の digest を伏せる（ADR 0375 決定3・決定4）」
-  // **この歯は直す前から緑である**（ADR 0563 に書いたとおり、適合テストの赤は伏せ方の欠落ではなく、
-  // `createMemory` が返す `Memory` が store の中の行そのものだったこと〔ADR 0562 の範囲〕による）。
-  // 適合テストが `memory.digest`（purge で書き換わる）を期待値に使うために赤になる。ここでは purge の前に digest の文字列を控えて比べる。
   it("同じテナントの digestBand の該当 memoryId だけを伏せ、他の memoryId・他テナントの行は変えない", async () => {
     const { memoryStore } = createFakeRuntimeStores();
     const otherCtx: Ctx = { tenantId: "tenant-other" };

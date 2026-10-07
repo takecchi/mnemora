@@ -6,15 +6,6 @@ import type { LLMProvider, StructuredRequest } from "../interfaces/llm-provider.
 import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * ADR 0433 決定1: 正規化のあとで長さが上限（コードポイント256）を超えた subject・predicate は、
- * 鍵が取れなかったものとして `null` にする（空白だけの要素と同じ扱い）。
- *
- * Postgres の `idx_memories_claim_key`（btree）は1行 2704 バイトを超えると INSERT が落ちるので、
- * 偽の LLM が長い値を返しても `observe` が成功することを縛る。
- * Postgres 側の同じ歯は `packages/postgres/src/__tests__/claim-key-oversized-part.postgres.test.ts`。
- */
-
 const ctx: Ctx = { tenantId: "tenant-oversized-claim-key" };
 const LIMIT = 256;
 

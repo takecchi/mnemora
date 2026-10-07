@@ -6,28 +6,17 @@ import type { TenantSettingsStore } from "../interfaces/tenant-settings-store.js
 import { createRuntime, type Runtime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * ADR 0536（第1段の棚卸しの「割れていそうな上位3つ」の1つ目）: 活動時計（`decay_clock = "activity"`）の経路を Runtime の操作列で縛る（Fake）。
- * 同じ `EXPECTED` を実 Postgres と InMemory の側（`packages/postgres/src/__tests__/decay-activity-clock-parity.postgres.test.ts`）が縛る。
- * 3者の振る舞いは一致していた（割れは見つからなかった）。
- */
 interface Env {
   runtime: Runtime;
   mem: MemoryStore;
   ts: TenantSettingsStore;
   fresh: () => Ctx;
-  /** 抽出の LLM が次の `observe` で返す本文。 */
   setExtracted: (content: string) => void;
 }
 
 type Result = Record<string, unknown>;
 
-/**
- * ADR 0536 の1つ目（活動時計 `decay_clock = "activity"` の経路）: Runtime の操作列を3者（core の Fake・testkit の InMemory・Postgres）に流し、
- * 記憶ごとの status と活動時計の3つ組（`decayBaseSeq`・`decayFloorSeq`・`halfLifeRecalls`）、`TenantSettingsStore` の活動の数（`T`・subject ごとの `S_x`）、
- * recall の結果（別名）、`sweepArchive`（`clock`: 既定のテナントの設定・`activity`・`either`・`wall`）の結果を、平らなデータにする。
- * subject なしの記憶と subject ありの記憶を混ぜ（ADR 0353・0394）、壁時計から活動時計へ切り替えた記憶（Issue #1014）も入れる。
- */
+/** 活動時計（`decay_clock = "activity"`）の経路を Runtime の操作列で縛る。同じ `EXPECTED` を実 Postgres と InMemory の側も縛る。 */
 async function scenario(env: Env): Promise<Result> {
   const { runtime, mem, ts, fresh, setExtracted } = env;
   const out: Result = {};
@@ -74,7 +63,6 @@ async function scenario(env: Env): Promise<Result> {
     return {
       ids: r.memories.map((m) => alias(m.memoryId)).sort(),
       recallId: r.recallId,
-      // aggregateScope の結果（忘却ゲートの件数・範囲内の数・目次帯）
       omitted: JSON.stringify(
         r.omitted.map((o) => {
           const x = o as unknown as Record<string, unknown>;
@@ -91,7 +79,6 @@ async function scenario(env: Env): Promise<Result> {
     };
   };
 
-  // 1. 活動時計のテナントで、subject なし・alice・bob の記憶を作る（半減期 3 回）
   const ctx = fresh();
   const ctxA: Ctx = { ...ctx, subjectId: "alice" };
   const ctxB: Ctx = { ...ctx, subjectId: "bob" };
@@ -107,7 +94,6 @@ async function scenario(env: Env): Promise<Result> {
     await counters(ctx, ["alice", "bob"]),
   ];
 
-  // 2. 半減期 1 回の記憶（すぐ沈む）を、subject なし・alice で足す。カウンタが進んだあとに作るので、起点は T + S_x
   for (let i = 0; i < 2; i += 1) await recallAliases(ctx, ids);
   for (let i = 0; i < 2; i += 1) await recallAliases(ctxA, ids, "subject");
   await ts.setDefaultHalfLifeRecalls!(ctx, 1);
@@ -119,7 +105,6 @@ async function scenario(env: Env): Promise<Result> {
     await counters(ctx, ["alice", "bob"]),
   ];
 
-  // 3. recall を重ねて活動の数を進める。各回の結果（忘却ゲートの後）と、カウンタの進み方を見る
   const steps: unknown[] = [];
   for (let i = 0; i < 18; i += 1) {
     const kind = i % 3;
@@ -138,7 +123,6 @@ async function scenario(env: Env): Promise<Result> {
   out["3 recalls advance the clock; the gate drops memories that sank"] = steps;
   out["3b memories after the recalls"] = await seqOf(ctx, ids);
 
-  // 4. usage による強化（起点が今の活動の数に進む。subject あり・なし）
   const last = await recallAliases(ctx, ids);
   setExtracted("unused");
   await runtime.observe(ctx, {
@@ -151,7 +135,6 @@ async function scenario(env: Env): Promise<Result> {
     await counters(ctx, ["alice", "bob"]),
   ];
 
-  // 5. consolidate・reflect が書く記憶の3つ組
   const c1 = await observeOne(ctxA, "fact alice consolidation source one");
   const c2 = await observeOne(ctxA, "fact alice consolidation source two");
   await settle(ctx);
@@ -189,7 +172,6 @@ async function scenario(env: Env): Promise<Result> {
   const tenantRecalls = async (n: number) => {
     for (let i = 0; i < n; i += 1) await recallAliases(ctx, ids);
   };
-  // qA だけが沈んでいる（q0 は T=6 でまだ床 7 を越えていない）。壁時計の軸は生きているので、either は何も選ばない
   await sweep("clock activity, now=today: only qA has sunk", { clock: "activity" });
   await sweep("clock either, now=today: wall axis alive, nothing", { clock: "either" });
   await tenantRecalls(2); // T=8: q0 も沈む
@@ -205,7 +187,6 @@ async function scenario(env: Env): Promise<Result> {
   await sweep("tenant default (activity), now=today: everything that sank", {});
   out["6c recall after the sweeps"] = (await recallAliases(ctx, ids)).ids;
 
-  // 7. 壁時計から活動時計へ切り替える（Issue #1014）
   const ctx2 = fresh();
   const ids2: Record<string, string> = {};
   ids2["wall0"] = await observeOne(ctx2, "fact written under the wall clock");
@@ -227,7 +208,6 @@ async function scenario(env: Env): Promise<Result> {
     await seqOf(ctx2, ids2),
   ];
 
-  // 8. 床とちょうど同じ値（境界）: 沈むのは `床 <= 今`（掃引）・`床 > 今` でなくなる（recall のゲート）。subject ありは今 = T + S_x
   const ctx3 = fresh();
   const ctx3A: Ctx = { ...ctx3, subjectId: "alice" };
   await ts.setDecayClock!(ctx3, "activity");
@@ -270,7 +250,6 @@ const llm = {
   },
   completeStructured: async <T>(_ctx: Ctx, req: StructuredRequest<T>): Promise<T> =>
     req.schema.parse({
-      // reflect・consolidate・extract のどの schema にも通る、決め打ちの応答（LLM の実 API は使わない）
       outcome: "reflected",
       content: "CANNED merged",
       digest: "canned digest",

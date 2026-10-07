@@ -4,15 +4,6 @@ import type { PromptSpec, LLMProvider } from "../interfaces/llm-provider.js";
 import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * `extractionContext`（ADR 0299、PR #694）の約束のうち、`extraction-context.test.ts` が
- * `kind: "utterance"` と「超えたら断る」側しか見ていなかった穴を塞ぐ（Issue #1776 の #694 の
- * コメント、ADR 0665）。
- *
- * - 文脈は `utterance`・`event`・`document` の3種とも、観測の payload に保存され、抽出のプロンプトに渡る。
- * - 上限（messages 8件・text 2000字・speaker 200字）は「ちょうどは通る」。黙って切り捨てない。
- */
-
 const ctx = { tenantId: "context-all-kinds" };
 
 const OBSERVATIONS = {

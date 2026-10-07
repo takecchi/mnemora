@@ -6,23 +6,6 @@ import type { NewMemory } from "../memory.js";
 import type { NewObservation } from "../observation.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * ADR 0493（穴探し60巡目）の続き（形 E「Fake だけ検査が甘い」）: core のテスト用の Fake が、`@mnemora/testkit` の InMemory と
- * `@mnemora/postgres` が**どちらも断る**入力を、断らずに通していた口を縛る。`fake-read-and-claim-input-checks.test.ts` の続き。
- *
- * 断る入力（手元の Postgres・InMemory・Fake に同じ入力を流して測った。Fake だけが通していた）:
- * - 全口: `ctx.tenantId` の NUL・孤立サロゲート。
- * - `aggregateScope` の scope（日時・`decayFloorSeqAfter`・`subjectId`・`attributes`・`labels`）、`VectorStore.search` の `decayFloorAtAfter`・`decayFloorSeqAfter`。
- * - イベントを積む口: `actor`・`meta` の NUL・孤立サロゲート・BigInt、`digestSnapshot` の NUL、`sizeBeforeBytes` の int4 外。
- * - `reinforce` の `nowSeq`（`bigint`・非負）、`createMemory` の活動時計3欄・`extractorVersion`・`subjectId`・`decayFloorAt`・`lastReinforcedAt`・列挙3欄。
- * - `createObservation` の `subjectId`・`externalId` の孤立サロゲート。
- * - `archiveDecayed` の `now`・`nowSeq`、`createObservationWithOutbox`・`supersedeWithNewMemories`・`requeueEmbedJobs` の `now`、`claimedBy`・`jobKinds` の NUL。
- * - `updateStatus` 系・`setEmbeddingStatus`・`resolveContestedPair` の列挙値、`eraseTenant` の `limit`。
- *
- * **やりすぎの対照**も置く: `halfLifeHours` の範囲（この Fake は意図して見ない）、`updateStatus` の `"contested"`（同じく意図して見ない）、
- * 行を書かないときの `now`・`jobKinds`（Postgres は見ない）、`TenantSettingsStore.eraseTenant` の `limit`（Postgres は使わない）。
- */
-
 const ctx: Ctx = { tenantId: "tenant-1" };
 const space = { provider: "test", model: "fixture-model", dimensions: 3 };
 const bad = new Date("invalid");
@@ -501,7 +484,6 @@ describe("E8・E9・E11: archiveDecayed・outbox の行を書く口の now・cla
       /jobKinds must not contain NUL/,
     );
     expect(outboxStore.listJobs(ctx)).toHaveLength(0);
-    // 書いていないので、同じ externalId で新規に作れる
     const ok = await memoryStore.createObservationWithOutbox(ctx, input, ["extract"]);
     expect(ok.created).toBe(true);
   });

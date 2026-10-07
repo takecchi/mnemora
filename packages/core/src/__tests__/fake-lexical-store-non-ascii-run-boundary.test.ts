@@ -1,12 +1,5 @@
-// 非 ASCII の連なりの扱いの境目を、本物の PostgresLexicalStore（Postgres 17、UTF8 / C.UTF-8）に
-// 実測して揃えた値で縛る歯。期待値は、同じ内容を `PostgresLexicalStore.search` で引いて得た。
-//
-// - クエリ側（`mnemora_lexical_query_terms`）は、非 ASCII の連なりを「空白1つ」に落とす
-//   （空文字にして前後の語をつなげない）。`foo` + 田 + `bar` は `foo` と `bar` の2語になり、
-//   本文 `foo` に当たって coverage は 1/2。つなげた `foobar` は1語になって何にも当たらない。
-// - 「ASCII」は 0x00–0x7F まで（`[[:ascii:]]`）。Latin-1 の `ï`（U+00EF）は ASCII ではない。
-//   本文側 `naïve` は `na`・`ï`・`ve` に割れ、クエリ `ve` が当たる。クエリ側 `naïve` は
-//   `na` と `ve` の2語になり、本文 `na ve`（`ï` を挟まない）に当たる。
+// 期待値は、同じ内容を本物の `PostgresLexicalStore.search`（Postgres 17、UTF8 / C.UTF-8）で引いて得た値。
+// 「ASCII」は 0x00–0x7F（`[[:ascii:]]`）まで。Latin-1 の `ï`（U+00EF）は ASCII ではない。
 
 import { describe, expect, it } from "vitest";
 import type { Ctx } from "../ctx.js";

@@ -11,14 +11,17 @@ import type { ScoreBreakdown } from "../recall.js";
 
 type ScoredCandidate = Parameters<typeof compareScoredCandidates>[0];
 
-/**
- * 公開の純関数の TSDoc の約束を、実装が守っていなかった4か所の歯（4回目の TSDoc の棚卸しの C1〜C4）。
- */
-
 function candidate(id: string, recordedAt: Date, total = 1): ScoredCandidate {
   return {
     memory: { id, recordedAt, occurredAt: null, digest: "d" },
     score: { total },
+  } as unknown as ScoredCandidate;
+}
+
+function candidateAt(id: string, occurredAt: Date | null, recordedAt: Date): ScoredCandidate {
+  return {
+    memory: { id, recordedAt, occurredAt, digest: "d" },
+    score: { total: 1 },
   } as unknown as ScoredCandidate;
 }
 
@@ -51,6 +54,15 @@ describe("C2 computeAffinity: similarity が NaN なら無いものとして lex
     expect(computeAffinity({ total: 1, similarity: NaN } as ScoreBreakdown)).toBe(-Infinity);
   });
 
+  it("0 と負の値は測った値で、無いものとして扱わない（similarity 0・lexicalMatch 0・負の similarity）", () => {
+    expect(computeAffinity({ total: 1, similarity: 0 } as ScoreBreakdown)).toBe(0);
+    expect(computeAffinity({ total: 1, lexicalMatch: 0 } as ScoreBreakdown)).toBe(0);
+    expect(computeAffinity({ total: 1, similarity: NaN, lexicalMatch: 0 } as ScoreBreakdown)).toBe(
+      0,
+    );
+    expect(computeAffinity({ total: 1, similarity: -0.4 } as ScoreBreakdown)).toBe(-0.4);
+  });
+
   it("有限の similarity と lexicalMatch は、今までどおり大きいほう", () => {
     expect(
       computeAffinity({ total: 1, similarity: 0.7, lexicalMatch: 0.2 } as ScoreBreakdown),
@@ -71,6 +83,13 @@ describe("C3 countKindForUnits・unitAssemblyShortfall: 件数ではなく候補
 
   it("1件が二重に入り、別の1件が抜けている（件数だけは合う）と、'unknown' で、抜けた1件を数える", () => {
     const assembled = units([a], [a, b]);
+    expect(countKindForUnits(assembled, 3)).toBe("unknown");
+    expect(unitAssemblyShortfall(assembled, 3)).toBe(1);
+  });
+
+  it("同じ memory.id の別のオブジェクトが二重に入っても、1件として数える（オブジェクトの同一性では数えない）", () => {
+    const aAgain = candidate("a", new Date(0));
+    const assembled = units([a], [aAgain, b]);
     expect(countKindForUnits(assembled, 3)).toBe("unknown");
     expect(unitAssemblyShortfall(assembled, 3)).toBe(1);
   });
@@ -125,6 +144,29 @@ describe("C4 compareScoredCandidates: Invalid Date の時刻でも NaN を返さ
     const y = candidate("y", new Date(NaN));
     expect(compareScoredCandidates(x, y)).toBeLessThan(0);
     expect(compareScoredCandidates(y, x)).toBeGreaterThan(0);
+  });
+
+  it("実効時刻は occurredAt が先（recordedAt が古くても occurredAt が新しければ先）", () => {
+    const occurredLate = candidateAt("z", new Date(10), new Date(1));
+    const recordedMid = candidateAt("a", null, new Date(5));
+    expect(compareScoredCandidates(occurredLate, recordedMid)).toBeLessThan(0);
+    expect(compareScoredCandidates(recordedMid, occurredLate)).toBeGreaterThan(0);
+  });
+
+  it("occurredAt が Invalid Date なら実効時刻は Invalid Date で、recordedAt には倒れず、id で決まる", () => {
+    const invalidOccurred = candidateAt("a", new Date(NaN), new Date(1));
+    const validOccurred = candidateAt("b", new Date(5), new Date(9));
+    expect(compareScoredCandidates(invalidOccurred, validOccurred)).toBeLessThan(0);
+    expect(compareScoredCandidates(validOccurred, invalidOccurred)).toBeGreaterThan(0);
+  });
+
+  it("同じ id・同じ時刻（Invalid Date どうしでも）は 0（どちらが先とも言わない）", () => {
+    const x = candidate("x", new Date(2));
+    const sameAsX = candidate("x", new Date(2));
+    const invalid = candidate("y", new Date(NaN));
+    const sameAsInvalid = candidate("y", new Date(NaN));
+    expect(compareScoredCandidates(x, sameAsX)).toBe(0);
+    expect(compareScoredCandidates(invalid, sameAsInvalid)).toBe(0);
   });
 
   it("有効な時刻どうしは、今までどおり新しいほうが先（id より時刻が優先）", () => {

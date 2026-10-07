@@ -3,22 +3,7 @@ import type { Ctx } from "../ctx.js";
 import type { NewMemory } from "../memory.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * ADR 0563: `FakeMemoryStore.listActiveClaimPredicates` は、`subject` か `predicate` の片方しか無い claim key を持つ
- * Memory を数えない（`InMemoryMemoryStore` は `subject == null || predicate == null` を飛ばし、Postgres は
- * `claim_key_subject IS NOT NULL AND claim_key_predicate IS NOT NULL` で絞る）。
- *
- * 直す前は `claimKey` が在りさえすれば数え、`predicate` が無い行で並べ替えの `Buffer.from(undefined)` が `TypeError` を
- * 投げ、`subject` が無い行は `predicate` を数えに混ぜた。
- *
- * 対応する適合テスト: 「subject か predicate の片方しか無い claim key を持つ Memory は数えない（null を混ぜない）」
- * （`memory-store-conformance.ts`）。**適合テストの対象ではない**（Issue #768 コメント2）。
- *
- * ⚠ ADR 0630: 書き込みの口（`createMemory` など）は、片側だけ・空文字の claim key を拒むようになった。この歯が縛る
- * 「数えない」は、**それより前に書かれた行**（読み側に残りうる）の扱いである。だから片側だけの値は、正しい claim key で
- * 書いたあとに、Fake の内部の `backing` の行を書き換えて作る（`withClaimKey`）。書き込みの口が拒むことは
- * `fake-new-memory-rejects.test.ts`。
- */
+/** 片側だけの claim key は、正しい claim key で書いた後に Fake の内部の `backing` の行を書き換えて作る（`withClaimKey`）: 書き込みの口は片側だけ・空文字の claim key を拒むため。 */
 
 const ctx: Ctx = { tenantId: "tenant-1" };
 let n = 0;
@@ -52,7 +37,6 @@ type Store = ReturnType<typeof createFakeRuntimeStores>["memoryStore"];
 const list = (store: Store) =>
   store.listActiveClaimPredicates!(ctx, { subjectId: "user-1", limit: 10 });
 
-/** 正しい claim key で書いた行を、書いた後に、片側だけ・空文字などの値へ書き換える（ADR 0630 より前に書かれた行の再現）。 */
 async function withClaimKey(store: Store, claimKey: unknown): Promise<void> {
   const written = await store.createMemory(
     ctx,

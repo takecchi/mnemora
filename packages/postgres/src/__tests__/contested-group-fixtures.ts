@@ -2,12 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { Pool } from "pg";
 import type { MemoryId, NewMemoryEvent } from "@mnemora/core";
 
-/**
- * Issue #1449 PR1（ADR 0401）の歯が共有する部品。`markContested*` / `resolveContested*` の
- * 歯は、有効期間をマイクロ秒精度まで指定して `memories` へ直接行を入れたい
- * （`mark-contested-group-microsecond-boundary.postgres.test.ts` と同じ理由）ので、
- * 生の SQL で入れる。
- */
+/** 有効期間をマイクロ秒精度まで指定して `memories` へ直接行を入れたいので、生の SQL で入れる。 */
 
 export interface RawValidity {
   /** ISO 8601（マイクロ秒まで書ける）。null は無限。 */
@@ -53,7 +48,6 @@ const iso = (ms: number): string => new Date(ms).toISOString();
 
 export type Shape = "chain" | "star" | "complete";
 
-/** bench-1449 の `validityFor` と同じ作り方（Issue #1449 1-A）。 */
 export function validityFor(shape: Shape, i: number): RawValidity {
   if (shape === "complete") return { validFrom: null, validUntil: null };
   if (shape === "chain") {
@@ -82,7 +76,6 @@ export function rng(seed: number): () => number {
 export function randomValidity(next: () => number): RawValidity {
   const base = T0;
   const at = (k: number): string => {
-    // k マイクロ秒 = 秒に k/1e6。ISO は小数6桁まで。
     const secs = Math.floor(k / 1_000_000);
     const micros = k % 1_000_000;
     return `${new Date(base + secs * 1000).toISOString().replace(".000Z", "")}.${String(micros).padStart(6, "0")}Z`;

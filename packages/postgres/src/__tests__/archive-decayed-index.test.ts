@@ -8,51 +8,29 @@ import * as schema from "../schema.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
 /**
- * ADR 0114 の実測: `archiveDecayed` が対象を選ぶ `buildArchiveDecayedTargetSelect`
- * （`../memory-store.js`）が、**新しい索引を追加せずに**既存の `idx_memories_recall_gate`
- * （`(tenant_id, status, decay_floor_at)`、`WHERE status IN ('active', 'contested')`。
- * `migrations/0001_init.sql`）だけで適用可能であることを確かめる。
+ * `buildArchiveDecayedTargetSelect` が、新しい索引を追加せずに既存の `idx_memories_recall_gate` だけで適用可能であることを確かめる。
  *
- * `docs/memory-model.md` §10 はこの索引を「Phase 2 で `decay_floor_at` を読み取りに
- * 使い始めるとき、索引を作り直さずに済むように」3列目を先置きしたと明記している
- * （ADR 0011）。この掃引がまさにその Phase 2 的な読み取りの最初の使用者であり、
- * **索引の3列目が実際に効くことを確かめないと、その先置きが絵に描いた餅で終わる。**
+ * - 本体の関数の返り値をそのまま `EXPLAIN`/実行する。述語をテスト側に書き写さない。
+ * - 「選ばれること」ではなく「選べること」を測る。seq scan と bitmap scan をプランナから外し、
+ *   コスト比較という揺れる軸を外して、索引が述語に使えるかだけを見る。本番で実際に選ばれることは保証しない。
  *
- * `recall-gate-index.test.ts` が確立した作法をそのまま踏襲する:
- * - **本体の関数の返り値をそのまま `EXPLAIN`/実行する。**述語をテスト側に書き写さない
- *   （`memories-requeue-embed-index.test.ts` の `explainTargetSelect` と同じ理由）。
- * - **「選ばれること」ではなく「選べること」を測る。**seq scan と bitmap scan を
- *   プランナから外し、コスト比較という揺れる軸を外して、含意という揺れない軸だけを見る
- *   （`recall-gate-index.test.ts` 冒頭の doc コメント「🔑 プランナがこの索引を選んだ、と
- *   この索引がこの述語に使える、は別の主張である」を参照）。
- * - **本番でこの索引が実際に選ばれることは、この歯は保証しない。**それは
- *   `vector-search-provenance.test.ts` の歯Bのような、強制なしの不変条件が拾う話であり、
- *   ここではまだそういう歯を立てていない——**確かめていないこと**として PR 本文に書く。
- *
- * ⚠ **`buildArchiveDecayedTargetSelect` は drizzle の `SQL` フラグメントを返す。**
- * `SET LOCAL enable_seqscan = off` 等のプランナ強制は `pool` から取り出した特定の
- * `PoolClient` の上でしか効かない（`pool.query()` は呼ぶたびに違う接続を借りうる）。
- * `drizzle(pool, ...)` で作った `db`（`getTestClient()` が返すもの）も同様にプールから
- * 借りるだけなので、**強制した接続とクエリを発行する接続が一致する保証が無い。**
- * ⟹ ここでは `drizzle(client, { schema })` で「強制を掛けたその `PoolClient` 自身」に
- * 束ねた一時的な `Db` を作り、`target`（本体の関数の返り値）をその上で実行する。
+ * ⚠ `SET LOCAL enable_seqscan = off` 等のプランナ強制は `pool` から取り出した特定の `PoolClient` の上でしか効かない
+ * （`pool.query()` も `getTestClient()` の `db` も呼ぶたびに違う接続を借りうる）。
+ * そのため `drizzle(client, { schema })` で強制を掛けたその `PoolClient` 自身に束ねた一時的な `Db` を作り、
+ * `target` をその上で実行する。
  */
 
 const TENANT = "archive-decayed-index-tenant";
 
 /**
- * `memories-requeue-embed-index.test.ts` と同じ勘所——大量行・現実に近い分布でないと
- * プランナが「行数が少ないのでどうせ Seq Scan」を選び、含意の検査にならない。
+ * 大量行・現実に近い分布でないとプランナが「行数が少ないのでどうせ Seq Scan」を選び、含意の検査にならない。
  * `active` を大半にし、掃引の対象外になる status を少数混ぜる。
  */
 const ROW_COUNT = 20_000;
 
 /**
- * [ADR 0165](../../../docs/decisions/0165-decay-activity-clock.md) 決めたこと15
- * （Issue #305）: 活動時計側の `decay_base_seq`/`decay_floor_seq`/`half_life_recalls` も
- * 同じ seed で populate する——`clock: 'activity'` の掃引（下記 `describe` の後半）が
- * 同じデータを再利用できるようにするため。`decay_floor_seq` は `decay_floor_at` と
- * 同じ「半分は過去（沈んでいる）・半分は未来（沈んでいない）」の分布にしてある
+ * 活動時計側の `decay_base_seq`/`decay_floor_seq`/`half_life_recalls` も同じ seed で populate する。
+ * `decay_floor_seq` は `decay_floor_at` と同じく半分が沈み半分が沈まない分布
  * （`i` が偶数なら `i` 自身、奇数なら `NOW_SEQ` よりずっと大きい値）。
  */
 async function seedManyMemories(pool: Pool, tenant: string, rowCount: number): Promise<void> {
@@ -104,8 +82,7 @@ async function seedManyMemories(pool: Pool, tenant: string, rowCount: number): P
     `,
     [tenant, rowCount],
   );
-  // 統計情報が無いと、プランナが誤った行数見積もりで無関係な索引や Seq Scan を選ぶ
-  // （recall-gate-index.test.ts / memories-requeue-embed-index.test.ts と同じ勘所）。
+  // 統計情報が無いと、プランナが誤った行数見積もりで無関係な索引や Seq Scan を選ぶ。
   await pool.query("ANALYZE memories");
 }
 
@@ -119,19 +96,16 @@ const NOW = new Date();
 const OPTS = { now: NOW, limit: 50 };
 
 /**
- * ADR 0165 決めたこと15（Issue #305）: 活動時計軸の掃引オプション。`nowSeq = ROW_COUNT` が
- * `seedManyMemories` の `decay_floor_seq` 分布（偶数の `i` は `i` 自身＝`ROW_COUNT` 以下、
- * 奇数の `i` は `ROW_COUNT * 10 + i`＝はるかに大きい）の境界と一致する——偶数側だけが
- * `decay_floor_seq <= nowSeq` を満たす。
+ * `nowSeq = ROW_COUNT` は `seedManyMemories` の `decay_floor_seq` 分布の境界と一致する。
+ * 偶数側だけが `decay_floor_seq <= nowSeq` を満たす。
  */
 const OPTS_ACTIVITY = { now: NOW, nowSeq: ROW_COUNT, limit: 50, clock: "activity" as const };
 
 type Forcing = "none" | "btreeIndex" | "seqscan";
 
 /**
- * `recall-gate-index.test.ts` の `withForcing` と同じ形。**`release()` を `ROLLBACK` の
- * 外側に置く**——`ROLLBACK` が投げると `release()` に到達せず、その接続がプールへ
- * 戻らないまま失われる（同ファイルの注意点をそのまま踏襲する）。
+ * **`release()` を `ROLLBACK` の外側に置く**——`ROLLBACK` が投げると `release()` に到達せず、
+ * その接続がプールへ戻らないまま失われる。
  */
 async function withForcing<T>(
   pool: Pool,
@@ -220,14 +194,11 @@ describe("archiveDecayed の対象選択索引（ADR 0114）", () => {
 
     expect(new Set(viaBtree)).toEqual(new Set(viaSeqScan));
     expect(new Set(natural)).toEqual(new Set(viaSeqScan));
-    // ⚠ `FOR UPDATE SKIP LOCKED` + `LIMIT` のため、順序と件数はプラン非依存に
-    // `decay_floor_at` 昇順・上限 `OPTS.limit` で揃うはずだが、ここでは集合としての
-    // 一致（「同じ行を落としていない」）だけを見る——順序は下の別の歯（データの分岐）で見る。
+    // 集合としての一致（「同じ行を落としていない」）だけを見る。順序は下の別の歯で見る。
     expect(natural.length).toBeGreaterThan(0);
     expect(natural.length).toBeLessThanOrEqual(OPTS.limit);
 
-    // 索引の話とデータの話、両方を検査する（「索引はあるが述語を書き間違えて何も
-    // 拾えていない」を見逃さないため）。全件で status を確かめる。
+    // 索引の話とデータの話の両方を検査する（「索引はあるが述語を書き間違えて何も拾えていない」を見逃さないため）。
     const store = new PostgresMemoryStore(db);
     const idSet = new Set(natural);
     let sawActive = false;
@@ -240,15 +211,6 @@ describe("archiveDecayed の対象選択索引（ADR 0114）", () => {
     expect(sawActive).toBe(true);
   }, 60_000);
 
-  /**
-   * [ADR 0165](../../../docs/decisions/0165-decay-activity-clock.md) 決めたこと8・9・15
-   * （Issue #305）: `clock: 'activity'` の掃引が、新しく追加した索引
-   * `idx_memories_recall_gate_seq`（`(tenant_id, status, decay_floor_seq)`）を使えることを
-   * 確かめる。マイグレーションのコメント（`migrations/0015_decay_activity_clock.sql`）が
-   * 「掃引のための索引を別に作らない——壁時計側もそうしている」と書いているとおり、
-   * ゲート用に足したこの索引を掃引側も再利用する。`recall-gate-index.test.ts` /
-   * 上の壁時計版と同じ形（選ばれることではなく選べることを測る）。
-   */
   it("適用可能性（活動時計）: btree 経路だけに絞ると、clock: 'activity' の対象選択が idx_memories_recall_gate_seq を引ける", async () => {
     const { pool } = await getTestClient();
     await seedManyMemories(pool, TENANT, ROW_COUNT);

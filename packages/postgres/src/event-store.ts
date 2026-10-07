@@ -25,28 +25,23 @@ function memoryNotFound(id: string): Error {
 }
 
 /**
- * `EventStore` の Postgres 実装（docs/architecture.md §5.8、docs/memory-model.md §9）。
- *
- * **`update` / `delete` に相当するメソッドを一切持たない。** append-only は型だけでなく
- * 実装としても徹底する。
+ * `EventStore` の Postgres 実装。`update` / `delete` に相当するメソッドを一切持たない（append-only）。
  */
 export class PostgresEventStore implements EventStore {
   constructor(private readonly db: Db) {}
 
   /**
-   * ADR 0436 決定1・2・3: `event.memoryId` が非 null のとき、その記憶が `ctx.tenantId` の記憶であることを
-   * **書く前に**確かめる。実在しない・別のテナントの記憶・uuid の形でない id は、行を書かずに
+   * `event.memoryId` が非 null のとき、その記憶が `ctx.tenantId` の記憶であることを**書く前に**確かめる
+   * （ADR 0436）。実在しない・別のテナントの記憶・uuid の形でない id は、行を書かずに
    * `PostgresEventStore: memory not found for tenant: <id>` を含む `Error` を投げる（区別しない）。
-   * 確かめと書き込みは1つの SQL 文（検査の EXISTS と、`WHERE ok` で絞った INSERT の CTE）——間に別の文が挟まらない。
    * `memoryId` が null のイベント（`events_purged`）は記憶を指さないので検査しない。
    */
   async append(ctx: Ctx, event: NewMemoryEvent): Promise<MemoryEvent> {
     assertWellFormedCtx(ctx);
-    // ADR 0499: NUL は DB の生の例外でなく、名指しの例外で断る（INSERT の前。memoryId の形の検査より後ろ——
-    // 形の壊れた memoryId は、今までどおり「memory not found」が先）。
+    // 形の壊れた memoryId は NUL の検査より先に「memory not found」で断る。
     if (event.memoryId === null) {
       assertNoNulInNewMemoryEvent("PostgresEventStore", event);
-      // ADR 0505: 例外の message（`cause` の連鎖を含む）から、SQL に付けた値（params。meta・digestSnapshot）を落とす。
+      // 例外の message（`cause` の連鎖を含む）から、SQL に付けた値（params）を落とす（ADR 0505）。
       const result = await omittingParams(() =>
         this.db.execute(sql`
         INSERT INTO memory_events (id, tenant_id, memory_id, kind, at, actor, digest_snapshot, size_before_bytes, meta)
@@ -71,7 +66,7 @@ export class PostgresEventStore implements EventStore {
       throw memoryNotFound(memoryId);
     }
     assertNoNulInNewMemoryEvent("PostgresEventStore", event);
-    // 検査で落ちたかは、戻り値の `tenant_check_ok`（検査の結果そのもの）で見る（ADR 0398 決定2 と同じ作法）。
+    // 検査で落ちたかは、戻り値の `tenant_check_ok`（検査の結果そのもの）で見る。
     const result = await omittingParams(() =>
       this.db.execute(sql`
       WITH mem AS (
@@ -110,8 +105,7 @@ export class PostgresEventStore implements EventStore {
 
   async get(ctx: Ctx, id: EventId): Promise<MemoryEvent | null> {
     assertWellFormedCtx(ctx);
-    // id 列は uuid 型。この口の契約は「無い == null」なので、形式が壊れた入力も
-    // クエリを投げる前に同じ null へ寄せる（mapping.ts の isUuidLike の doc参照）。
+    // 形式が壊れた id は、クエリを投げる前に「無い」と同じ null へ寄せる。
     if (!isUuidLike(id)) {
       return null;
     }
@@ -125,10 +119,7 @@ export class PostgresEventStore implements EventStore {
 
   async list(ctx: Ctx, filter: EventFilter): Promise<MemoryEvent[]> {
     assertWellFormedCtx(ctx);
-    // memory_id 列は uuid 型。この口の契約は「無い == []」なので、形式が壊れた
-    // memoryId もクエリを投げる前に空配列へ寄せる（他のフィルタの値に関わらず、
-    // memory_id の等値条件が絶対に一致しえない以上、結果は必ず空になるため）
-    // （mapping.ts の isUuidLike の doc参照）。
+    // 形式が壊れた memoryId は、他のフィルタに関わらず結果が必ず空なので、クエリを投げる前に空配列へ寄せる。
     if (filter.memoryId !== undefined && !isUuidLike(filter.memoryId)) {
       return [];
     }

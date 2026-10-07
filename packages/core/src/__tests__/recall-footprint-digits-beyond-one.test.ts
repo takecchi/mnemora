@@ -1,11 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { estimateRecallFootprint } from "../recall-footprint.js";
 
-/**
- * ADR 0470: `extraDigitsBeyondOne`（非公開）は、件数を10進で書いたときに1桁より何桁増えるかを数える。
- * `n >= 1e21` で `String(n)` が指数表記（`"1e+21"`）になっても、10進の桁数を数える。
- * `estimateRecallFootprint` の `chars` の桁の項（`totalInScope` ×2 と帯の `eligible` ×1）を通して縛る。
- */
+/** `n >= 1e21` で `String(n)` が指数表記になっても、10進の桁数を数えることを縛る（`extraDigitsBeyondOne` は非公開なので `chars` の桁の項を通す）。 */
 const chars = (memoryCountInScope: number) => estimateRecallFootprint({ memoryCountInScope }).chars;
 
 /** 桁が1つ増えると、`totalInScope`（2回）と `eligible`（1回）で 3 字増える。 */

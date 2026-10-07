@@ -3,23 +3,7 @@ import type { Ctx } from "../ctx.js";
 import type { NewMemory } from "../memory.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * `FakeMemoryStore.aggregateScope` の `scope.includeSubjectless`（Issue #608 項目③(b)、
- * [ADR 0286](../../../docs/decisions/0286-recall-include-subjectless.md)）が、
- * `InMemoryMemoryStore.aggregateScope`/`PostgresMemoryStore.aggregateScope` と同じ
- * 意味論——`includeSubjectless: true` のときだけ `subjectId === null`（主題なし）も
- * scope 内に含める——を実際に守っていることを検査する歯。
- *
- * **`packages/testkit` の `memory-store-conformance.ts` の対象ではない。**
- * `FakeMemoryStore` は `packages/core` 自身の runtime テスト専用の別系統
- * （`fake-reinforce-monotonicity.test.ts` と同じ理由・同じ形）。
- *
- * Issue #768: 調査時、この Fake を `describeMemoryStoreConformance` へ一時的に通して
- * 見つけた食い違い（`aggregateScope` が `scope.subjectId` の等値絞りしか見ておらず、
- * `includeSubjectless` を一切読んでいなかった）を、`runtime-fakes.ts` の
- * `aggregateScope` に足した `subjectMatches` の分岐で塞いだ。その塞ぎが実際に効いて
- * いることを、`memory-store-conformance.ts` の対応する歯と同じ形でここに固定する。
- */
+/** `memory-store-conformance.ts` には足さない: `FakeMemoryStore` は core の runtime テスト専用の別系統のため。 */
 
 const ctx: Ctx = { tenantId: "tenant-1" };
 let contentHashCounter = 0;

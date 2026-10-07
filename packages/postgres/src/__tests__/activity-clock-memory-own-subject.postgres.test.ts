@@ -19,17 +19,7 @@ import {
   TEST_EMBEDDING_SPACE,
 } from "./test-db.js";
 
-/**
- * [ADR 0394](../../../../docs/decisions/0394-activity-clock-writes-use-memorys-own-subject.md)
- * （ADR 0353 の負債1の解消）を、本物の Postgres の列（`decay_base_seq`/`decay_floor_seq`）で確かめる。
- *
- * 書く側の活動時計の「いま」は、対象の Memory 自身の subject の `T + S_x`（読む側の段1 SQL・
- * `archiveDecayed` が行ごとに足す式と同じ）でなければならない。`ctx` と Memory の subject が
- * ずれる形（tick のように subjectId の無い ctx／ctx=alice で bob の記憶／ctx=alice で主題なしの記憶）で、
- * 作成（抽出）と強化（使用報告・`restoreArchived`）の両方を確かめる。
- *
- * 数値は T=10・S_alice=7・S_bob=20（有効ないま: alice=17, bob=30, 主題なし=10）。
- */
+/** 数値は T=10・S_alice=7・S_bob=20（有効ないま: alice=17, bob=30, 主題なし=10）。ctx と Memory の subject がずれる形で確かめる。 */
 
 const TENANT = "own-subject-tenant";
 const tenantCtx: Ctx = { tenantId: TENANT };
@@ -85,9 +75,8 @@ async function setup(llmProvider: LLMProvider) {
       embed: async (_ctx, texts) => texts.map(() => [1, 0, 0]),
     },
     hashContent: (content: string) => `sha256(${content})`,
-    // runtime の時計を少し先にする。歴史的な理由で残している（今は outbox の available_at も注入した時計に従う。ADR 0559）。
     clock: { now: () => new Date(Date.now() + 1_000) },
-    // 問15: LLM が返す subjectId（記憶自身の subject）の活動時計を縛るので、opt-in で受ける。
+    // LLM が返す subjectId（記憶自身の subject）の活動時計を縛るので、opt-in で受ける。
     config: { acceptLlmSubjectIdWithoutCandidates: true },
   });
   await tenantSettingsStore.setDecayClock(tenantCtx, "activity");
@@ -187,7 +176,6 @@ describe("ADR 0394: 書く側の活動時計の「いま」は、記憶自身の
     }
     expect(seen.get("bob")).toBe(NOW_BOB);
     expect(seen.get(null)).toBe(NOW_NONE);
-    // 制御: ctx と subject が一致する候補。
     expect(seen.get("alice")).toBe(NOW_ALICE);
   });
 

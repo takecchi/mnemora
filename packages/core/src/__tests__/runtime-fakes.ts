@@ -1,5 +1,6 @@
 import type { ClaimKey } from "../claim-key.js";
 import type { Ctx } from "../ctx.js";
+import { sliceAtGraphemeBoundary } from "../text-truncation.js";
 import type { EmbeddingProvider } from "../interfaces/embedding-provider.js";
 import type { EventStore } from "../interfaces/event-store.js";
 import type { Relation, RelationKind, RelationStore } from "../interfaces/relation-store.js";
@@ -3643,9 +3644,8 @@ export class FakeOutboxStore implements OutboxStore {
     if (job.attempts !== expectedAttempts) {
       throw new OutboxLeaseConflictError(jobId, expectedAttempts, job.attempts);
     }
-    // Issue #826: 相手側の終端（fail）が既に付いていれば、先に付いた終端を勝たせる
-    // ——行を変えず、例外も投げない。
-    if ((job.failedAt ?? null) !== null) {
+    // 相手側の終端だけでなく自分と同じ終端が付いていても書かない: 2回目の `at` で上書きすると、先勝ち（ADR 0440）から外れる。
+    if ((job.completedAt ?? null) !== null || (job.failedAt ?? null) !== null) {
       return;
     }
     // Issue #1237: 実装（`InMemoryOutboxStore`・`PostgresOutboxStore`）と同じく、`opts.at` を渡せばそれを使う。
@@ -3671,9 +3671,8 @@ export class FakeOutboxStore implements OutboxStore {
     if (job.attempts !== expectedAttempts) {
       throw new OutboxLeaseConflictError(jobId, expectedAttempts, job.attempts);
     }
-    // Issue #826: 相手側の終端（complete）が既に付いていれば、先に付いた終端を勝たせる
-    // ——行を変えず、例外も投げない。
-    if ((job.completedAt ?? null) !== null) {
+    // 相手側の終端だけでなく自分と同じ終端が付いていても書かない: 2回目の `at`・`error` で上書きすると、先勝ち（ADR 0440）から外れる。
+    if ((job.completedAt ?? null) !== null || (job.failedAt ?? null) !== null) {
       return;
     }
     job.failedAt = fakeCopyDate(opts?.at) ?? new Date(); // ADR 0562: 呼び手の Date を行に入れない
@@ -4298,14 +4297,14 @@ export const LEXICAL_QUERY_MAX_WORD_CHARS = 64;
 export const LEXICAL_QUERY_MAX_TOTAL_CHARS = 600;
 
 /**
- * `query` が {@link LEXICAL_QUERY_MAX_TOTAL_CHARS} を超える場合、先頭からその文字数に
- * 切り詰める。超えなければ `query` をそのまま返す。他のどの上限（語数・1語の文字数）
+ * `query` が {@link LEXICAL_QUERY_MAX_TOTAL_CHARS} を超える場合、先頭からその文字数以下に、
+ * 書記素を割らずに切り詰める。超えなければ `query` をそのまま返す。他のどの上限（語数・1語の文字数）
  * よりも先に適用する（`packages/postgres` の `capLexicalQueryTotalChars` と同じ
  * 位置づけ）。
  */
 function capFakeLexicalQueryTotalChars(query: string): string {
   return query.length > LEXICAL_QUERY_MAX_TOTAL_CHARS
-    ? query.slice(0, LEXICAL_QUERY_MAX_TOTAL_CHARS)
+    ? sliceAtGraphemeBoundary(query, LEXICAL_QUERY_MAX_TOTAL_CHARS)
     : query;
 }
 

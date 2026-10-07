@@ -5,14 +5,6 @@ import type { Ctx } from "@mnemora/core";
 import { PostgresMemoryStore } from "../memory-store.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
-/**
- * ADR 0432 AL-4 の確かめ直し（Issue #1734、PR #1538）で足した歯。`archiveDecayed` の `reachedLimit` は
- * 「`limit` が正で、掃いた件数がちょうど `limit`」のときだけ true。`limit` に届かなかったとき（対象が
- * `limit` より少ない）は false——「もう残っていない」の意味。`archive-decayed-limit-zero` は
- * `limit: 0` と `limit: 1`（1件で届く）だけを見ていたので、「掃いた件数が1件でもあれば true」や
- * 「`limit - 1` 件で true」に変えても赤にならなかった。Postgres と testkit の InMemory の両方を見る。
- */
-
 const ctx: Ctx = { tenantId: "archive-decayed-reached-limit-under-limit" };
 const now = new Date("2026-06-01T00:00:00.000Z");
 

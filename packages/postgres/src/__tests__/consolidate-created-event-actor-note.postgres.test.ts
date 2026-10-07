@@ -30,15 +30,7 @@ import {
   TEST_EMBEDDING_SPACE,
 } from "./test-db.js";
 
-/**
- * `runtime.consolidate` に渡した `actor` と `reason`（`meta.note`）は、統合先の `created` にも、
- * 統合元の `superseded` にも入る。省略したときの actor は `{ type: "system" }` で、`note` は付かない。
- *
- * 統合先の `created` を積む場所は3つある（store が同じトランザクションで積む経路・store が名乗らない
- * ときの別の append・口を持たない store の2段の経路）。core の Fake を通る歯は、この3つのうち
- * 2段の経路しか通らない（Fake は `createdEventsWritten` を名乗らない）。ここでは実 Postgres と
- * testkit の InMemory を、口あり・口なしの両方で通す。
- */
+/** 統合先の `created` を積む場所は3つある。core の Fake を通る歯は2段の経路しか通らないので、ここでは実 Postgres と InMemory を、口あり・口なしの両方で通す。 */
 
 interface Kit {
   runtime: Runtime;

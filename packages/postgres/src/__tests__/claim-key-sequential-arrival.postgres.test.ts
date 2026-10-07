@@ -13,19 +13,6 @@ import {
   TEST_EMBEDDING_SPACE,
 } from "./test-db.js";
 
-/**
- * claim key の自動 contested 検出（ADR 0324）で、同じ鍵の主張が1件ずつ届く経路の振る舞いを、
- * `@mnemora/postgres` で縛る（Issue #933。core の Fake での同じ歯は
- * `packages/core/src/__tests__/claim-key-sequential-arrival.test.ts`——直った理由・
- * 分岐の詳細はそちらの doc コメントを見ること。ここでは重複しない）。
- *
- * **ADR 0378（Issue #933 案2）で直った後**: `PostgresMemoryStore.findContestedByClaimKey`
- * を実装しているので、3件目・4件目は `findActiveByClaimKey`（`active`）+
- * `findContestedByClaimKey`（`contested`）を合わせた一致で `unresolved_conflict` になり、
- * `memory_events` に `claim_key_conflict_unresolved` の evidence が積まれる。1件目・2件目の
- * 対（`contested`/`contestedWithId`）は、3件目・4件目が届いても壊れない。
- */
-
 const ctx: Ctx = { tenantId: "claim-key-sequential-933" };
 const CLAIMS = [
   "好きな食べ物はラーメン",
@@ -95,18 +82,15 @@ describe("claim key の検出: 同じ鍵の主張が1件ずつ届く経路（Iss
       [[2, "unresolved_conflict"]],
       [[3, "unresolved_conflict"]],
     ]);
-    // 3件目・4件目は、observe した直後もどちらも active（誰とも対にならない）。
     expect(statusAfterEach).toEqual(["active", "contested", "active", "active"]);
 
     const memories = await Promise.all(ids.map((id) => memoryStore.get(ctx, id)));
     expect(memories.map((m) => m?.status)).toEqual(["contested", "contested", "active", "active"]);
-    // 1件目・2件目の対は、3件目・4件目が届いても壊れない。
     expect(memories[0]?.contestedWithId).toBe(ids[1]);
     expect(memories[1]?.contestedWithId).toBe(ids[0]);
     expect(memories[2]?.contestedWithId ?? null).toBeNull();
     expect(memories[3]?.contestedWithId ?? null).toBeNull();
 
-    // 決定6の evidence（直る前は一度も積まれなかった）は、3件目・4件目に積まれる。
     const unresolvedEventsFor = async (id: (typeof ids)[number]) => {
       const events = await eventStore.list(ctx, { memoryId: id });
       return events.filter(
