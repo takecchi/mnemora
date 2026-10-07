@@ -29,44 +29,16 @@ import {
 } from "./association-answer-correctness-measure-lib.js";
 
 /**
- * ADR 0337 追記2026-09-26「回答の正誤」の道具本体。
+ * 連想枠の off/on10 で回答の正誤が変わるかを測る道具本体。
  *
- * 依頼元: クローン miku（オーナーではない）。目的:
- * 連想枠（`RecallQuery.association`）の off（null）/on（`DEFAULT_RECALL_ASSOCIATION`=
- * `{maxCount:10}`）で、`answer-time-weighting` ベンチの**回答の正誤**が変わるかを、
- * 実 API（gpt-4o-mini）で最小限だけ測る。
- *
- * **段1（実 API ゼロ）**: `MNEMORA_LLM=deterministic` / `MNEMORA_EMBEDDING=recorded`
- * （既存カセット `answer-time-weighting.order-legend.json` を再生）で、dev+eval+
- * eval-undated 全16ケース×2方針=32組の回答プロンプトを off/on10 で比べ、変わる組を
- * 確定する。**参考として `MNEMORA_EMBEDDING=local`（実推論、カセット非依存）でも
- * 同じ32組を測り、recorded の結果と違えば両方 JSON に残す**（マネージャー指示）。
- *
- * **段2（実 API、変わった組だけ）**: `MNEMORA_LLM=openai`（`gpt-4o-mini`）/
- * `MNEMORA_EMBEDDING=recorded`（埋め込みは実 API を1回も呼ばない——連想枠は
- * `VectorStore.getVectors`/`search` しか呼ばないため、embed() の入力集合は
- * off/on で変わらず、既存カセットで足りる。ADR 0337 本文の実測を根拠に流用）。
- * 変わった組を対に、off→on の順で trial ごとに交互に回す。呼び出し回数は
- * `handle.llmProvider`（`CountingLLMProvider`、`answer-bench.ts`）の実測値で数え、
- * `HARD_CALL_LIMIT` に達する前に必ず止める（呼ぶ前にチェックする——超えてから
- * 気づく形にしない）。
- *
- * ⛔ **新しいカセットは記録しない**——ここで得る gpt-4o-mini の応答は使い捨ての実測
- * であり、再生用の記録として残す意図が無い（既存カセットは1バイトも書き換えない）。
- *
- * 実行: `DATABASE_URL=... OPENAI_API_KEY=... tsx
- * examples/chat/src/bench/association-answer-correctness-measure.ts`
+ * 段2の埋め込みは `recorded` を流用し、実 API を呼ばない。連想枠は `VectorStore.getVectors`/`search` しか呼ばず、
+ * `embed()` の入力集合が off/on で変わらないため、既存カセットで足りる。
+ * 新しいカセットは記録しない。ここで得る応答は使い捨ての実測で、既存カセットは書き換えない。
+ * 呼び出し回数は `HARD_CALL_LIMIT` に達する前に、呼ぶ前のチェックで止める。
  */
 
-// ---------------------------------------------------------------------------
-// 定数
-// ---------------------------------------------------------------------------
-
-/** 実 API 呼び出しの絶対上限（マネージャー指示）。 */
 const HARD_CALL_LIMIT = 200;
-/** 段2の「対にした呼び出し」に使ってよい予算（`HARD_CALL_LIMIT` から安全マージンを引いた値）。 */
 const PAIRED_CALL_BUDGET = 190;
-/** 1組あたりの試行回数の上限（マネージャー指示）。 */
 const TRIAL_CAP = 5;
 
 const OFF = null;
@@ -76,10 +48,6 @@ const OUTPUT_DIR = join(
   new URL("../../bench-results/association-answer-correctness-2026-09-26/", import.meta.url)
     .pathname,
 );
-
-// ---------------------------------------------------------------------------
-// 段1: off/on10 でプロンプトが変わる組を数える(実 API ゼロ)
-// ---------------------------------------------------------------------------
 
 interface PairDiffDetail {
   caseId: string;
@@ -158,10 +126,6 @@ async function detectChangedPairs(
     await handle.close();
   }
 }
-
-// ---------------------------------------------------------------------------
-// 段2: 実 API で変わった組だけを対に回す
-// ---------------------------------------------------------------------------
 
 interface TrialSideResult {
   verdict: AnswerVerdict;
@@ -273,10 +237,6 @@ async function runRealApiPhase(
   }
 }
 
-// ---------------------------------------------------------------------------
-// main
-// ---------------------------------------------------------------------------
-
 function sha256OfFile(path: string): string {
   return createHash("sha256").update(readFileSync(path)).digest("hex");
 }
@@ -345,9 +305,6 @@ async function main(): Promise<void> {
     realApiResult = await runRealApiPhase(databaseUrl, cassette, changedPairs, n);
   }
 
-  // -------------------------------------------------------------------------
-  // 集計
-  // -------------------------------------------------------------------------
   const outcomes: PairedTrialOutcome[] = realApiResult.trials.map((t) => ({
     pair: t.pair,
     trial: t.trial,
@@ -379,15 +336,11 @@ async function main(): Promise<void> {
     );
   }
 
-  // -------------------------------------------------------------------------
-  // 書き出し
-  // -------------------------------------------------------------------------
   mkdirSync(OUTPUT_DIR, { recursive: true });
   const json = {
     measuredAt,
     commit,
-    // 実行した器の絶対パスをそのまま書き出さない（担い手の作業ディレクトリに依存する
-    // 値を repo に焼き込まない）——`examples/chat/cassettes/` 配下の相対パスだけ残す。
+    // 実行した器の絶対パスをそのまま書き出さない。作業ディレクトリに依存する値を repo に焼き込まないため、`examples/chat/cassettes/` 配下の相対パスだけ残す。
     cassette: {
       path: join("examples", "chat", "cassettes", basename(cassettePath)),
       sha256: cassetteSha256,
