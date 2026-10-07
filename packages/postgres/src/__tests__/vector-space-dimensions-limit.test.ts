@@ -7,31 +7,28 @@ import { requireDatabaseUrl } from "./test-db.js";
 import { dropTempDatabase } from "./temp-database.js";
 
 /**
- * `registerEmbeddingSpace` の dimensions 上限検査（Issue #776 / ADR 0018 C-2）。
+ * `registerEmbeddingSpace` の dimensions 上限検査。
  *
- * ADR 0018 C-2 が実測して記録した不具合をここで固定する——`dimensions > 2000` の
- * `EmbeddingSpaceId` を渡すと、`CREATE TABLE IF NOT EXISTS` は成功するが続く
+ * `dimensions > 2000` の `EmbeddingSpaceId` を渡すと、`CREATE TABLE IF NOT EXISTS` は成功するが続く
  * `CREATE INDEX ... USING hnsw` が pgvector の `54000`
  * （"column cannot have more than 2000 dimensions for hnsw index"）で失敗し、
- * **テーブルだけが残る**（ADR 0018 は「ここでは直さない」と明記して記録に留めていた）。
+ * **テーブルだけが残る**。そうならないよう、テーブルを作る前に拒否する。
  *
  * ここで固定する3点:
- * - `dimensions=2000` は通る（テーブル・索引の両方が作られる。ADR 0018 の実測どおり、
- *   2000 は pgvector hnsw の有効な境界）。
+ * - `dimensions=2000` は通る（テーブル・索引の両方が作られる。2000 は pgvector hnsw の有効な境界）。
  * - `dimensions=2001` は拒否され、テーブルが1つも残らない（`to_regclass` で不在を確認）。
  * - 拒否時のエラーはロック取得より前の入力検証と同じ流儀（"invalid embedding
- *   space dimensions" を含むメッセージ）で投げられる。型は `RangeError`（ADR 0525）。
+ *   space dimensions" を含むメッセージ）で投げられる。型は `RangeError`。
  *
  * `runMigrations` を先に通してから使い捨ての DB へ対して実行する構造は
  * `vector-space-concurrency.test.ts` と同じ（`registerEmbeddingSpace` の FK 先である
  * `memories` テーブルを用意するため）。
  */
 
-// it ごとに別のデータベースを使う（`vector-space-concurrency.test.ts` と同じ構造）。
-// 以前は2本が同じ名前を使い回しており、2本目の冒頭の `dropTempDatabase` が、1本目の
-// Pool が開いたままのデータベースを落とそうとしていた——`temp-database.ts` の前提
-// （呼ぶ前に自分の pool を閉じている）を破り、drain 待ちが pg の Pool のアイドル切断
-// （既定 10 秒）と drain の上限（10 秒）の競争になって間欠的に赤になった（Issue #975）。
+// it ごとに別のデータベースを使う。同じ名前を使い回すと、2本目の冒頭の `dropTempDatabase` が、1本目の
+// Pool が開いたままのデータベースを落とそうとして `temp-database.ts` の前提（呼ぶ前に自分の pool を
+// 閉じている）を破り、drain 待ちが pg の Pool のアイドル切断（既定 10 秒）と drain の上限（10 秒）の
+// 競争になって間欠的に赤くなる。
 const DB_AT_LIMIT = "mnemora_vs_dims_limit_at_2000";
 const DB_OVER_LIMIT = "mnemora_vs_dims_limit_over_2001";
 
@@ -105,7 +102,7 @@ describe("registerEmbeddingSpace の dimensions 上限検査（pgvector hnsw、A
     await expect(registerEmbeddingSpace(pool, SPACE_OVER_LIMIT)).rejects.toThrow(
       /invalid embedding space dimensions: 2001/,
     );
-    // ADR 0525: 範囲の誤りなので RangeError（型は DB の要らない vector-space-dimensions-error-types.test.ts が固定）
+    // 範囲の誤りなので RangeError（型は DB の要らない vector-space-dimensions-error-types.test.ts が固定）
     await expect(registerEmbeddingSpace(pool, SPACE_OVER_LIMIT)).rejects.toThrow(RangeError);
 
     expect(await regclassExists(pool, table)).toBe(false);

@@ -304,7 +304,7 @@ describe.skipIf(!bothRefsAvailable)(
       expect(diff.requiredMemberAdded).toHaveLength(3);
     });
 
-    it("同じ2点間で、無関係な破壊的変更まで過剰検出していない（この2点間の実際の差分は3件だけ——本文冒頭のコメント参照）", () => {
+    it("同じ2点間で、無関係な破壊的変更まで過剰検出していない（この2点間の実際の差分は3件だけ）", () => {
       const baseModel = buildPackageModel(readAtRef(BASE_REF), `${BASE_REF}:testkit.d.ts`);
       const headModel = buildPackageModel(readAtRef(HEAD_REF), `${HEAD_REF}:testkit.d.ts`);
       const diff = diffPackageModels(baseModel, headModel);

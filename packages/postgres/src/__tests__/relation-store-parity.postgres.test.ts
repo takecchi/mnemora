@@ -51,7 +51,6 @@ describe.each(kits)("RelationStore の入力と冪等（ADR 0488）: %s", (_name
     await rs.link(ctx, "contradicts", a, b);
     await rs.link(ctx, "contradicts", a, a);
     expect((await rs.listRelated(ctx, a)).map((r) => r.memoryId).sort()).toEqual([a, b].sort());
-    // 向きは片方だけ（b から a は張っていない）。
     expect(await rs.listRelated(ctx, b)).toEqual([]);
     await rs.unlink(ctx, "contradicts", a, b);
     await rs.unlink(ctx, "contradicts", a, b);

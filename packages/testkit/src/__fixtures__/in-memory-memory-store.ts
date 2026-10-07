@@ -1153,7 +1153,6 @@ export class InMemoryMemoryStore implements MemoryStore {
       assertStorableNewMemory(replaced);
     }
     for (const [i, target] of supersede.entries()) {
-      assertStorableMemoryEvent(target.event, { skipAtFloor: true });
       const memory = this.memories.get(target.id);
       if (!memory || memory.tenantId !== ctx.tenantId) {
         throw new Error(
@@ -1178,8 +1177,10 @@ export class InMemoryMemoryStore implements MemoryStore {
         wouldConflict.push({ id: target.id, observedStatus: status });
         continue;
       }
+      // イベントの検査（`kind`・`at`・NUL・BigInt・`sizeBeforeBytes`）は CAS を通る対象だけに掛ける。弾かれる対象は
+      // イベントを書かず、Postgres も見ないので、全対象を先に検査すると投げる入力が増える。
+      assertStorableMemoryEvent(target.event);
       assertCloneableMemoryEvent(target.event);
-      assertWrittenTimestamptzFloor("memory_events", "at", target.event.at);
       this.assertEventTargetOwn(ctx, target.event.memoryId, [target.id]);
       willSupersede.add(target.id);
     }

@@ -23,13 +23,11 @@ import {
 } from "./test-db.js";
 
 /**
- * `getRecall` が読み戻す `query` の、JSON で往復しない値の今の振る舞いを縛る（Issue #1206。
- * `RecallRecord.query` の doc の 2026-09-27 追記）。振る舞いは変えていない。
+ * `getRecall` が読み戻す `query` の、JSON で往復しない値の今の振る舞いを縛る。振る舞いは変えていない。
  *
- * `recall()` は検証した後のクエリをそのまま記録する。`RecallQuerySchema` が `Date` にする3欄
- * （`occurredAfter`・`occurredBefore`・`validAt`）は、`@mnemora/postgres` では ISO 文字列で、
- * testkit の fixture では `Date` のまま読み戻る。`vector` の `-0` は Postgres だけ `0` になる。
- * `budget` はどちらも返り値と同じ（`omitted` などの残りの欄は `recall-explain-accounting.postgres.test.ts`）。
+ * `recall()` は検証した後のクエリをそのまま記録する。`RecallQuerySchema` が `Date` にする3欄（`occurredAfter`・`occurredBefore`・`validAt`）は、
+ * `@mnemora/postgres` では ISO 文字列で、testkit の fixture では `Date` のまま読み戻る。`vector` の `-0` は Postgres だけ `0` になる。
+ * `budget` はどちらも返り値と同じ。
  */
 
 const NOW = new Date("2026-09-27T00:00:00.000Z");

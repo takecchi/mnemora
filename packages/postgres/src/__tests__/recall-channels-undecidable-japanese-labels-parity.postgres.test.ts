@@ -38,19 +38,14 @@ import {
 } from "./test-db.js";
 
 /**
- * ADR 0508: `recall` の `channels` の合流のうち、ADR 0484 の歯（`recall-channel-merge.postgres.test.ts`）が
- * 縛っていなかった3つの組を、**testkit の InMemory（Fake）と実 Postgres（tsvector・trigram）の3実装に同じ
- * 記憶・同じ問いを当てて**突き合わせる。
- *
- * 1. `ann_truncated`: 語彙チャンネルが走り ANN の窓が埋まった run は `certainty: "undecidable"`
- *    （`ANN_TRUNCATION_UNDECIDABLE_LEXICAL_ACTIVE`）。窓が埋まっていなければ出ない。語彙チャンネルを使わない
- *    ANN だけの run は、undecidable にならない（やりすぎ側）。
- * 2. 日本語の語彙: 語彙だけが当てる記憶に日本語の文面を使う。tsvector は日本語を引けない（ADR 0084 §3.2）、
- *    trigram は引ける。**Fake がどちらに合わせているか**を実測で見る。
- * 3. `labels` と channels: 語彙チャンネルだけが当てる記憶も `labels` の絞りを破らない。
- *
+ * 3実装（testkit の InMemory〔Fake〕、実 Postgres の tsvector・trigram）に同じ記憶・同じ問いを当てて突き合わせる。
  * 比べるのは、記憶を内容（content）で名指した順序つきの `retrievedVia`・`omitted` の kind と certainty。
- * 数値（score）は store ごとに尺度が違う（`lexicalMatch`、ADR 0092・0319）ので比べない。
+ * 数値（score）は store ごとに尺度が違う（`lexicalMatch`）ので比べない。
+ *
+ * 1. `ann_truncated`: 語彙チャンネルが走り ANN の窓が埋まった run は `certainty: "undecidable"`。
+ *    語彙チャンネルを使わない ANN だけの run は、undecidable にならない（やりすぎ側）。
+ * 2. 日本語の語彙: tsvector は日本語を引けず、trigram は引ける。**Fake がどちらに合わせているか**を見る。
+ * 3. `labels` と channels: 語彙チャンネルだけが当てる記憶も `labels` の絞りを破らない。
  */
 
 const TENANT = "recall-channels-undecidable-ja-labels";
@@ -82,7 +77,7 @@ interface Kit {
   vectorStore: VectorStore;
 }
 
-/** trigram が使えない環境（SQL_ASCII の脚。ADR 0319・0103）では null。 */
+/** trigram が使えない環境（SQL_ASCII の脚）では null。 */
 async function buildKit(name: KitName): Promise<Kit | null> {
   if (name === "testkit") {
     const memoryStore = new InMemoryMemoryStore();
@@ -181,7 +176,6 @@ function omissionKey(o: Omission): string {
   return o.kind;
 }
 
-/** 3実装に同じ記憶・同じ問いを当て、実装名 → 形 の表を返す（使えない実装は入れない）。 */
 async function runOnAll(
   seeds: readonly Seed[],
   query: RecallQuery,
@@ -200,8 +194,8 @@ async function runOnAll(
 }
 
 /**
- * 3実装が同じか。同点の並びは実装ごとに違う（Fake は作成順、Postgres は不定。ADR 0170）ので、返った記憶は
- * 集合で比べる。`omittedOnly` は、top-1 が同点で割れうる問い（limit を絞った形）で `omitted` だけを比べる。
+ * 3実装が同じか。同点の並びは実装ごとに違う（Fake は作成順、Postgres は不定）ので、返った記憶は集合で比べる。
+ * `omittedOnly` は、top-1 が同点で割れうる問い（limit を絞った形）で `omitted` だけを比べる。
  */
 function expectSame(
   table: Map<KitName, { shape: Shape }>,
@@ -220,10 +214,6 @@ function expectSame(
 afterAll(async () => {
   await closeTestClient();
 });
-
-// ---------------------------------------------------------------------------
-// 1. ann_truncated（undecidable）
-// ---------------------------------------------------------------------------
 
 describe("ann_truncated と channels: Fake と実 Postgres が同じ判定を返す", () => {
   // 3件とも同じ語を含み、ベクトルも同じ向き。kPrime = limit × overFetchFactor。
@@ -302,10 +292,6 @@ describe("ann_truncated と channels: Fake と実 Postgres が同じ判定を返
   });
 });
 
-// ---------------------------------------------------------------------------
-// 2. 日本語の語彙
-// ---------------------------------------------------------------------------
-
 describe("日本語の語彙と channels: Fake と実 Postgres の突き合わせ", () => {
   const SEEDS: Seed[] = [
     { content: "来週の定例会議の議題を共有した", vector: [0, 0, 1] },
@@ -329,8 +315,7 @@ describe("日本語の語彙と channels: Fake と実 Postgres の突き合わ�
       expect(table.get("trigram")!.shape.returned).toEqual([hit]);
     }
     expect(table.get("tsvector")!.shape.returned).toEqual([]);
-    // Fake（InMemoryLexicalStore）は tsvector 側に合わせてある（CJK を語単位に割らない。fixture の doc）。
-    // trigram だけが日本語を引ける——これは ADR 0084 §3.2・0319 の既知の非対称で、Fake は trigram を写さない。
+    // Fake（InMemoryLexicalStore）は tsvector 側に合わせてあり、trigram だけが日本語を引ける。Fake は trigram を写さない。
     expect(table.get("testkit")!.shape.returned).toEqual(table.get("tsvector")!.shape.returned);
   });
 
@@ -379,10 +364,6 @@ describe("日本語の語彙と channels: Fake と実 Postgres の突き合わ�
     expect(trigram.shape.returned).not.toContain("定例会議の議事録を整理した|lexical");
   });
 });
-
-// ---------------------------------------------------------------------------
-// 3. labels と channels
-// ---------------------------------------------------------------------------
 
 describe("labels と channels: 語彙チャンネルだけが当てる記憶も labels の絞りを破らない", () => {
   const SEEDS: Seed[] = [

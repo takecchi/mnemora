@@ -1,12 +1,9 @@
 /**
- * `process.env.DATABASE_URL` を、この vitest worker 専用の DB へ書き換える
- * （Issue #1277 / ADR 0371）。`vitest.config.mts` の両方の project（並列・直列）の
- * `setupFiles` の先頭に置く——それより後に読み込まれるテストファイルは、
- * `test-db.ts` の `requireDatabaseUrl()` 経由で常にこの worker 専用 DB を見る。
+ * `process.env.DATABASE_URL` を、この vitest worker 専用の DB へ書き換える。`vitest.config.mts` の両方の project（並列・直列）の `setupFiles` の先頭に置く。
+ * それより後に読み込まれるテストファイルは、`test-db.ts` の `requireDatabaseUrl()` 経由で常にこの worker 専用 DB を見る。
  *
- * DB そのものを作る／migrate する処理は `global-setup-worker-databases.ts`
- * （vitest の `globalSetup`、メインプロセスで1回だけ実行）にある。ここでは
- * 「どの DB を見るか」を決めるだけ——接続はしない。
+ * DB そのものを作る／migrate する処理は `global-setup-worker-databases.ts`（vitest の `globalSetup`、メインプロセスで1回だけ実行）にある。
+ * ここでは「どの DB を見るか」を決めるだけで、接続はしない。
  *
  * 命名規則・`BASE_DATABASE_URL_ENV` を使う理由は `worker-database.ts` の docstring。
  */

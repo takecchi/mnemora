@@ -12,17 +12,16 @@ import { requireDatabaseUrl } from "./test-db.js";
 import { dropTempDatabase } from "./temp-database.js";
 
 /**
- * 専用スキーマの構成で `probeTrigramLexicalSupport` が `pg_trgm` をどこに入れるかを縛る歯
- * （Issue #1256、修正後の振る舞い）。
+ * 専用スキーマの構成で `probeTrigramLexicalSupport` が `pg_trgm` をどこに入れるかを縛る歯。
  *
- * ## 直した振る舞い
+ * ## 振る舞い
  *
  * `probeTrigramLexicalSupport`（`PostgresTrigramLexicalStore.create` が内部で呼ぶ）の
  * `CREATE EXTENSION IF NOT EXISTS pg_trgm` は、`vector` 拡張（`runMigrations` が
  * `REQUIRED_EXTENSIONS` として `extensionSchema` に入れたもの）のスキーマを読み、そこへ
  * `WITH SCHEMA` で入れる——`vector` が見つからない、またはそのスキーマが現在の
  * `search_path` の先頭（`current_schema()`）と同じとき（`schema` を渡さない既定の構成で、
- * `vector` が先頭のスキーマに在る場合）は、発行する SQL 文字列を今日と1バイトも変えない。
+ * `vector` が先頭のスキーマに在る場合）は、発行する SQL 文字列を変えない。
  *
  * 作った（または既にあった）`pg_trgm` が、この接続の `search_path` から見えなければ、
  * `{ ok: false, reason: "extension_not_visible", detail }` を返す（`detail` は拡張が実際に
@@ -33,8 +32,7 @@ import { dropTempDatabase } from "./temp-database.js";
  * (a) 新しく作る DB（既定の `extensionSchema` = `public`）: `ns_a`・`ns_b` とも
  *     `{ ok: true }`。`pg_trgm` は `public` に入り、`create`/`search` も通る。
  * (a2) `extensionSchema` にカスタムな名前（`public` 以外）を渡しても、その名前へ入る。
- * (b) 既に別の名前空間（`ns_a`）へ `pg_trgm` が手動で（＝このバグが直る前の名残を模して）
- *     入ってしまった DB: `ns_a` は `{ ok: true }`。`ns_b` は
+ * (b) 既に別の名前空間（`ns_a`）へ `pg_trgm` が手動で入ってしまった DB: `ns_a` は `{ ok: true }`。`ns_b` は
  *     `{ ok: false, reason: "extension_not_visible", detail: "ns_a" }`。`create` は同じ
  *     `reason` を持つ `TrigramLexicalStoreUnavailableError` を投げる。
  * (c) (b) の後に `ALTER EXTENSION pg_trgm SET SCHEMA public` を流せば、両方 `{ ok: true }`
@@ -71,7 +69,7 @@ async function extensionSchemasOf(pool: Pool, extname: string): Promise<string[]
  * オーバーロードと噛み合わせにくいため、代入して復元する素朴な形にしてある。
  */
 function captureCreateExtensionSql(): { texts: string[]; restore: () => void } {
-  // ADR 0430: probe は `db.transaction`（専用の接続）の中で流れるので、`pool.query` ではなく
+  // probe は `db.transaction`（専用の接続）の中で流れるので、`pool.query` ではなく
   // `pg.Client.prototype.query` を見る。
   const original = PgClient.prototype.query as unknown as (...args: unknown[]) => unknown;
   const texts: string[] = [];
@@ -228,7 +226,7 @@ describe("probeTrigramLexicalSupport と専用スキーマ（Issue #1256 修正�
         }
 
         const [a, b] = clients;
-        // このバグが直る前に作られた DB の名残を模す——pg_trgm を ns_a に手動で入れておく。
+        // 別の名前空間に pg_trgm が入っている DB を作る——pg_trgm を ns_a に手動で入れておく。
         await a!.client.pool.query(`CREATE EXTENSION IF NOT EXISTS pg_trgm WITH SCHEMA "ns_a"`);
         expect(await extensionSchemasOf(a!.client.pool, "pg_trgm")).toEqual(["ns_a"]);
 
@@ -247,7 +245,6 @@ describe("probeTrigramLexicalSupport と専用スキーマ（Issue #1256 修正�
         await expect(PostgresTrigramLexicalStore.create(b!.client.db)).rejects.toBeInstanceOf(
           TrigramLexicalStoreUnavailableError,
         );
-        // pg_trgm の位置自体は変わっていない（自動では移さない）。
         expect(await extensionSchemasOf(a!.client.pool, "pg_trgm")).toEqual(["ns_a"]);
 
         // (c) 直し方: 拡張の権限を持つロールで ALTER EXTENSION ... SET SCHEMA。

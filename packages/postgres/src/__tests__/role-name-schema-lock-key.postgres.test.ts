@@ -16,47 +16,30 @@ import { requireDatabaseUrl } from "./test-db.js";
 import { dropTempDatabase } from "./temp-database.js";
 
 /**
- * Issue #779 の🟠を直す歯。
- *
- * ## 何が壊れていたか
- *
- * PostgreSQL の既定 `search_path` は `"$user", public` である。接続に使ったロール名と
- * 同じ名前のスキーマが DB に在ると、`schema` オプションを省略した `runMigrations` /
- * `registerEmbeddingSpace` は例外を出さずそのスキーマへ読み書きする（Issue #757 の実測）。
- * ところが `migrationLockKeyFor` / `registerEmbeddingSpaceLockKeyFor` は `schema` 未指定を
- * 「静的には特定できない」として既定の固定キーへ倒していた（ADR 0057 決定6）——結果、
- * **同じ物理スキーマを見ているのに、`schema: "<ロール名>"` を明示指定した別の呼び出しと
- * ロックキーが食い違い、互いを待たない。**
+ * PostgreSQL の既定 `search_path` は `"$user", public` である。接続に使ったロール名と同じ名前のスキーマが DB に在ると、
+ * `schema` オプションを省略した `runMigrations` / `registerEmbeddingSpace` は例外を出さずそのスキーマへ読み書きする。
+ * そのとき `migrationLockKeyFor` / `registerEmbeddingSpaceLockKeyFor` が `schema` 未指定を既定の固定キーへ倒すと、
+ * 同じ物理スキーマを見ているのに `schema: "<ロール名>"` を明示指定した別の呼び出しとロックキーが食い違い、互いを待たない。
  *
  * ## この歯がどう測るか
  *
- * 「schema 未指定の呼び出しが実際に使うロックキー」を直接読む手段は無い（advisory lock は
- * 内部で取得・解放されるだけで、キーの値そのものは戻り値に出ない）。そのため
- * `migrate-concurrency.test.ts` / `vector-space-concurrency.test.ts` と同じ流儀
- * （別セッションから先に advisory lock を握っておき、対象の呼び出しが「待つ／待たない」を
- * `MigrationLockTimeoutError` の有無で観測する）を使う——**特定のキーを先客が握っている
- * ときに、対象の呼び出しがそのキーで待つなら、対象は同じキーを使っている。**
+ * 「schema 未指定の呼び出しが実際に使うロックキー」を直接読む手段は無い（advisory lock は内部で取得・解放されるだけで、キーの値そのものは戻り値に出ない）。
+ * そのため `migrate-concurrency.test.ts` / `vector-space-concurrency.test.ts` と同じ流儀
+ * （別セッションから先に advisory lock を握っておき、対象の呼び出しが「待つ／待たない」を `MigrationLockTimeoutError` の有無で観測する）を使う。
+ * 特定のキーを先客が握っているときに、対象の呼び出しがそのキーで待つなら、対象は同じキーを使っている。
  *
- * ロール名と同名のスキーマを用意した DB では、`schema` 未指定の呼び出しが使うべきキーは
- * `migrationLockKeyFor(<ロール名>)`（＝ `schema: "<ロール名>"` を明示指定したときと同じ
- * 導出キー）である。先客にこのキーを握らせておいて、`schema` 未指定の呼び出しが
- * 短いタイムアウトで `MigrationLockTimeoutError` に落ちれば、「同じキーを使っている
- * （＝互いに待つ）」ことの直接証拠になる。
+ * ロール名と同名のスキーマを用意した DB では、`schema` 未指定の呼び出しが使うべきキーは `migrationLockKeyFor(<ロール名>)`
+ * （`schema: "<ロール名>"` を明示指定したときと同じ導出キー）である。
+ * 先客にこのキーを握らせておいて、`schema` 未指定の呼び出しが短いタイムアウトで `MigrationLockTimeoutError` に落ちれば、同じキーを使っている直接証拠になる。
+ * 既定の固定キー（`MIGRATION_LOCK_KEY` / `REGISTER_EMBEDDING_SPACE_LOCK_KEY`）のままだと、先客が握っている導出キーとは無関係なので待たずに完了してしまう
+ * （`.rejects.toBeInstanceOf(...)` が「resolved した」で赤くなる）。
  *
- * 直す前は、`schema` 未指定の呼び出しは既定の固定キー（`MIGRATION_LOCK_KEY` /
- * `REGISTER_EMBEDDING_SPACE_LOCK_KEY`）のまま——先客が握っている導出キーとは無関係なので
- * **待たずに完了してしまう**（`.rejects.toBeInstanceOf(...)` が「resolved した」で赤くなる）。
+ * 陽性対照として、ロール名スキーマが存在しない（`current_schema()` が `public` に落ちる）DB では、`schema` 未指定の呼び出しは既定の固定キーのままであることも別の it() で固定する
+ * （ローリングデプロイ中の互換性を壊していないことの回帰ガード）。
  *
- * 陽性対照として、ロール名スキーマが存在しない（＝ `current_schema()` が `public` に
- * 落ちる）DB では、`schema` 未指定の呼び出しは今まで通り既定の固定キーのままであることも
- * 別の it() で固定する——こちらは修正の前後どちらでも緑のまま（ローリングデプロイ中の
- * 互換性を壊していないことの回帰ガード）。
+ * ## 前提
  *
- * ## この試験環境の前提
- *
- * `DATABASE_URL` が指す接続ロール名は `^[a-z_][a-z0-9_]*$` に収まる（`postgres` / `worker`
- * 等）——CI・手元の `initdb` 手順（`AGENTS.md`）のどちらもこの形。ロール名がこの形を
- * 外れる環境ではこの歯の前提が崩れる（確かめていない）。
+ * `DATABASE_URL` が指す接続ロール名は `^[a-z_][a-z0-9_]*$` に収まる（`postgres` / `worker` 等）。ロール名がこの形を外れる環境ではこの歯の前提が崩れる。
  */
 
 const DB_MIGRATE_ROLE_SCHEMA = "mnemora_lock_role_schema_migrate";
@@ -80,17 +63,12 @@ function connectionStringFor(database: string): string {
 }
 
 /**
- * 使い捨てのデータベースを作り、専用の Pool を返す（`temp-database.ts` の作法どおり
- * FORCE を使わない）。`admin()` と同じロールで接続するため、作った DB の所有者は
- * そのロールになる——後で同名のスキーマを作れば、そのロールは常にオーナー権限を持つ
- * （別ロールを作って GRANT する手間を避けられる）。
+ * 使い捨てのデータベースを作り、専用の Pool を返す（`temp-database.ts` の作法どおり FORCE を使わない）。
+ * `admin()` と同じロールで接続するため、作った DB の所有者はそのロールになる。後で同名のスキーマを作れば、そのロールは常にオーナー権限を持つ（別ロールを作って GRANT する手間を避けられる）。
  *
- * `vector` 拡張を `public` に前もって作っておく——`registerEmbeddingSpace` 自体は拡張を
- * 作らない（`runMigrations` の役目、ADR 0057）ため、これが無いと
- * `embedding vector(N)` の型解決が `type "vector" does not exist` で落ちる
- * （このファイルの歯はロックキーの食い違いだけを見たいので、拡張の有無で空振りしない
- * ようにする）。`WITH SCHEMA public` を明示するのは、後で作る「ロール名と同名の
- * スキーマ」が `search_path` の先頭に来ても `vector` 型の解決先を変えないため。
+ * `vector` 拡張を `public` に前もって作っておく。`registerEmbeddingSpace` 自体は拡張を作らない（`runMigrations` の役目）ため、
+ * これが無いと `embedding vector(N)` の型解決が `type "vector" does not exist` で落ち、ロックキーの食い違いとは無関係に空振りする。
+ * `WITH SCHEMA public` を明示するのは、後で作る「ロール名と同名のスキーマ」が `search_path` の先頭に来ても `vector` 型の解決先を変えないため。
  */
 async function createBlankDatabase(database: string): Promise<Pool> {
   await dropTempDatabase(admin(), database);
@@ -102,13 +80,11 @@ async function createBlankDatabase(database: string): Promise<Pool> {
   return pool;
 }
 
-/** `pool` が接続に使っているロール名（`"$user"` が解決する先そのもの）。 */
 async function currentRoleName(pool: Pool): Promise<string> {
   const { rows } = await pool.query<{ role: string }>("SELECT current_user AS role");
   return rows[0]!.role;
 }
 
-/** 別セッションから advisory lock を握る（テストの「先客」役）。 */
 async function grabLockFromAnotherSession(
   database: string,
   lockKey: bigint,
@@ -139,11 +115,11 @@ describe("schema 未指定 + ロール名と同名のスキーマ: advisory lock
   it("runMigrations: ロール名と同名スキーマが在れば、schema 未指定は schema: '<ロール名>' 明示指定と同じキーを使う（互いに待つ）", async () => {
     const pool = await createBlankDatabase(DB_MIGRATE_ROLE_SCHEMA);
     const roleName = await currentRoleName(pool);
-    // "$user" の解決先を実際に作る——これが再現条件そのもの（Issue #779 / #757）。
+    // "$user" の解決先を実際に作る。これが再現条件そのもの。
     await pool.query(`CREATE SCHEMA IF NOT EXISTS "${roleName}"`);
 
     const expectedKey = migrationLockKeyFor(roleName);
-    // 陽性対照: 明示指定側は既定キーとは別のキーであること（比較に意味があることの確認）。
+    // 陽性対照: 明示指定側は既定キーとは別のキーであること。
     expect(expectedKey).not.toBe(MIGRATION_LOCK_KEY);
 
     const holder = await grabLockFromAnotherSession(DB_MIGRATE_ROLE_SCHEMA, expectedKey);

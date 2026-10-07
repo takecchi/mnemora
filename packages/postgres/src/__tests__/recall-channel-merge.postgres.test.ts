@@ -23,16 +23,6 @@ import {
 } from "./test-db.js";
 
 /**
- * ADR 0484: `recall({ channels: ["ann", "lexical"] })` の候補の合流を、実 Postgres の**2つの語彙 store**
- * （`PostgresLexicalStore` = tsvector、`PostgresTrigramLexicalStore` = pg_trgm）で、ADR 0084 の表に照らして縛る。
- *
- * 契約（ADR 0084 の表、`recall-runtime.ts` の和集合）:
- * - 同じ記憶を両チャンネルが当てたら、1件にまとまる。`retrievedVia` は `"ann"`、`score` に `similarity` と
- *   `lexicalMatch` の両方が載る。
- * - ANN だけが当てた記憶は `retrievedVia: "ann"`、`lexicalMatch` は無い。
- * - 語彙だけが当てた記憶は `retrievedVia: "lexical"`、`similarity` は無い。`lexicalMatch` は `(0, 1]`。
- * - `explain.stages` の `candidate_generation` は channel ごとに1つ（`ann`、`lexical` の順）。
- *
  * 記憶 3 件: A（ANN にも語彙にも当たる）、B（ANN だけ。語彙の語を含まない）、C（語彙だけ。ベクトルは遠く、
  * `overFetchFactor` を絞って ANN の窓〔k'〕から外す）。埋め込みの fake はどの文面も `[1, 0, 0]` を返す。
  */
@@ -67,7 +57,7 @@ async function setup(kind: StoreKind) {
     try {
       lexicalStore = await PostgresTrigramLexicalStore.create(db);
     } catch (error) {
-      // ADR 0103: この環境（SQL_ASCII の脚など）では pg_trgm を使えない。skip ではなく、使えないことを主張する。
+      // pg_trgm を使えない環境（SQL_ASCII の脚など）では skip ではなく、使えないことを主張する。
       expect(String((error as Error).message)).toContain(
         TRIGRAM_LEXICAL_STORE_UNAVAILABLE_ERROR_PREFIX,
       );

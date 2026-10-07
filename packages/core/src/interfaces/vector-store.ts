@@ -263,8 +263,8 @@ export interface VectorStore {
    *
    * **契約: `queries` に同じ `key` が2回以上あるときは、最後のクエリの結果だけを返す**（後勝ち）。返す `Map` の並びは、
    * その key が**最初に現れた位置**である——結果は `new Map(queries.map((q) => [q.key, search(ctx, space, q.vector, opts)]))` と同じ。
-   * ただし、同じ key のうち**前のクエリだけが投げる入力**（そのベクトルだけが DB に拒まれる値。float4 の範囲を超える有限の値など）では、
-   * この式は投げるが、`searchMany` は投げずに返す。どの key の結果も、`search()` と同じく `limit` を超えない。
+   * クエリのベクトルの中身（`NaN`・`Infinity`・float4 に収まらない有限の値を含む）では、`search()` も `searchMany` も投げない
+   * （比較不能として扱う）ので、同じ key の前のクエリだけが投げる入力は無い。どの key の結果も、`search()` と同じく `limit` を超えない。
    */
   searchMany?(
     ctx: Ctx,

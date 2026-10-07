@@ -21,24 +21,15 @@ const migration0032Sql = (): string =>
 const PURGE_INDEXES = ["idx_recalls_by_created", "idx_outbox_completed"];
 
 /**
- * ADR 0404 の実測を歯にした検査。向きは ADR 0412 で改めた（0404 は索引を足さないと決め、
- * この検査は「Sort が入る」ことを縛っていた。0412 が `recalls (tenant_id, created_at, id)` を足した）。
+ * `PostgresMemoryStore.purgeExpiredRecalls` が対象を選ぶ SELECT の中身は `buildPurgeExpiredRecallsTargetSelect` が組み立てる。
+ * この検査はその関数の返り値をそのまま `EXPLAIN` する。テスト側に述語を書き写さない（`memory-events-retention-index.test.ts` の `explainTargetSelect` と同じ理由）。
+ * 述語（`tenant_id`・`created_at < olderThan`・`ORDER BY created_at, id`）が変われば計画が変わり、この歯が動く。
  *
- * `PostgresMemoryStore.purgeExpiredRecalls` が対象を選ぶ SELECT の中身は
- * `buildPurgeExpiredRecallsTargetSelect` が組み立てる。**この検査はその関数の返り値を
- * そのまま `EXPLAIN` する**——テスト側に述語を書き写さない
- * （`memory-events-retention-index.test.ts` の `explainTargetSelect` と同じ理由）。
- * 述語（`tenant_id`・`created_at < olderThan`・`ORDER BY created_at, id`）が変われば計画が変わり、
- * この歯が動く。
+ * 1. 後 = migration 0032 の索引 `idx_recalls_by_created` が在る世界。Index Scan（削除しないときは Index Only Scan もありうる）になり、`Sort` も `Seq Scan` も無い。
+ *    `FOR UPDATE` 付き（削除するとき）でも同じ。
+ * 2. 前（陽性対照）= その索引を落とした世界。`Sort` が挟まる。これが無いと、1 の「Sort が無い」は「測る関数が別の SELECT を返している」ときも緑になる。
  *
- * 1. **後** = migration 0032 の索引 `idx_recalls_by_created` が在る世界。Index Scan（削除しない
- *    ときは Index Only Scan もありうる）になり、`Sort` も `Seq Scan` も無い。`FOR UPDATE` 付き
- *    （削除するとき）でも同じ。
- * 2. **前（陽性対照）** = その索引を落とした世界。`Sort` が挟まる。これが無いと、1 の
- *    「Sort が無い」は「測る関数が別の SELECT を返している」ときも緑になる。
- *
- * 索引は `finally` で作り直す（`resetTestDatabase()` は TRUNCATE するだけで DDL は戻さない）。
- * 全文を `console.log` で出力する。
+ * 索引は `finally` で作り直す（`resetTestDatabase()` は TRUNCATE するだけで DDL は戻さない）。全文を `console.log` で出力する。
  */
 
 const TENANT = "recalls-purge-index-tenant";
@@ -74,11 +65,10 @@ function planText(rows: { "QUERY PLAN": string }[]): string {
 }
 
 const CTX: Ctx = { tenantId: TENANT };
-// 対象は古い側の 2/3 ほど（ADR 0404 の「3万行が対象」に近い選択性）。limit は ADR と同じ 1000。
+// 対象は古い側の 2/3 ほど。limit は 1000。
 const OLDER_THAN = new Date(Date.now() - (ROWS_PER_TENANT / 3) * 1000);
 const OPTS = { olderThan: OLDER_THAN, limit: 1000 };
 
-/** 🔴 本体が実際に打つ `SELECT` をそのまま `EXPLAIN` する。 */
 async function explainTargetSelect(lock: boolean): Promise<string> {
   const { db } = await getTestClient();
   const target = buildPurgeExpiredRecallsTargetSelect(CTX, OPTS, lock);
@@ -106,7 +96,6 @@ describe("recalls の保持期間掃除の対象選択（ADR 0404 / ADR 0412）"
     expect(plan).not.toContain("Sort");
     expect(plan).not.toContain("Seq Scan");
 
-    // 削除するとき（lock = true）は同じ選択に FOR UPDATE が付く。
     const locked = await explainTargetSelect(true);
     console.log(`=== EXPLAIN（後・lock=true）===\n${locked}`);
     expect(locked).toContain("LockRows");

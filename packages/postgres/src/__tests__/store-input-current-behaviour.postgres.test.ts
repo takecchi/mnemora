@@ -18,16 +18,13 @@ import { PostgresMemoryStore } from "../memory-store.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
 /**
- * store の入口が入力の中身をどう扱うかの、今の振る舞い（8回目の TSDoc の棚卸し）。
+ * store の入口が入力の中身をどう扱うかの、今の振る舞い。
  *
- * - `getRecall`: adapter の期待する形式でない id は `null`（`MemoryStore.getRecall` の TSDoc）。3実装で縛る。
- * - `getRecall`: マイグレーション 0013 より前の形の行は `breakdownCaptured: false` で読み戻る（同じ TSDoc）。Postgres で縛る。
- * - `createMemory`・`createMemoryWithOutbox`・`supersedeWithNewMemories`: `provenance` が列挙に無い `kind`・列の
- *   `sourceObservationId` が無い `stated`/`inferred`・`null` のときは、以前から拒む。
- *   **ADR 0630 から、`provenance` の中身の欠け・値域外（`MemorySchema` を通らなくなる形）も拒む**（以前は受け付けた。
- *   下の `REJECTED` に移した）。ほかの欄（`digest` など）の全形と、拒むときに何も書かないことは、この下の
- *   `MALFORMED_NEW_MEMORY_CASES` の節。Postgres と testkit の fixture で縛る（core の Fake は
- *   `packages/core/src/__tests__/fake-provenance-rejects.test.ts`・`fake-new-memory-rejects.test.ts`）。
+ * - `getRecall`: adapter の期待する形式でない id は `null`（3実装）。マイグレーション 0013 より前の形の行は
+ *   `breakdownCaptured: false` で読み戻る（Postgres）。
+ * - `createMemory`・`createMemoryWithOutbox`・`supersedeWithNewMemories`: `provenance` の中身の欠け・値域外
+ *   （`MemorySchema` を通らなくなる形）も拒む（`REJECTED`）。ほかの欄の全形と、拒むときに何も書かないことは、
+ *   下の `MALFORMED_NEW_MEMORY_CASES` の節。Postgres と testkit の fixture で縛る。
  */
 
 const ctx: Ctx = { tenantId: "store-input-current-behaviour" };
@@ -110,10 +107,6 @@ const WRITES: Array<[string, Write]> = [
   ],
 ];
 
-/**
- * 拒む（例外になる）形——**ADR 0630 から**。以前は「受け付け（そのまま書いて返し）、返った Memory は MemorySchema を
- * 通らない」形（`ACCEPTED`）として縛っていた。向きを変えただけで、形の一覧は変えていない。
- */
 const NOW_REJECTED: Array<[string, (obs: string) => Partial<NewMemory>]> = [
   [
     "stated で sourceObservationId・at が無い",
@@ -155,7 +148,6 @@ const NOW_REJECTED: Array<[string, (obs: string) => Partial<NewMemory>]> = [
   ],
 ];
 
-/** 拒む（例外になる）形。 */
 const REJECTED: Array<[string, (obs: string) => Partial<NewMemory>]> = [
   ["kind が列挙に無い", () => ({ provenance: { kind: "bogus" } as never })],
   [
@@ -236,10 +228,6 @@ describe.each(KITS)("provenance の入口の検査: %s", (_name, build) => {
     });
   });
 });
-
-// ---------------------------------------------------------------------------
-// ADR 0630: 読み戻すと MemorySchema を通らない NewMemory を、入口で拒む。拒むときは、何も書かない。
-// ---------------------------------------------------------------------------
 
 describe("Postgres: 拒むとき、Memory・ラベル・outbox・イベントのどれにも書かない（ADR 0630）", () => {
   async function counts(): Promise<Record<string, number>> {
@@ -389,7 +377,6 @@ describe.each(KITS)("範囲外は、この検査では拒まない（ADR 0630）
     ).resolves.toBeDefined();
   });
 
-  // 変異試験（2026-10-06）: createObservationWithOutbox に「attributes の値が文字列以外なら拒む」を足す変異が生き残った。
   it("createObservationWithOutbox: attributes の値が文字列でなくても、この検査では拒まない（Observation は範囲外）", async () => {
     const store = await build();
     await expect(

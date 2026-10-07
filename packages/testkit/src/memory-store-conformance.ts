@@ -4059,8 +4059,8 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
     // Issue #1238 A6（#1173 の棚卸しが挙げた候補）: 上の歯は「既に late で強化済みの
     // ところへ early を渡す」形（起点は lastReinforcedAt）だけを見ており、
     // 「まだ一度も強化していない（lastReinforcedAt: null）記憶に、作成時刻より前の
-    // at を渡す」形（起点は recordedAt、fixture 側のコメント「未強化の記憶では
-    // 作成時刻が起点」）は検査していなかった。
+    // at を渡す」形（起点は recordedAt。`InMemoryMemoryStore.reinforce` の
+    // TSDoc が「起点 `lastReinforcedAt ?? recordedAt`」と書く）は検査していなかった。
     it("reinforce は未強化（lastReinforcedAt: null）の記憶に、recordedAt より前の at を渡しても起点を巻き戻さない（no-op）", async () => {
       const store = await createStore();
       const ctx: Ctx = { tenantId: "tenant-1" };

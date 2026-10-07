@@ -9,30 +9,18 @@ import { registerEmbeddingSpace } from "../vector-space.js";
 import { captureClientQuery, closeTestClient, getTestClient } from "./test-db.js";
 
 /**
- * Issue #1415 / ADR 0374: `search()` の統計が無い場面の枝（候補D、
- * `buildStatsMissingBranches`）と、統計がある場面の枝（今の main の形、
- * `buildStatsPresentBranches`）は、同じデータ・同じ `filter` に対して**結果が
- * 完全に一致する**——`memories` の引き方（主キー経由か素の `JOIN` か）はあくまで
- * プランの形の選び方であり、`filter` が指す集合・順序・同点の決着には影響しない、
- * という契約を縛る歯。
- *
- * `searchMany()` 側の同じ契約は `search-many-primary-key-lookup.postgres.test.ts`
- * が実装当初から間接的に触れているが（`search()` と1バイトも違わない枝であることの
- * 記述）、`search()` 単体の統計あり・無し比較は今回が初出——Issue #1415 で初めて
- * `search()` に候補D の枝が入ったため。
+ * `search()` の統計が無い場面の枝（`buildStatsMissingBranches`）と、統計がある場面の枝（`buildStatsPresentBranches`）は、同じデータ・同じ `filter` に対して結果が完全に一致する。
+ * `memories` の引き方（主キー経由か素の `JOIN` か）はあくまでプランの形の選び方であり、`filter` が指す集合・順序・同点の決着には影響しない、という契約を縛る。
  *
  * ## 手立て
  *
- * 同じテナント・同じ行に対して、**新しい `PostgresVectorStore` インスタンス**を
- * 2つ使う——1つ目は一度も `ANALYZE` していない状態で呼ぶ（`StatsPresenceGate` が
- * 未確認→ `reltuples < 0` を見て候補D の枝を選ぶ）。そのあとテスト側で明示的に
- * `ANALYZE` を打ち、2つ目の**新しい**インスタンス（1つ目とは別、`StatsPresenceGate`
- * を共有しない——`search-stats-presence-scope.postgres.test.ts` が縛るとおり）で
- * 同じクエリを呼ぶ（未確認→今度は `reltuples >= 0` を見て今日の枝を選ぶ）。
+ * 同じテナント・同じ行に対して、新しい `PostgresVectorStore` インスタンスを2つ使う。
+ * 1つ目は一度も `ANALYZE` していない状態で呼ぶ（`StatsPresenceGate` が未確認 → `reltuples < 0` を見て統計が無い場面の枝を選ぶ）。
+ * そのあとテスト側で明示的に `ANALYZE` を打ち、2つ目の新しいインスタンス（`StatsPresenceGate` を共有しない。`search-stats-presence-scope.postgres.test.ts` が縛るとおり）で同じクエリを呼ぶ
+ * （今度は `reltuples >= 0` を見て統計がある場面の枝を選ぶ）。
  *
- * どちらの枝が実際に選ばれたかは、送った SQL のテキストに `OFFSET 0`
- * （候補D 特有）が含まれるかどうかで検算する——この検算が無いと、たまたま両方の
- * 実行が同じ枝を選んでいただけ、という空振りの歯になりうる。
+ * どちらの枝が実際に選ばれたかは、送った SQL のテキストに `OFFSET 0`（統計が無い場面の枝に特有）が含まれるかどうかで検算する。
+ * この検算が無いと、たまたま両方の実行が同じ枝を選んでいただけ、という空振りの歯になりうる。
  */
 
 const TENANT = `stats-presence-result-eq-${randomUUID()}`;
@@ -196,7 +184,7 @@ describe("search(): 統計が無い枝（候補D）と統計がある枝（今�
   it("候補D の枝（統計無し）と今日の枝（統計あり）が、同じシナリオで完全に同じ結果を返す", async () => {
     const ctx: Ctx = { tenantId: TENANT };
 
-    // 1本目: 一度も ANALYZE していない、新しいインスタンス——候補D の枝を選ぶはず。
+    // 1本目: 一度も ANALYZE していない、新しいインスタンス。統計が無い場面の枝を選ぶはず。
     const unanalyzedStore = new PostgresVectorStore((await getTestClient()).db);
     const unanalyzedResults = new Map<string, VectorHit[]>();
     let unanalyzedUsedCandidateD = false;
@@ -218,12 +206,11 @@ describe("search(): 統計が無い枝（候補D）と統計がある枝（今�
       "この歯の前提が崩れている——1本目は一度も候補D（OFFSET 0）の枝を選ばなかった",
     ).toBe(true);
 
-    // ここで初めて ANALYZE を打つ。
     const { pool } = await getTestClient();
     await pool.query(`ANALYZE ${table}`);
     await pool.query(`ANALYZE memories`);
 
-    // 2本目: ANALYZE 後の、まったく新しいインスタンス——今日の枝（素の JOIN）を選ぶはず。
+    // 2本目: ANALYZE 後の、まったく新しいインスタンス。素の JOIN を選ぶはず。
     const analyzedStore = new PostgresVectorStore((await getTestClient()).db);
     const analyzedResults = new Map<string, VectorHit[]>();
     let analyzedUsedCandidateD = false;

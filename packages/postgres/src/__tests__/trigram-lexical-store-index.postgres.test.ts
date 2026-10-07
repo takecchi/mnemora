@@ -12,9 +12,7 @@ import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js"
 
 /**
  * `createOptionalTrigramIndex` が張る `idx_memories_trigram` が、`PostgresTrigramLexicalStore.search` と
- * **同じ `SELECT`**（`buildTrigramLexicalSearchSelect`）で実際に選ばれることの実測（Issue #1260）。
- * `buildTrigramLexicalSearchSelect` の doc は「`EXPLAIN` の歯が同じ関数を使うため」本体から切り出したと書き、
- * 「`trigram-lexical-store.postgres.test.ts` の索引の歯がそのまま通る」とも書いていたが、その歯は無かった。
+ * **同じ `SELECT`**（`buildTrigramLexicalSearchSelect`）で実際に選ばれることの実測。
  * `lexical-store-index.test.ts`（`idx_memories_lexical`）と同じ作法で置く。
  *
  * ⚠ **この歯はプランナの選択を assert している**——版・統計・データ規模に依存する

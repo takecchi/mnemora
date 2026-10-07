@@ -13,14 +13,14 @@ import {
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
 /**
- * #919 の確かめ直し（#1774）。`trigram-lexical-store-query-char-cap.test.ts` が見ていない2つの境界。
+ * クエリの文字数の上限の、2つの境界。
  *
  * 1. クエリ全体の文字数の上限は、日本語側にも効く（ASCII 側だけに効かせない）。
  *    上限より後ろにしかない日本語は使われず、上限の内側にある日本語は使われる。
  * 2. 日本語側の上限（{@link TRIGRAM_JAPANESE_QUERY_MAX_CHARS}）は、先頭から「ちょうど」その文字数まで
  *    を使う（1文字少なく切ると、上限ちょうどの本文との自己一致が崩れる）。
  *
- * ⚠ UTF8 の `server_encoding` を前提とする（`trigram-lexical-store-query-char-cap.test.ts` と同じ）。
+ * ⚠ UTF8 の `server_encoding` を前提とする。
  */
 
 const TENANT = "trigram-query-cap-boundary-tenant";
@@ -86,7 +86,7 @@ describe("PostgresTrigramLexicalStore.search: 上限の境界（#919）", () => 
     }
     const memoryStore = new PostgresMemoryStore(db);
     // 自己一致（similarity = 1）でなければ通らない閾値。1文字でも少なく切ると、末尾の
-    // 語尾のトライグラムが本文側と合わず similarity が 1 を割る（実測で 0.98 前後）。
+    // 語尾のトライグラムが本文側と合わず similarity が 1 を割る。
     // `trigram-lexical-store-query-char-cap.test.ts` の 0.95 では、この1文字の差を拾えない。
     const trigramStore = await PostgresTrigramLexicalStore.create(db, { threshold: 0.995 });
     const ctx: Ctx = { tenantId: TENANT };

@@ -27,13 +27,10 @@ import {
  *
  * - `PostgresMemoryStore.reinforceMany` は、`reinforce` を1件ずつ呼んだのと同じ結果になる
  *   （`MemoryStore.reinforceMany?` の TSDoc）。`@mnemora/postgres` は大文字の UUID も正しい形として受け付け、
- *   `get`・`reinforce` は同じ記憶を返す。以前の `reinforceMany` は、DB が返す小文字の id と渡された id を
- *   JS の `Map` でそのまま突き合わせていたので、大文字の UUID だけで「memory not found」を投げていた。
- * - `Runtime.forget`・`restoreArchived`・`purge`・`markContested` は、`getMany` の戻りを
- *   渡された id でそのまま引いていたので、`@mnemora/postgres` では記憶が在るのに `not_found` を返していた。
- *   直した後は、store が返した id と渡された id を小文字にして突き合わせる。store へ渡す id は変えない。
- * - testkit の fixture の id も、ADR 0521 以降は大文字小文字を区別しない（それまでは区別し、`get("MEM-1")` は `null`、
- *   大文字は `not_found` だった。fixture の leg の `caseInsensitive` を `true` にした。`false` の側の分岐は、いまは通らない）。
+ *   `get`・`reinforce` は同じ記憶を返す。`reinforceMany` も、大文字の UUID で「memory not found」を投げない。
+ * - `Runtime.forget`・`restoreArchived`・`purge`・`markContested`: store が返した id と渡された id を
+ *   小文字にして突き合わせる。store へ渡す id は変えない。
+ * - testkit の fixture の id も、大文字小文字を区別しない。
  *   store ごとの差は store の `get` の差であり、Runtime はそれに従う。
  */
 afterAll(async () => {
@@ -164,9 +161,8 @@ describe("PostgresMemoryStore.markContestedPair — 大文字の UUID でも在�
     expect([first.status, second.status]).toEqual(["contested", "contested"]);
   });
 
-  // ⚠ #1324 では、この入力が「memory not found」（`Error`）を投げることを縛っていた。store の入口で uuid の形の id を
-  // 小文字にそろえるようにしてから、TSDoc が約束する「同じ id なら RangeError」に変わった（例外の種類が約束どおりに
-  // なる。投げる入力の集合は変わらない）。意図して書き換えた歯である（`uppercase-uuid-store-entry.postgres.test.ts`）。
+  // ⚠ store の入口で uuid の形の id を小文字にそろえるので、この入力は TSDoc が約束する「同じ id なら RangeError」を
+  // 投げる（「memory not found」の `Error` ではない）。投げる入力の集合は増えない（`uppercase-uuid-store-entry.postgres.test.ts`）。
   it("投げる入力を増やさない: 同じ記憶を小文字と大文字で渡すと、TSDoc どおり RangeError を投げ、何も書かない", async () => {
     const { store, ctx, create, side } = await setup();
     const a = await create("pair-self");

@@ -20,9 +20,7 @@ import {
  * - `uq_memories_extraction`（`(tenant_id, source_observation_id, extractor_version, content_hash)`）:
  *   `reextract` が既存の抽出結果を探す `listBySourceObservation`
  *
- * 【実測 2026-09-27、main 44b9326、1テナント 20,000 行 + 別テナント 5,000 行、ANALYZE 済み】
- * どちらも索引を使っていた。期待値は時間ではなく計画の形で書く（CI で揺れないため）:
- * 索引名を含み、`Seq Scan on memories` を含まない。
+ * 期待値は時間ではなく計画の形で書く（CI で揺れないため）: 索引名を含み、`Seq Scan on memories` を含まない。
  */
 
 const TENANT = "superseded-and-extraction-index";
@@ -46,7 +44,6 @@ async function seed(pool: Pool): Promise<{ superseder: MemoryId; observationId: 
      FROM unnest($1::uuid[]) WITH ORDINALITY AS t(m, i)`,
     [ids, TENANT, observationIds, observationIds.length],
   );
-  // 先頭の 50 行を統合先とし、次の 2,000 行をそれらの superseded にする（1群あたり約40行）。
   await pool.query(
     `UPDATE memories SET status = 'superseded', superseded_by_id = ($1::uuid[])[(r.rank % 50) + 1]
      FROM (SELECT id AS target_id, row_number() OVER (ORDER BY id) AS rank
@@ -65,8 +62,7 @@ async function seed(pool: Pool): Promise<{ superseder: MemoryId; observationId: 
      FROM unnest($1::uuid[]) AS m`,
     [other],
   );
-  // 統計が無いと、プランナが誤った見積もりで無関係な索引や Seq Scan を選ぶ
-  // （recall-gate-index.test.ts / contested-with-index.test.ts と同じ勘所）。
+  // 統計が無いと、プランナが誤った見積もりで無関係な索引や Seq Scan を選ぶ。
   await pool.query("ANALYZE memories");
   await pool.query("ANALYZE observations");
   return { superseder: ids[0]! as MemoryId, observationId: observationIds[7]! as ObservationId };

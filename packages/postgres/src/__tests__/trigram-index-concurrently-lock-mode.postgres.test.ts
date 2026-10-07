@@ -18,8 +18,7 @@ import {
 
 /**
  * `createOptionalTrigramIndexConcurrently`（`idx_memories_trigram` を `CREATE INDEX CONCURRENTLY` で
- * 張る版）が、素の版 `createOptionalTrigramIndex` と何が違い、何が同じかを実行時に固定する
- * （ADR 0319 の 2026-09-30 追記）。形は `create-index-lock-mode.postgres.test.ts` に倣う。
+ * 張る版）が、素の版 `createOptionalTrigramIndex` と何が違い、何が同じかを実行時に固定する。
  *
  * 1. 素の版は `memories` に `ShareLock` を取り、並行する `INSERT` は待たされる。
  *    `CONCURRENTLY` 版は `ShareUpdateExclusiveLock` を取り、`INSERT` は通る。
@@ -163,7 +162,6 @@ describe("createOptionalTrigramIndex(Concurrently) が memories に取るロッ�
     const holder = await pool.connect();
     let build: Promise<void> | undefined;
     try {
-      // 未完了の書き込みトランザクションで、索引作成を最初の待ちに止める。
       await holder.query("BEGIN");
       await insertOne(holder);
 
@@ -176,7 +174,6 @@ describe("createOptionalTrigramIndex(Concurrently) が memories に取るロッ�
       expect(granted).not.toContain("ShareLock");
       expect(granted).not.toContain("AccessExclusiveLock");
 
-      // 作成が走っている最中でも、別接続の INSERT は待たされない。
       const write = insertOne(pool);
       expect(await settlesWithin(write, 2000)).toBe(true);
       await write;
@@ -205,7 +202,6 @@ describe("createOptionalTrigramIndexConcurrently の索引の定義と再作成"
     expect(concurrent?.def).toContain("gin (tenant_id, content gin_trgm_ops)");
     expect(concurrent?.def).toMatch(/WHERE.*status.*active.*contested/);
 
-    // VALID な索引が既にあるときは何もしない（冪等）。
     await createOptionalTrigramIndexConcurrently(db);
     expect(await indexState(pool)).toEqual(concurrent);
   }, 30_000);
@@ -217,7 +213,6 @@ describe("createOptionalTrigramIndexConcurrently の索引の定義と再作成"
     const expectedDef = (await indexState(pool))?.def;
     await pool.query(`DROP INDEX ${INDEX_NAME}`);
 
-    // INVALID を作る: 待ちの最中に CONCURRENTLY をキャンセルする（docstring 参照）。
     const holder = await pool.connect();
     const victim = createPostgresClient(requireDatabaseUrl(), {
       options: "-c statement_timeout=500",

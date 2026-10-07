@@ -18,7 +18,7 @@ import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js"
  * `resolveContestedPair` は、両側が contested であるだけでは足りず、互いを指し合っている（相互参照）ときだけ
  * 解決する。片側だけが相手を指している・別々の対に属する2件は、`MemoryStatusConflictError` で断り、何も書かない。
  *
- * 一方向の contested（対向を明示した作成。ADR 0140 が塞いでいない入口）を使うと、「first が second を指す」と
+ * 一方向の contested（対向を明示した作成）を使うと、「first が second を指す」と
  * 「second が first を指す」のどちらか片方だけが成り立つ組を作れる。2つの検査をそれぞれ単独で当てられる。
  */
 
