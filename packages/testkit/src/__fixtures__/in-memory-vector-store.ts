@@ -28,47 +28,15 @@ interface Entry {
 }
 
 /**
- * `VectorHit.distance` の契約（`packages/core/src/interfaces/vector-store.ts`）に合わせて
- * コサイン距離を返す。以前はユークリッド距離だったが、`packages/postgres/src/vector-store.ts`
- * はコサイン距離（pgvector の `<=>`、`vector_cosine_ops`）を使っており、
- * `recall-runtime.ts` は `1 - distance` を similarity として扱う——ユークリッド距離のままでは
- * その意味論が崩れ、in-memory と postgres で「同じ入力に別の順序」が出てしまう。
+ * `VectorHit.distance` の契約どおりコサイン距離を返す（pgvector の `<=>`。`recall-runtime.ts` は `1 - distance` を similarity として扱う）。
+ * `packages/core` のテストファイルは import できない（core の実行時依存が zod のみであることを壊す）ので、`FakeVectorStore` の同じ実装を意図して重複させている。
  *
- * `packages/core/src/__tests__/runtime-fakes.ts` の `FakeVectorStore` に全く同じ実装
- * （`cosineDistance`）が既にあるが、`packages/testkit` は `packages/core` の**テストファイル**を
- * import できない（`packages/core` の実行時依存が zod のみであることを壊すことになる）ため、
- * ここで意図して重複させている。
- *
- * ゼロベクトルはコサインが未定義（0/0）になる。
- *
- * **🔴 訂正（[ADR 0040](../../../../docs/decisions/0040-zero-vector-never-returned.md)）**:
- * ここには以前「pgvector の `<=>` はゼロベクトルに対してエラーを返す」と書いてあったが、
- * **それは誤りだった。実測すると `NaN` を返す**（pgvector 0.8.2。両引数位置・両方ゼロ・
- * `ORDER BY` の中でも例外にならない）。
- *
- * そしてこの実装は「無関係（距離1）」を返していた。**⟹ 同じ呼び出しが adapter によって
- * 別の答えになっていた**——`similarity = 1 - distance` なので in-memory は
- * `similarity = 0`、Postgres は `NaN`。既定の `scoreThreshold`（0.1）では
- * どちらも落ちるが、**呼び出し側が `scoreThreshold` を 0 以下にすると
- * in-memory だけが候補を返していた。**
- *
- * **契約（ADR 0040）: ゼロベクトルが絡む候補は `recall()` の結果に出ない。**
- * `NaN` はどんな数との比較も false になるので、**どんな `scoreThreshold` でも通らない。**
- * `Infinity` は `scoreThreshold = -Infinity` で通ってしまうため使わない。
- *
- * **Issue #867 / 案B: 長さが違う2本を比較不能として扱う。** 以前はここが
- * `Math.max(a.length, b.length)` まで回し、足りない側を `?? 0` で zero-pad してから
- * 計算を続けていた——ノルムが0にならないため ADR 0040 の `NaN` 経路に乗らず、
- * 意味の無い実数の類似度を普通のヒットとして返していた（`omitted` にも何も残らない）。
- * `Postgres`（pgvector）は同じ入力で「different vector dimensions」の DB エラーになり、
- * adapter 間で挙動が割れていた。**長さが違う時点で比較不能**——`Math.max`/zero-pad より先に
- * `a.length !== b.length` を見て `NaN` を返す。`PostgresVectorStore.search` も
- * （`packages/postgres/src/vector-store.ts`）同じ場面でゼロベクトルに差し替えて
- * 同じ `NaN` 経路に乗せている。
+ * ゼロベクトルが絡む候補、長さが違う2本は、`NaN` を返す（ADR 0040）: `NaN` はどんな `scoreThreshold` との比較も false になり `recall()` の結果に出ない。
+ * 0 や 1 を返すと `scoreThreshold` が 0 以下のときだけ候補が出て、adapter ごとに答えが割れる。`Infinity` は `scoreThreshold = -Infinity` で通るので使わない。
+ * 長さの検査は `Math.max`/zero-pad より先に置く: zero-pad すると `NaN` 経路に乗らず、意味の無い類似度をヒットとして返す。
  */
 function cosineDistance(a: number[], b: number[]): number {
   if (a.length !== b.length) {
-    // 上の doc コメント（Issue #867 / 案B）参照——長さが違う時点で比較不能。
     return Number.NaN;
   }
   const length = a.length;
@@ -83,8 +51,7 @@ function cosineDistance(a: number[], b: number[]): number {
     normB += bi * bi;
   }
   if (normA === 0 || normB === 0) {
-    // ⚠ 0 でも 1 でも Infinity でもなく NaN を返す。理由は上の doc を参照
-    //（どんな閾値と比べても通らない値でなければ契約を満たせない）。
+    // `NaN` を返す（0・1・`Infinity` ではなく）。理由は上の doc を参照。
     return Number.NaN;
   }
   const similarity = dot / (Math.sqrt(normA) * Math.sqrt(normB));
@@ -92,36 +59,19 @@ function cosineDistance(a: number[], b: number[]): number {
 }
 
 /**
- * `VectorStore` のインメモリ・プレースホルダ実装。索引・pgvector を模さない
- * 最小実装であり、`packages/testkit` の適合テストを実行できることを示すためだけのもの。
+ * `VectorStore` のインメモリ・プレースホルダ実装。索引・pgvector を模さない最小実装。
  *
- * **`memoryStore` を必須のコンストラクタ引数にしている（省略不可）。** `status` /
- * `subjectId` / `decayFloorAt` は Memory の属性であって、ベクトルの属性ではない
- * （`VectorFilter` — `packages/core/src/interfaces/vector-store.ts`）。
- * `packages/postgres/src/vector-store.ts` はこれを `JOIN memories m` で得ている
- * ——ADR 0003（`MemoryStore` が真実の源であり、`VectorStore` は再構築可能な派生索引で
- * あるという非対称）をそのまま実装した形であり、Postgres 側は外部キー
- * （`memory_id → memories(id)`）でこの非対称を強制してもいる。in-memory 実装が
- * `InMemoryMemoryStore` を参照するのは、同じ非対称を写しただけである
- * （`InMemoryOutboxStore` が `InMemoryMemoryStore.outboxJobs` を共有参照で受け取るのと
- * 同じ形、同じ理由）。
+ * `memoryStore` は必須: `status` / `subjectId` / `decayFloorAt` は Memory の属性で、Postgres は `JOIN memories` で得ている。
+ * 省略できると、filter を検査できる adapter と検査できない adapter が同じ緑の出力になる（ADR 0034）。
  *
- * **省略可能にしなかった理由（ADR 0034）**: 省略できると「filter を実際に検査できる
- * adapter」と「検査できない（＝常に無視しても壊れない）adapter」が同じ緑色の出力に
- * なる。このリポジトリは ADR 0011/0025/0027/0028 で同じ族の失敗
- * （名乗れる以上の精度を主張する）を繰り返しており、ここでも繰り返さない。
- *
- * **ベクトルは float4 に丸めて持つ**（Issue #1268）。`upsert` は成分を `Math.fround` で丸めて保存し、`search` は
- * クエリも丸めてから比べる——`@mnemora/postgres`（pgvector）が成分を float4 で持つのに揃え、何が距離の同点になるかを
- * Postgres と同じにする。`getVectors` が返すのも丸めた値である。距離の値の下の桁は Postgres と揃わない
- * （`VectorStore.search` の doc の 2026-09-28 追記を参照）。
+ * ベクトルは float4 に丸めて持つ: `upsert` は成分を `Math.fround` で丸めて保存し、`search` はクエリも丸めてから比べる。
+ * 何が距離の同点になるかを Postgres と揃えるため。`getVectors` が返すのも丸めた値。距離の値の下の桁は Postgres と揃わない。
  */
 export class InMemoryVectorStore implements VectorStore {
   private readonly entries = new Map<string, Entry>();
 
   constructor(private readonly memoryStore: InMemoryMemoryStore) {
-    // ADR 0426: `memory_embeddings_<space>.memory_id` の `ON DELETE CASCADE` に当たる動き——
-    // `memories` の行が消えたら、全 space からその埋め込みを消す。
+    // `memories` の行が消えたら、全 space からその埋め込みを消す（`ON DELETE CASCADE` に当たる動き）。
     memoryStore.onMemoriesDeleted((tenantId, memoryIds) => {
       const idSet = new Set<MemoryId>(memoryIds);
       for (const [key, entry] of this.entries) {
@@ -133,9 +83,7 @@ export class InMemoryVectorStore implements VectorStore {
   }
 
   private key(space: EmbeddingSpaceId, tenantId: string, memoryId: MemoryId): string {
-    // 区切り文字で繋がず、`JSON.stringify` の配列で表す。`provider`・`model` は `:` を含みうる
-    // （`nomic-embed-text:latest` など）。繋いだ文字列の前方一致で空間を絞ると、空間 `{p, m, 3}` が
-    // 空間 `{p, m:3, 3}` のベクトルを拾っていた（`joined-string-keys.postgres.test.ts`）。
+    // 区切り文字で繋がず `JSON.stringify` の配列にする: `provider`・`model` は `:` を含みうる（`nomic-embed-text:latest`）ので、前方一致で空間 `{p, m, 3}` が空間 `{p, m:3, 3}` のベクトルを拾う。
     return JSON.stringify([space.provider, space.model, space.dimensions, tenantId, memoryId]);
   }
 
@@ -146,22 +94,19 @@ export class InMemoryVectorStore implements VectorStore {
     vector: number[],
   ): Promise<void> {
     assertWellFormedCtx(ctx);
-    // ADR 0521: 大文字の id も同じ記憶として受け、小文字（この fixture の id の綴り）で持つ。
+    // 大文字の id も同じ記憶として受け、小文字で持つ。
     memoryId = memoryId.toLowerCase() as MemoryId;
-    // 外部キー相当（ADR 0047）: `memory_embeddings_<space>.memory_id → memories(id)`。
-    // `search` は既に `this.memoryStore.get(...)` を真実の源として引いている
-    // （クラス doc 参照）——書き込み側（upsert）でも同じ非対称を強制する。
+    // 外部キー相当: 書き込み側でも `memoryStore` を真実の源とする。
     const memory = await this.memoryStore.get(ctx, memoryId);
     if (!memory) {
       throw new Error(`InMemoryVectorStore: memory not found for tenant: ${memoryId}`);
     }
-    // 穴 O-6-2（ADR 0424）: float4 に収まらない成分は、`Math.fround` で Infinity にして保存せず断る
-    // （Postgres の upsert は pgvector が拒む）。検索のクエリ側は投げない（下の `search`）。
+    // float4 に収まらない成分は、`Infinity` にして保存せず断る（検索のクエリ側は投げない）。
     assertFloat4Vector("InMemoryVectorStore.upsert", vector);
     this.entries.set(this.key(space, ctx.tenantId, memoryId), {
       tenantId: ctx.tenantId,
       memoryId,
-      // Issue #1108: 呼び手の配列と切り離して保存する（Postgres は値を写す）。
+      // 呼び手の配列と切り離して保存する。
       vector: vector.map(Math.fround),
     });
   }
@@ -174,9 +119,9 @@ export class InMemoryVectorStore implements VectorStore {
   ): Promise<VectorHit[]> {
     assertWellFormedCtx(ctx);
     assertWellFormedFilter(opts.filter, "opts.filter");
-    // ADR 0456 H3・ADR 0500: `labels`（`text[]`）・`attributes`（`jsonb`）の NUL は、Postgres ではクエリの時点で拒まれる。
+    // `labels`・`attributes` の NUL は、Postgres ではクエリの時点で拒まれる。
     assertQueryLabelsWithoutNul("search", "filter.labels", opts.filter.labels);
-    // ADR 0543: `filter.labels`（`text[]` の引数）の孤立サロゲートは、Postgres では U+FFFD に置き換わって比べられる（保存側の `tags` も置き換わっている）。
+    // `filter.labels` の孤立サロゲートは、Postgres では U+FFFD に置き換わって比べられる。
     opts = {
       ...opts,
       filter: {
@@ -187,56 +132,32 @@ export class InMemoryVectorStore implements VectorStore {
       },
     };
     assertQueryJsonWithoutNul("search", "filter.attributes", opts.filter.attributes);
-    // 条件の日時・通し番号は Postgres の型へ変換できなければならない（query-check.ts）。
-    // ADR 0547: 読みの口の条件は、下限（4714-11-24 BC）より前でも断らない。Postgres は下限へ寄せてから比べる。列の値は下限以後しか無いので、
-    // 寄せずにそのまま比べても同じ答えになる（`since` 系は全件、`until` 系は0件）。寄せない。Invalid Date だけ断る（`22007`）。
+    // 読みの口の日時は下限（4714-11-24 BC）より前でも断らず、そのまま比べる（Postgres は下限へ寄せるが答えは同じ）。Invalid Date だけ断る。
     assertQueryDate("search", "filter.occurredAfter", opts.filter.occurredAfter);
     assertQueryDate("search", "filter.occurredBefore", opts.filter.occurredBefore);
     assertQueryDate("search", "filter.validAt", opts.filter.validAt);
     assertQueryDate("search", "filter.decayFloorAtAfter", opts.filter.decayFloorAtAfter);
-    // ADR 0505: `decayFloorSeqAfter` は `bigint` の引数（行が無くても、範囲外なら Postgres はクエリの時点で拒む）。
+    // `decayFloorSeqAfter` は `bigint` の引数（範囲外なら、行が無くても Postgres はクエリの時点で拒む）。
     assertQueryBigint("search", "filter.decayFloorSeqAfter", opts.filter.decayFloorSeqAfter);
-    // `PostgresVectorStore.search` は `opts.limit` を生 SQL の `LIMIT` にそのまま渡すため、
-    // 負数を渡すと Postgres 自身が `LIMIT must not be negative` で例外を投げる
-    // （実測済み）。ここで検査せず `hits.slice(0, opts.limit)` へ渡すと、
-    // `Array.prototype.slice` の負数引数は「末尾から数えた除外」という別の意味になり、
-    // ほぼ全件を静かに返してしまう——クエリを投げる前に弾く Postgres 側に揃える。
-    //
-    // ⚠ 負数だけでは足りない——`LIMIT` の SQL パラメータは bigint 型であり、`NaN`/
-    // `Infinity`/非整数（例: `1.5`）を渡すと Postgres は
-    // `invalid input syntax for type bigint: "NaN"` の形で例外を投げる（実測済み）。
-    // `Array.prototype.slice` はこれらを黙って別の値へ丸める
-    // （`ToIntegerOrInfinity`: `NaN`→`0`＝空配列、`Infinity`→全件、`1.5`→切り捨てて`1`）ため、
-    // 検査しないと「limit が全く効いていない/黙って縮む」という誤った結果を返してしまう。
-    // 既存の「負数」ガード（上の段落）とは別の例外メッセージにして、PR #811 が固定した
-    // 「負数は例外」の回帰テストの文言を変えずに済ませる。
+    // 整数でない・負の `limit` は先に断る: `slice` は `NaN`→空、`Infinity`→全件、負数→「末尾から数えた除外」と黙って別の値に丸め、limit が効かない結果を返す。
     if (!Number.isInteger(opts.limit)) {
       throw new Error(`search: limit must be an integer (got ${opts.limit})`);
     }
     if (opts.limit < 0) {
       throw new Error(`search: limit must not be negative (got ${opts.limit})`);
     }
-    // `LIMIT` の bigint に収まらない値（2^63 以上）も Postgres は拒む（実測: `value
-    // "9223372036854776000" is out of range for type bigint`）。
+    // `LIMIT` の bigint に収まらない値も Postgres は拒む。
     if (opts.limit >= 2 ** 63) {
       throw new Error(`search: limit must fit in a Postgres bigint (got ${opts.limit})`);
     }
-    // 索引を模す prefix は space（provider/model/dimensions）だけで絞る。
-    // テナント分離は `opts.filter.tenantId` と `ctx.tenantId` の**両方**の一致で行う（AND）。
-    // ⚠ 以前は「`filter.tenantId` の一致だけで行う。`ctx.tenantId` で二重に絞ると
-    // 『filter.tenantId を無視しても壊れない』誤ったプレースホルダになる」と書いて、
-    // 意図して `ctx` を見ていなかった。Issue #1050 で、隔離の境界は `ctx.tenantId` だと
-    // 決め直した（ADR 0007。`VectorStore.getVectors` の doc も同じ境界）——`filter.tenantId`
-    // だけだと、2つが食い違ったとき `filter` 側のテナントの行が返る。`filter.tenantId` も
-    // 引き続き見るので、`filter` を無視する誤りはこのプレースホルダでも隠れない。
-    // 食い違えば0件（例外は投げない。`PostgresVectorStore` と core の `FakeVectorStore` も同じ）。
-    // 歯は `in-memory-search-ctx-tenant-boundary.test.ts`。
+    // テナント分離は `opts.filter.tenantId` と `ctx.tenantId` の両方の一致で行う（AND）。隔離の境界は `ctx.tenantId`（ADR 0007）だが、
+    // `filter.tenantId` も見ないと、`filter` を無視する誤りがこのプレースホルダで隠れる。食い違えば0件（例外は投げない）。
     const memoryCtx: Ctx = { tenantId: opts.filter.tenantId };
     // pgvector はクエリも `::vector`（float4）に変換してから比べる。
     const float4Query = query.map(Math.fround);
     const hits: (VectorHit & { recordedAt: Date })[] = [];
     for (const [key, entry] of this.entries) {
-      // 空間は `key()` の組の先頭3つを完全一致で比べる（前方一致にしない。`key()` の doc）。
+      // 空間は完全一致で比べる（前方一致にしない。`key()` 参照）。
       const [provider, model, dimensions] = JSON.parse(key) as [string, string, number];
       if (provider !== space.provider || model !== space.model || dimensions !== space.dimensions) {
         continue;
@@ -244,20 +165,16 @@ export class InMemoryVectorStore implements VectorStore {
       if (entry.tenantId !== opts.filter.tenantId || entry.tenantId !== ctx.tenantId) {
         continue;
       }
-      // `status` / `subjectId` / `decayFloorAt` は Memory の属性であり、`memories`
-      // 相当（`this.memoryStore`）を引かないと見られない（クラス doc 参照）。
-      // Postgres 実装の `JOIN memories m ON m.id = e.memory_id` に対応する一段。
+      // `status` / `subjectId` / `decayFloorAt` は Memory の属性なので、`memoryStore` を引いて見る。
       const memory = await this.memoryStore.get(memoryCtx, entry.memoryId);
       if (!memory) {
-        // Postgres の外部キー制約に対応する扱い——真実の源に無い vector は返さない。
+        // 真実の源に無い vector は返さない（外部キー制約に対応する）。
         continue;
       }
       if (opts.filter.status !== undefined && !opts.filter.status.includes(memory.status)) {
         continue;
       }
-      // Issue #608 項目③(b) / ADR 0286: `includeSubjectless: true` のときだけ、
-      // `subject_id IS NULL`（主題なし）も通す——`PostgresVectorStore.search`
-      // （`vector-store.ts` の `m.subject_id = ... OR m.subject_id IS NULL`）と同じ意味論。
+      // `includeSubjectless: true` のときだけ、`subject_id IS NULL`（主題なし）も通す。
       const subjectMatches =
         opts.filter.subjectId === undefined ||
         memory.subjectId === opts.filter.subjectId ||
@@ -265,8 +182,7 @@ export class InMemoryVectorStore implements VectorStore {
       if (!subjectMatches) {
         continue;
       }
-      // Issue #152/#153（ADR 0312）: AND 等値の絞り込み——`PostgresVectorStore.search`
-      // （`m.attributes @> ...::jsonb`）と同じ意味論。
+      // AND 等値の絞り込み（`m.attributes @> ...::jsonb` と同じ）。
       if (opts.filter.attributes !== undefined) {
         const memoryAttributes = memory.attributes ?? {};
         const attributesMatch = Object.entries(opts.filter.attributes).every(
@@ -276,33 +192,19 @@ export class InMemoryVectorStore implements VectorStore {
           continue;
         }
       }
-      // Issue #201 PR-B（ADR 0323）: OR の集合絞り込み——`PostgresVectorStore.search`
-      // （`m.tags && ...::text[]`）と同じ意味論。
+      // OR の集合絞り込み（`m.tags && ...::text[]` と同じ）。
       if (opts.filter.labels !== undefined) {
         const labels = opts.filter.labels;
         if (!memory.tags.some((tag) => labels.includes(tag))) {
           continue;
         }
       }
-      // ADR 0165 決めたこと1・4・12（Issue #305）: 忘却ゲートの2軸。`decayFloorAnyAxis` が
-      // true かつ両方の境界が渡されているときだけ OR で結ぶ——`PostgresVectorStore.search`
-      // （`packages/postgres/src/vector-store.ts`）と同じ意味論。それ以外は今日どおり
-      // AND のまま個別に効く。
-      //
-      // ⚠ **前任の作業者が実際に踏んだ漏れ2**（core commit 5e37afb の doc 参照）:
-      // `decayFloorSeqAfter`/`decayFloorAnyAxis` を一度も見ない実装のままだと、
-      // 'activity'/'either' の忘却ゲートが段1で正しく再現できない。ここで同じ漏れを
-      // 作らない。
+      // 忘却ゲートの2軸。`decayFloorAnyAxis` が true で両方の境界が渡されているときだけ OR で結び、それ以外は AND で個別に効く。
       const passesDecayFloorAt =
         opts.filter.decayFloorAtAfter === undefined ||
-        // 狭義の `>`（境界とちょうど同じものは除外）。postgres 実装の
-        // `m.decay_floor_at > ${decayFloorAtAfter}` と揃える。
+        // 狭義の `>`（境界とちょうど同じものは除外）。
         memory.decayFloorAt > opts.filter.decayFloorAtAfter;
-      // 契約: `decay_floor_seq IS NULL` の行は通す（ADR 0165 決めたこと4「NULL はこの軸には
-      // 床が無い＝活動時計では沈まない」）。ADR 0353（Issue #338）:
-      // `decayFloorSeqUsesSubjectCounters` が true のときだけ、この行の subjectId に
-      // 対応する `S_x`（`this.memoryStore.subjectActivitySeq`）を足す
-      // （`activityFloorSeqAliveCondition`（postgres 側）と同じ式）。
+      // `decay_floor_seq IS NULL` の行は通す（この軸には床が無い）。`decayFloorSeqUsesSubjectCounters` が true のときだけ、その行の subject の `S_x` を足す。
       const effectiveDecayFloorSeqAfter =
         opts.filter.decayFloorSeqAfter === undefined
           ? undefined
@@ -315,12 +217,9 @@ export class InMemoryVectorStore implements VectorStore {
         (memory.decayFloorSeq ?? null) === null ||
         memory.decayFloorSeq! > effectiveDecayFloorSeqAfter;
 
-      // ADR 0505: `decayFloorSeqAfter + S_x` が `bigint` を溢れるとき、Postgres は `22003` で文ごと失敗する。
-      // 失敗するのは、その式が**評価される行**があるときだけ（実測）: `decay_floor_seq` が非 NULL（`IS NULL OR …` の短絡）で、
-      // subject を持つ行（持たなければ `S_x` は 0）。2軸のときは壁時計が左なので、AND（別々の条件）なら壁時計で
-      // 落ちない行だけ、OR（`decayFloorAnyAxis`）なら壁時計が通さない行だけが、活動時計の式まで行く。ほかの条件で
-      // 落ちる行は、式まで行かない（活動時計の条件は最後に評価される）。ここでは印だけ付け、下の最後で
-      // （活動時計の条件の結果で落ちる行も、ほかの条件を通ったなら）投げる。
+      // `decayFloorSeqAfter + S_x` が `bigint` を溢れるとき、Postgres は文ごと失敗する。ただし式が評価される行があるときだけ:
+      // `decay_floor_seq` が非 NULL で subject を持つ行。2軸のときは壁時計が先に評価されるので、壁時計で落ちる行は式まで行かない。
+      // ここでは印だけ付け、最後に（ほかの条件を通った行について）投げる。
       let seqSumOverflows = false;
       let rejectedBySeqCondition: boolean;
       const markSeqSumOverflow = (): void => {
@@ -353,17 +252,14 @@ export class InMemoryVectorStore implements VectorStore {
         markSeqSumOverflow();
         rejectedBySeqCondition = !passesDecayFloorSeq;
       }
-      // ADR 0056: 除外の列挙（status とは向きが逆）。`undefined`/空配列は no-op
-      // （`VectorFilter.excludeProvenanceKinds` の doc 参照）。
+      // 除外の列挙（status とは向きが逆）。`undefined`/空配列は no-op。
       if (
         opts.filter.excludeProvenanceKinds !== undefined &&
         opts.filter.excludeProvenanceKinds.includes(memory.provenance.kind)
       ) {
         continue;
       }
-      // ADR 0059: period（両端とも包含、`>=`/`<=`）。比較対象は
-      // `occurredAt ?? recordedAt`——postgres 実装の
-      // `COALESCE(m.occurred_at, m.recorded_at)` に対応する一段（ADR 0039 の実効時刻）。
+      // period（両端とも包含）。比較対象は `occurredAt ?? recordedAt`（`COALESCE(m.occurred_at, m.recorded_at)` に対応）。
       const effectiveTime = memory.occurredAt ?? memory.recordedAt;
       if (
         opts.filter.occurredAfter !== undefined &&
@@ -377,9 +273,7 @@ export class InMemoryVectorStore implements VectorStore {
       ) {
         continue;
       }
-      // Issue #280（Issue #202 第2弾）: `validAt` ゲート。両端 NULL は「いつでも真」
-      // （`VectorFilter.validAt` の doc 参照）。`validUntil` は狭義の `>`（非包含）——
-      // postgres 実装の `m.valid_until > ${validAt}` と揃える。
+      // `validAt` ゲート。両端 NULL は「いつでも真」。`validUntil` は狭義の `>`（非包含）。
       if (opts.filter.validAt !== undefined) {
         if (memory.validFrom != null && memory.validFrom > opts.filter.validAt) {
           continue;
@@ -402,17 +296,9 @@ export class InMemoryVectorStore implements VectorStore {
         recordedAt: memory.recordedAt,
       });
     }
-    // `PostgresVectorStore.search`（ADR 0170、Issue #339）と同じ3段 tie-break:
-    // 距離 → `recordedAt` DESC → `memoryId` 昇順。以前はここが距離だけのソートで、
-    // 同点の中身は `Array.prototype.sort` の安定性により**挿入順**（＝通常の呼び出し順では
-    // `recordedAt` が古いほうが先）に落ちていた——Postgres 側の「新しい方が先」とは
-    // 逆向きになり、`VectorStore.search` の doc が明記する「同点の順序も adapter の責務」
-    // （距離だけでなく完全なタイブレークまで含めて決定的な順序を返すこと）を満たしていなかった
-    // （`packages/testkit/src/__tests__/in-memory-vector-store-tiebreak.test.ts` が歯）。
+    // 距離 → `recordedAt` DESC → `memoryId` 昇順の3段 tie-break（`PostgresVectorStore.search` と同じ）。距離だけだと同点が挿入順になり、Postgres の「新しい方が先」と逆になる。
     hits.sort((a, b) => {
-      // 距離 `NaN`（ゼロベクトル、ADR 0040）は Postgres の `float8` と同じく、どの有限値よりも
-      // 大きく、`NaN` どうしは同点として扱う（Issue #983）。`a.distance - b.distance` だけだと
-      // `NaN` で比較関数が一貫せず、ゼロベクトルの候補の位置が挿入順しだいで揺れる。
+      // 距離 `NaN`（ゼロベクトル）は Postgres の `float8` と同じくどの有限値よりも大きく、`NaN` どうしは同点とする。`a.distance - b.distance` だと比較関数が一貫しない。
       const aNaN = Number.isNaN(a.distance);
       const bNaN = Number.isNaN(b.distance);
       if (aNaN !== bNaN) return aNaN ? 1 : -1;
@@ -424,12 +310,7 @@ export class InMemoryVectorStore implements VectorStore {
     return hits.slice(0, opts.limit).map(({ memoryId, distance }) => ({ memoryId, distance }));
   }
 
-  /**
-   * Issue #377 / Issue #1412 の続き: `VectorStore.searchMany?` の実装。契約そのものが
-   * 「各クエリを `search()` で単独に呼んだ結果と一致する。同じ key は後勝ち、`Map` の並びは最初に
-   * 現れた位置」なので、`search()` を呼ぶ形にする——例外（`limit`・日時の検査）・float4 の丸め・
-   * テナント境界が `search()` と自動で一致する。往復を束ねる利点は、DB を持たないこの実装には無い。
-   */
+  /** `search()` を呼ぶ形にする: 例外・float4 の丸め・テナント境界が `search()` と自動で一致する（契約は、各クエリを単独に呼んだ結果と一致すること）。 */
   async searchMany(
     ctx: Ctx,
     space: EmbeddingSpaceId,
@@ -438,9 +319,9 @@ export class InMemoryVectorStore implements VectorStore {
   ): Promise<Map<string, VectorHit[]>> {
     assertWellFormedCtx(ctx);
     assertWellFormedFilter(opts.filter, "opts.filter");
-    // `queries` が空でも、Postgres は往復の前に絞りの NUL を断る（ADR 0500）。
+    // `queries` が空でも、Postgres は往復の前に絞りの NUL を断る。
     assertQueryLabelsWithoutNul("searchMany", "filter.labels", opts.filter.labels);
-    // ADR 0543: `filter.labels`（`text[]` の引数）の孤立サロゲートは、Postgres では U+FFFD に置き換わって比べられる（保存側の `tags` も置き換わっている）。
+    // `filter.labels` の孤立サロゲートは、Postgres では U+FFFD に置き換わって比べられる。
     opts = {
       ...opts,
       filter: {
@@ -452,8 +333,7 @@ export class InMemoryVectorStore implements VectorStore {
     };
     assertQueryJsonWithoutNul("searchMany", "filter.attributes", opts.filter.attributes);
     const result = new Map<string, VectorHit[]>();
-    // `queries` が空なら `search()` を一度も呼ばないので、`limit` が不正でも投げない
-    // （`PostgresVectorStore.searchMany` も空配列は往復せず空の Map を返す）。
+    // `queries` が空なら `search()` を呼ばないので、`limit` が不正でも投げない（`PostgresVectorStore.searchMany` も同じ）。
     for (const q of queries) {
       result.set(q.key, await this.search(ctx, space, q.vector, opts));
     }
@@ -465,14 +345,7 @@ export class InMemoryVectorStore implements VectorStore {
     this.entries.delete(this.key(space, ctx.tenantId, memoryId.toLowerCase() as MemoryId));
   }
 
-  /**
-   * `ctx.tenantId` に属する `memoryIds` の行を、**この store が持つ全 space**（`key()` が
-   * 区切る単位のすべて）から消す（Issue #1425、ADR 0382）。`key` は
-   * `[provider, model, dimensions, tenantId, memoryId]` の組から作られるが、この store は
-   * `entries` の値自身にも `tenantId`/`memoryId` を平文で持つ（`key()` を JSON.parse し
-   * 直す必要が無い）——`tenantId`/`memoryId` の一致だけを見て、space（key の先頭3要素）は
-   * 問わない。
-   */
+  /** `ctx.tenantId` に属する `memoryIds` の行を、この store が持つ全 space から消す（space は問わない）。 */
   async deleteAcrossSpaces(ctx: Ctx, memoryIds: readonly MemoryId[]): Promise<void> {
     assertWellFormedCtx(ctx);
     if (memoryIds.length === 0) {
@@ -486,14 +359,10 @@ export class InMemoryVectorStore implements VectorStore {
     }
   }
 
-  /**
-   * Issue #1207 / ADR 0383: `ctx.tenantId` に属する行を、**全 space**から `opts.limit`
-   * を目安に消す。`deleteAcrossSpaces` と同じ「space（key の先頭3要素）は問わず、
-   * `tenantId` の一致だけを見る」形。
-   */
+  /** `ctx.tenantId` に属する行を、全 space から `opts.limit` を目安に消す。 */
   async eraseTenant(ctx: Ctx, opts: EraseTenantStoreOptions): Promise<EraseTenantResult> {
     assertWellFormedCtx(ctx);
-    // ADR 0493: `limit` は `bigint` の引数へ渡される。整数でない・範囲外は Postgres が拒む。
+    // `limit` は `bigint` の引数へ渡される。
     assertQueryBigint("eraseTenant", "limit", opts.limit);
     const matchingKeys: string[] = [];
     for (const [key, entry] of this.entries) {
@@ -518,16 +387,7 @@ export class InMemoryVectorStore implements VectorStore {
     memoryIds: MemoryId[],
   ): Promise<VectorEntry[]> {
     assertWellFormedCtx(ctx);
-    // `key` は space + tenantId + memoryId から機械的に決まる（クラス冒頭の `key` 参照）
-    // ので、tenant 境界は search と同じくキーの一致だけで自然に掛かる——他テナントの
-    // memoryId が渡っても、そのテナントの key には一致しない。
-    //
-    // `PostgresVectorStore.getVectors` は `memory_id = ANY(...)` という集合演算で引く
-    // （実測。`packages/postgres/src/vector-store.ts`）ため、同じ id を複数回渡しても
-    // 一致する行は主キーの性質上1回しか無い（`InMemoryMemoryStore.getMany` の重複 id
-    // 対応、PR #812 と同じ形の不一致）。ここで検査せず `memoryIds` をそのまま for-of
-    // すると、同じ id の `VectorEntry` を重複して返してしまう——`seen` で2回目以降を
-    // スキップし、Postgres の集合演算と同じ「一意な id の集合」に揃える。
+    // 同じ id を複数回渡しても1回しか返さない: Postgres は `memory_id = ANY(...)` の集合演算で引くので、重複した `VectorEntry` を返すと食い違う。
     const seen = new Set<MemoryId>();
     const results: VectorEntry[] = [];
     for (const rawMemoryId of memoryIds) {
