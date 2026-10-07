@@ -16,46 +16,10 @@ import { describe, expect, it } from "vitest";
 import { runNodeScript } from "./spawn-with-deadline.mjs";
 
 /**
- * `scripts/check-local-embedding-fingerprint.mjs`（CLI 入口）の歯。
+ * 「いまの振る舞い」を固定する。保留（exit 2）を期待する `it` は、Issue #586 が名指しする判定表とのずれを焼いている。
+ * #586 の決定が入ったら期待値を意図して書き換える（赤いからという理由だけで直さない）。
  *
- * 🔴🔴 **この歯は「いまの振る舞い」を固定している。「あるべき姿」ではない。**
- *
- * [Issue #586](https://github.com/takecchi/mnemora/issues/586) が、この CLI の
- * `fetchTreeWithRetry` の分岐について**判定表と実装の射程がずれている**ことを
- * 名指ししている——CLI の docstring の判定表は逐語で
- * 「HF API に届かない（再試行3回を尽くしても**ネットワーク失敗**）| 保留 | `2`」と
- * 書いているが、実装は **HTTP 404 も 5xx も 429 も「200 だが応答が配列でない」も、
- * すべて同じ保留（exit 2）へ倒す。**
- *
- * ⟹ **下の `it` のうち「保留（exit 2）」を期待しているものは、その *ずれたままの
- * 現状* を焼いている。** ⛔ **正しい姿を書いているのではない。**
- *
- * ⭐ **だから Issue #586 の判断が降りたら、この歯は赤くなる。それでよい。**
- * **赤くなったら「壊れた」ではなく「#586 の決定が入った」と読むこと**——そのときは
- * 期待値を**意図して**書き換える（決定を運ぶ PR の中で、その ADR と一緒に）。
- * ⛔ **決定が無いまま、赤いからという理由でここを書き換えないこと。**
- *
- * ## なぜこの歯が要るか
- *
- * 【実測 2026-09-21】この CLI（335行）には単体の歯が1本も無かった。判定ロジックの
- * 純関数側は `check-local-embedding-fingerprint-lib.test.mjs` が13本で守っており、
- * `ci.yml` の配線は `ci-yml-local-embedding-fingerprint-wiring.test.mjs` が8本で
- * 守っているが、**「どの事象がどの exit になるか」を決めている `fetchTreeWithRetry` は、
- * そのどちらの守備範囲にも入っていなかった。** ⟹ Issue #586 のずれは、そこに歯が
- * 無かったから誰にも気づかれなかった。
- *
- * ⚠ **ADR 0253「測ったこと」7 の変異試験 A〜G は、この CLI を端から端まで測っている。**
- * ⛔ **しかしそれは ADR の中の1回の実測であって、回帰を守る歯ではない。** 次に誰かが
- * `fetchTreeWithRetry` を触っても、それでは何も鳴らない。
- *
- * ## 測り方
- *
- * CLI の docstring が `--api-base` を逐語でこう名乗っている——「**到達不能な URL を
- * 渡せば到達失敗を、その場で・決定的に再現できる**」。その注入点へ**手元の HTTP
- * スタブ**を向ける。⟹ Hugging Face にも、4ファイル計42MB のモデル一式にも、一切触らない。
- *
- * ⚠ **`spawnSync` を使わない。** スタブのサーバはこのプロセスの中で動くので、
- * 同期的に子プロセスを待つとイベントループが止まってスタブが応答できない。
+ * CLI は `spawnSync` で待たない。スタブのサーバがこのプロセスの中で動くので、同期で待つとイベントループが止まって応答できない。
  */
 
 const script = fileURLToPath(new URL("../check-local-embedding-fingerprint.mjs", import.meta.url));
@@ -66,10 +30,6 @@ const pinnedRevisionDeclaration = fileURLToPath(
   new URL("../local-embedding-pinned-revision.json", import.meta.url),
 );
 
-/**
- * 固定した revision を、CLI（`readPinnedRevisionForCacheLayout`）とは別のやり方
- * （`JSON.parse` を直接呼ぶだけ）で読む。
- */
 function pinnedRevisionIndependently() {
   const parsed = JSON.parse(readFileSync(pinnedRevisionDeclaration, "utf8"));
   if (typeof parsed?.sha !== "string" || parsed.sha.length === 0) {
@@ -78,13 +38,7 @@ function pinnedRevisionIndependently() {
   return parsed.sha;
 }
 
-/**
- * 宣言された repo 名を、**CLI とは別のやり方で**読む。
- *
- * ⭐ CLI 側は正規表現1本で抜いている。ここでは行を探して引用符の中を取る——
- * **わざと違う読み方にしてある。** 両方が同じ値に着くことを下の `it` が確かめるので、
- * 「CLI の正規表現が壊れた」と「宣言そのものが変わった」を区別できる。
- */
+/** CLI とは別のやり方（行を探して引用符の中を取る）で読む。CLI の正規表現が壊れたのか、宣言が変わったのかを区別するため。 */
 function declaredRepoIndependently() {
   const line = readFileSync(providerSource, "utf8")
     .split("\n")
@@ -95,7 +49,7 @@ function declaredRepoIndependently() {
   return parts[1];
 }
 
-/** git の blob hash。CLI/lib とは独立にここで計算する（歯が被検査体を借りない）。 */
+/** git の blob hash。CLI/lib とは独立に計算する（被検査体を借りない）。 */
 function gitBlobSha1(bytes) {
   return createHash("sha1").update(`blob ${bytes.length}\0`).update(bytes).digest("hex");
 }
@@ -104,13 +58,8 @@ const repo = declaredRepoIndependently();
 const pinnedRevision = pinnedRevisionIndependently();
 
 /**
- * 手元の HTTP スタブと一時キャッシュを1組だけ用意して `fn` に渡し、**必ず後始末する。**
- *
- * ⚠ **共有の `afterEach` を使わない。** 下の `it` は `concurrent` で走る——失敗系は
- * CLI の再試行（3回・2秒間隔）を待つので、直列にすると1本あたり約4秒かかり、
- * CI の `Test` ステップを無視できない幅で伸ばす【実測 2026-09-21: 直列 26.0s → 並行 8.8s】。
- * 並行にすると `afterEach` は他のテストが使っている最中の資源まで畳みうるので、
- * **後始末はテストごとに `finally` で閉じる。**
+ * 共有の `afterEach` を使わず、後始末はテストごとに `finally` で閉じる。`it` は `concurrent` で走り、
+ * `afterEach` は他のテストが使用中の資源まで畳みうる。
  *
  * @param {{ files?: Record<string,string>, respond: (entries: object[], url: string) => { status: number, body: unknown } }} setup
  */
@@ -142,16 +91,10 @@ async function withFixture(setup, fn) {
   }
 }
 
-/** CLI を子プロセスで起動して、終了コードと出力を返す。 */
-/**
- * CLI を子として起こして待つ。子が期限（`spawn-with-deadline.mjs` の既定 30 秒）までに close しなければ、
- * 子を kill して「N 秒で close しなかった」と落ちる（`local-embedding-cache-key.test.mjs` と同じ直し）。
- */
 function runCli(args, env) {
   return runNodeScript(script, args, { env });
 }
 
-/** HTTP 状態コードと固定の body を返す `respond`。 */
 const fixed = (status, body) => () => ({ status, body });
 
 describe("check-local-embedding-fingerprint.mjs（CLI）: 宣言された repo の読み取り", () => {
@@ -177,13 +120,8 @@ describe("check-local-embedding-fingerprint.mjs（CLI）: 宣言された repo �
         { files: { "config.json": "{}\n" }, respond: fixed(200, []) },
         async (f) => {
           await runCli(["--cache-dir", f.cacheDir, "--api-base", f.origin]);
-          // ⭐ Issue #586 / ADR 0253 追記1 で前段が入った。1本目が「在るか」、2本目が「読めたか」。
           expect(f.state.paths[0]).toBe(`/api/models/${repo}`);
-          // 🔴 Issue #597 案(a)（ADR 0253 追記4）: この門は `main` を照合し続ける番犬として
-          // 残る決定である。CI が使う revision は
-          // `scripts/local-embedding-pinned-revision.json` に固定したが、**この門はそちらを
-          // 見ない**。⟹ ここが `tree/main` のリテラルのままであることが、その決定の歯である
-          // ——固定した revision へ差し替えると、上流の `main` が動いても門が黙ってしまう。
+          // この門は `main` を照合し続ける番犬で、固定した revision を見ない。ここを固定 revision に差し替えると、上流の `main` が動いても門が黙る。
           expect(f.state.paths[1]).toBe(`/api/models/${repo}/tree/main?recursive=1&expand=1`);
         },
       );
@@ -191,18 +129,6 @@ describe("check-local-embedding-fingerprint.mjs（CLI）: 宣言された repo �
   );
 });
 
-/**
- * `<repo>/<revision>/<filename>` というキャッシュの置き場所（Issue #597 案(a)、
- * ADR 0253 追記5）の正規化。
- *
- * 【背景・実測】CI run 35953212055 で、`examples/chat` が固定した revision を渡す
- * ようになった結果、`@huggingface/transformers` の `FileCache` がこの配置でファイルを
- * 書くようになり、この門が「素性不明」を報告して赤くなった。ここでは
- * `withFixture` の `setup.files`（`repoDir` 直下へ書く）を使わず、`f.cacheDir` へ
- * 直接、revision サブディレクトリを掘って書く——**HF の tree（模擬）の `path` は
- * プレフィックス無しのまま**にすることで、「照合対象は変えていない」ことを歯自体でも
- * 固定する。
- */
 describe("check-local-embedding-fingerprint.mjs（CLI）: revision サブディレクトリの正規化（Issue #597 案(a)、ADR 0253 追記5）", () => {
   it.concurrent(
     "@huggingface/transformers が revision 指定時に書く <repo>/<revision>/<filename> の配置でも一致する",
@@ -283,11 +209,6 @@ describe("check-local-embedding-fingerprint.mjs（CLI）: revision サブディ�
   );
 });
 
-/**
- * `@mnemora/local-embedding` が `revision` を渡されたときに置く配置
- * `<cacheDir>/<encodeURIComponent(revision)>/<repo>/<filename>`（Issue #1403・ADR 0365）。
- * CI では、`revision` を渡さないステップの平たい配置と同じキャッシュに並ぶ。
- */
 describe("check-local-embedding-fingerprint.mjs（CLI）: revision ごとの根（Issue #1403、ADR 0365）", () => {
   it.concurrent("<cacheDir>/<固定revision>/<repo>/<filename> の配置でも一致する", async () => {
     const contents = Buffer.from('{"ok":true}\n', "utf8");
@@ -335,8 +256,6 @@ describe("check-local-embedding-fingerprint.mjs（CLI）: tree API の応答ご�
         const r = await runCli(["--cache-dir", f.cacheDir, "--api-base", f.origin]);
         expect(r.stdout).toContain("一致: 手元の 1 本すべてが宣言された repo の内容と一致した。");
         expect(r.code).toBe(0);
-        // ⭐ 存在確認1回 ＋ tree 1回。**正常系で増える往復はちょうど1回である**
-        // （200 を見た時点で返すので、前段の再試行の待ち時間は発生しない）。
         expect(f.state.hits).toBe(2);
       },
     );
@@ -367,10 +286,7 @@ describe("check-local-embedding-fingerprint.mjs（CLI）: tree API の応答ご�
     );
   });
 
-  // Issue #1784（#563 の確かめ直し）: 読めなかったファイルが1本でもあれば、ほかが一致していても赤（exit 1）。
-  // 判定（compareFingerprints）は読めたファイルだけを見るので、最後の「一致かつ読めないもの無し」の条件を
-  // 「一致」だけに緩めても、以前の歯はどれも赤にならなかった【実測】。
-  // ⚠ root は権限 000 のファイルも読めるので、この場面を作れない。root では skip する。
+  // root は権限 000 のファイルも読めるので、この場面を作れない。root では skip する。
   it.skipIf(process.getuid?.() === 0)(
     "200 ＋ 1本は一致・1本は読めない ⟹ 赤（exit 1）。読めなかったファイルを名指しする",
     async () => {
@@ -405,14 +321,9 @@ describe("check-local-embedding-fingerprint.mjs（CLI）: tree API の応答ご�
         },
         async (f) => {
           const r = await runCli(["--cache-dir", f.cacheDir, "--api-base", f.origin]);
-          // 🔴 **この期待値は 2026-09-21 に 2 から 1 へ意図して書き換えた。**
-          // 元は「届いているのに保留になる」という #586 が名指ししたずれを固定していた。
-          // ⟹ その決定（ADR 0253 追記1）が入ったので、歯もそれに合わせた。
-          // ⛔ **黙って直したのではない。**
           expect(r.stderr).toContain("赤（mismatch）");
           expect(r.stderr).toContain("Hugging Face に存在しない");
           expect(r.code).toBe(1);
-          // 前段が3回とも 404 を見て初めて赤になる（一過性の 404 で必須ジョブを止めない）。
           expect(f.state.hits).toBe(3);
         },
       );
@@ -470,7 +381,6 @@ describe("check-local-embedding-fingerprint.mjs（CLI）: tree API の応答ご�
           const r = await runCli(["--cache-dir", f.cacheDir, "--api-base", "http://127.0.0.1:1"]);
           expect(r.stderr).toContain("保留（undetermined）");
           expect(r.code).toBe(2);
-          // スタブは立てたが、届き先が違うので1度も叩かれていない。
           expect(f.state.hits).toBe(0);
         },
       );
@@ -487,9 +397,7 @@ describe("check-local-embedding-fingerprint.mjs（CLI）: 再試行", () => {
         async (f) => {
           const r = await runCli(["--cache-dir", f.cacheDir, "--api-base", f.origin]);
           expect(r.code).toBe(2);
-          // CLI の RETRY_ATTEMPTS = 3。前段1回（503 ⟹「在るか」に答えない・再試行しない）
-          // ＋ tree 3回 = 4。⚠ 本数を焼き込んでいるのはここだけで、変えたときに鳴るのが
-          // 狙いである（変えるなら判定表の文言も一緒に見ること）。
+          // `RETRY_ATTEMPTS` = 3 なので、前段1回 + tree 3回 = 4。本数を焼き込むのはここだけで、変えたときに鳴らすのが狙い。
           expect(f.state.hits).toBe(4);
         },
       );
@@ -535,9 +443,6 @@ describe("check-local-embedding-fingerprint.mjs（CLI）: HF へ問い合わせ�
     },
   );
 
-  // Issue #1784: 宣言の repo を読めないのは「判定を待つ話」ではなく設定の壊れである ⟹ 赤（exit 1）。
-  // 保留（exit 2）に倒しても、以前の歯は赤にならなかった【実測】（CLI は宣言を自分の位置から相対で読む
-  // ので、壊さずに作るには CLI とその lib を一時の木へ写し、宣言の側だけを差し替える）。
   it.concurrent.each([
     ["repo の宣言が無い", "export const OTHER = 1;\n"],
     ["宣言のファイルが無い", null],
@@ -574,9 +479,6 @@ describe("check-local-embedding-fingerprint.mjs（CLI）: HF へ問い合わせ�
     },
   );
 
-  // Issue #1784: 想定外の例外は実行時エラー（exit 3）で終わる。`main().catch` を exit 0 に倒しても、
-  // 以前の歯は赤にならなかった【実測】（例外を起こす場面が、どの歯にも無かった）。
-  // ここでは「<cache>/<repo> がディレクトリでなくファイル」にして、readdir を例外にする。
   it.concurrent(
     "想定外の例外（キャッシュの repo の位置がファイル）⟹ 実行時エラー（exit 3）。緑にしない",
     async () => {
@@ -599,7 +501,6 @@ describe("check-local-embedding-fingerprint.mjs（CLI）: HF へ問い合わせ�
 });
 
 describe("check-local-embedding-fingerprint.mjs（CLI）: 前段「宣言が指す先が在るか」（Issue #586 / ADR 0253 追記1）", () => {
-  /** モデル情報 API と tree API で別々の応答を返す respond。 */
   const byPath = (info, tree) => (entries, url) =>
     url.includes("/tree/") ? tree(entries) : info(entries);
 
@@ -633,7 +534,7 @@ describe("check-local-embedding-fingerprint.mjs（CLI）: 前段「宣言が指�
         },
         async (f) => {
           const r = await runCli(["--cache-dir", f.cacheDir, "--api-base", f.origin]);
-          // ⛔ 429 を赤にしてはならない——外部要因で必須ジョブを止めることになる。
+          // 429 は赤にしない（外部要因で必須ジョブを止めない）。
           expect(r.stderr).not.toContain("Hugging Face に存在しない");
           expect(r.stdout).toContain("宣言された repo の存在確認: undetermined（HTTP 429）");
           expect(r.code).toBe(2);
@@ -674,16 +575,7 @@ describe("check-local-embedding-fingerprint.mjs（CLI）: 前段「宣言が指�
 });
 
 describe("check-local-embedding-fingerprint.mjs（CLI）: tree の形が変わったときの診断（Issue #586 発見2 / ADR 0253 追記2）", () => {
-  /**
-   * ⭐ **ここは文面そのものを assert する。**
-   *
-   * この検査が守っているのは exit コードではない——**判定は1つも変えていない**。
-   * 守っているのは「赤くなったときに、読んだ人が真因に辿り着けるか」である。
-   * ⟹ **赤の逐語は、欠陥の中身を人間の言葉で残す唯一の場所**なので、そこを固定する。
-   *
-   * 🔴 **以前の文面は「素性不明（HF の tree に無い）」だけで、読んだ人を
-   * 「キャッシュが汚れた」へ誘導していた**（真因は HF の応答の形の変化）。
-   */
+  /** 文面そのものを assert する。守っているのは exit コードではなく、赤くなったときに読んだ人が真因に辿り着けること。 */
 
   it.concurrent(
     "⭐ oid も lfs.oid も無いエントリが在ると、件数と『応答の形が変わった可能性』を印字する",
@@ -691,7 +583,6 @@ describe("check-local-embedding-fingerprint.mjs（CLI）: tree の形が変わ�
       await withFixture(
         {
           files: { "config.json": '{"ok":true}\n' },
-          // HF が hash の返し方を変えた状況: path は在るが oid が無い。
           respond: (entries) => ({
             status: 200,
             body: entries.map(({ oid, ...rest }) => ({ ...rest, sha: oid })),
@@ -702,7 +593,6 @@ describe("check-local-embedding-fingerprint.mjs（CLI）: tree の形が変わ�
           expect(r.stderr).toContain("hash を取れないエントリが 1 件あった");
           expect(r.stderr).toContain("Hugging Face の応答の形が変わった可能性がある");
           expect(r.stderr).toContain("hash を取れなかった tree エントリ: config.json");
-          // ⛔ 判定は変えていない。手元のファイルが素性不明になるので、従来どおり赤。
           expect(r.stdout).toContain("素性不明（HF の tree に無い）: config.json");
           expect(r.code).toBe(1);
         },
@@ -725,7 +615,6 @@ describe("check-local-embedding-fingerprint.mjs（CLI）: tree の形が変わ�
           const r = await runCli(["--cache-dir", f.cacheDir, "--api-base", f.origin]);
           expect(r.stderr).toContain("file でも directory でもないエントリが 2 件あった");
           expect(r.stderr).toContain("Hugging Face の応答の形が変わった可能性がある");
-          // 手元のファイルは正しく一致しているので、判定は緑のまま。
           expect(r.code).toBe(0);
         },
       );
@@ -740,13 +629,11 @@ describe("check-local-embedding-fingerprint.mjs（CLI）: tree の形が変わ�
           files: { "config.json": '{"ok":true}\n' },
           respond: (entries) => ({
             status: 200,
-            // 手元に無いファイル（onnx/model.onnx）のほうだけ oid を落とす。
             body: [...entries, { type: "file", path: "onnx/model.onnx" }],
           }),
         },
         async (f) => {
           const r = await runCli(["--cache-dir", f.cacheDir, "--api-base", f.origin]);
-          // ⭐ 判定は緑（手元の1本は一致している）。それでも理由は出る。
           expect(r.code).toBe(0);
           expect(r.stderr).toContain("hash を取れないエントリが 1 件あった");
           expect(r.stderr).toContain("hash を取れなかった tree エントリ: onnx/model.onnx");
@@ -759,7 +646,6 @@ describe("check-local-embedding-fingerprint.mjs（CLI）: tree の形が変わ�
     await withFixture(
       {
         files: { "config.json": '{"ok":true}\n' },
-        // ⭐ directory エントリは正常なので、数に入ってはならない。
         respond: (entries) => ({
           status: 200,
           body: [...entries, { type: "directory", path: "onnx" }],
