@@ -1,50 +1,15 @@
 /**
- * `scripts/archive-sweep-cost-summary.mjs`(CI の Job Summary に載せる Markdown を組み立てる
- * CLI)の純関数の側。ファイル I/O・`process.argv`・`process.exit` を一切持たない
- * ——`consolidation-cost-summary-lib.mjs` と同じ分担・同じ理由(Issue #209)。
+ * 純関数の側。ファイル I/O・`process.argv`・`process.exit` を持たない。
  *
- * `examples/chat` の `archive-sweep-cost` サブコマンド(`MNEMORA_ARCHIVE_SWEEP_JSON` が
- * 吐く JSON、`examples/chat/src/archive-sweep-json.ts` の `ArchiveSweepCostRunJson`)を
- * Markdown へ変換する。
+ * ⛔ 門にしない。基準値との diff は出すが、相違では落とさない(標本が少なく閾値の門に足りない。ADR 0088 §2.1)。
+ * 非0にするのは入力が壊れているときだけ。
  *
- * ## ⛔ 門にしない。ただし基準値とは比べる(渡された場合)
+ * ⛔ `--baseline` は省略できる作りのままにする(手元実行・単体テストのため)。
  *
- * `consolidation-cost-summary.mjs`(基準値の diff は ADR 0088 §3 由来、相違では
- * 落とさないのは同 ADR「決めたこと」4番・§2.1 由来)と同じ形を踏襲する: 基準値と
- * diff を取って Job Summary に出し、**かつ**相違では落とさない(exit 0)。標本は
- * probe 7件であり、閾値の門を置くには足りない。非0になるのは入力そのものが
- * 壊れているときだけ。
- *
- * 🔴 **この PR では `examples/chat/archive-sweep-baseline.json` を作らない**
- * (この作業環境に DB が無く、捏造した数値を基準値として残さないため。初回 CI の
- * artifact を後続 PR で基準値にする)。⟹ `--baseline` は省略可能でなければならない。
- * （2026-10-03 訂正）`examples/chat/archive-sweep-baseline.json` は、いまは在る。`ci.yml` の
- * `archive-sweep-cost` ジョブはそれを `--baseline` に渡している。`--baseline` を省略できる
- * 作りは、手元実行・単体テストのために今も変えていない。
- *
- * ## 🔴 `before` 段の `usageChars`/`usageEstimatedTokens`/`usageIndexChars` は厳密等価では比べない(ADR 0123 / Issue #223)
- *
- * `before`(掃引前)段の active な母集合は、この bench では74件(このリポジトリの実測時点)を
- * decay 込みで順位付けする。壁時計時間のわずかな差で順位境界の記憶が入れ替わり、
- * carry される内容の文字数・トークン数(`usageChars`/`usageEstimatedTokens`/
- * `usageIndexChars`)が run 間で **0.2648%〜1.2671%** 動く(Issue #223、既存 CI artifact
- * 7 run の実測)。一方 `goldRank`/`carriedCount`/`omittedArchivedCount` などは同じ7 runで
- * 1バイトも動かず、`after`(掃引後、母集合14件)の全欄も1バイトも動かない。
- *
- * この bench が捕まえたいのは「掃引が『載る量』を減らしたか」「掃引で想起の質が
- * 落ちていないか」であり、どちらも `usageChars` が 4302→665(約85%減)・`goldRank` が
- * 1.29→1.29(不変)という2桁大きい効果として出る。0.2648%〜1.2671%の揺れはその2桁下であり、
- * 厳密等価で相違を出し続けても、この揺れを「回帰」と区別する情報を何も足さない
- * ——`time-term-summary-lib.mjs` が `freshnessRatio`/`decayRatio`/`totalRatio` について
- * 既に採っている規律(壁時計時間に依存する連続値は比較から除外する)と同じ理由で、
- * `before` 段の `usage*` 3欄を **比較(mismatch のカウント)からは外す**。
- *
- * ただし `time-term` とは1点だけ違う形にする——`before.usageChars` は Issue #209 の
- * 受け入れ条件そのもの(掃引で載る量が減ったか)に使う中心的な値であり、
- * `freshnessRatio` のように「artifact にだけ残せばよい」脇役の値ではない。
- * ⟹ 比較(件数)からは外すが、**summary には基準値と実測を並べた表として残す**
- * (`buildBeforeUsageInfoSection`)——回帰が起きても人が表を読めば気づける形にする。
- * `after` 段の `usage*` は除外しない(7 run で不動という前提が崩れたら、まずここが動く)。
+ * 🔴 `before` 段の `usageChars`/`usageEstimatedTokens`/`usageIndexChars` は厳密等価で比べない。
+ * decay が壁時計時間に依存して順位境界が入れ替わり、run 間で動く(ADR 0123)。
+ * 比較(mismatch の件数)からは外すが、summary には基準値と実測を並べた表として残す
+ * (`buildBeforeUsageInfoSection`)。`after` 段は除外しない。
  */
 
 const REQUIRED_STORE_FIELDS = [
@@ -116,10 +81,6 @@ function findSweepProblems(sweep) {
   return problems;
 }
 
-/**
- * 1 phase(before/after)の形を検査する。`requireProbes: true` のときは
- * `recall.*.probes` 配列の存在も要求する(measured 側だけが要る)。
- */
 function findPhaseProblems(phase, label, { requireProbes }) {
   if (!isObject(phase)) {
     return [`${label} がオブジェクトでない`];
@@ -196,16 +157,12 @@ function findTopLevelProblems(data) {
 }
 
 /**
- * 🔴 `examples/chat/src/local-embedding-warmup.ts` の `WEIGHTS_UNAVAILABLE_PREFIX` と
- * 同じ文言をここに逐語で持つ(`consolidation-cost-summary-lib.mjs` と同じ二重管理。
- * このファイルは素の `.mjs` であり TS 側の定数を import できない)。
+ * 🔴 `examples/chat/src/local-embedding-warmup.ts` の `WEIGHTS_UNAVAILABLE_PREFIX` と同じ文言を逐語で持つ。
+ * 素の `.mjs` は TS 側の定数を import できない。
  */
 const WEIGHTS_UNAVAILABLE_PHRASE = "重みを取得できなかったので、値は測っていない";
 
 /**
- * `MNEMORA_ARCHIVE_SWEEP_JSON` が吐いた JSON(パース済み)の形を検査する。
- * `status: "weights_unavailable"` それ自体は壊れた入力ではない。
- *
  * @param {unknown} data
  * @returns {{ ok: true, value: Record<string, unknown> } | { ok: false, error: string }}
  */
@@ -232,10 +189,6 @@ export function validateMeasured(data) {
 }
 
 /**
- * 基準値ファイル(`examples/chat/archive-sweep-baseline.json`、パース済み)の形を検査する。
- * **基準値は常に `status: "measured"` であること。**`probes` 配列は要求しない
- * (基準値は before/after・store・mean だけを持つ軽量な形でよい)。
- *
  * @param {unknown} data
  * @returns {{ ok: true, value: Record<string, unknown> } | { ok: false, error: string }}
  */
@@ -258,10 +211,6 @@ export function validateBaseline(data) {
   return { ok: true, value: /** @type {Record<string, unknown>} */ (data) };
 }
 
-// ---------------------------------------------------------------------------
-// 差分
-// ---------------------------------------------------------------------------
-
 const TOP_DIFF_FIELDS = [
   "llmMode",
   "embeddingMode",
@@ -275,12 +224,10 @@ const STORE_DIFF_FIELDS = REQUIRED_STORE_FIELDS.map((f) => `store.${f}`);
 const MEAN_DIFF_FIELDS = [...REQUIRED_MEAN_FIELDS, "goldRank", "goldRankExcludedCount"];
 
 /**
- * `before` 段でだけ、壁時計時間に依存して run 間で揺れる連続値(ADR 0123 / Issue #223)。
- * `after` 段では除外しない——7 run で不動という前提が崩れたら、まずここで検知したい。
+ * ⛔ `after` 段は除外しない。動かないという前提が崩れたら、まずここで検知したい。
  */
 const NOISY_BEFORE_ONLY_USAGE_FIELDS = ["usageChars", "usageEstimatedTokens", "usageIndexChars"];
 
-/** `label`("before"/"after")に応じて、実際に厳密等価で比較する mean の欄を返す。 */
 function meanDiffFieldsForLabel(label) {
   if (label === "before") {
     return MEAN_DIFF_FIELDS.filter((field) => !NOISY_BEFORE_ONLY_USAGE_FIELDS.includes(field));
@@ -295,8 +242,6 @@ function readPath(obj, path) {
 }
 
 /**
- * 1 phase(before/after)の実測と基準値を比較する。
- *
  * @param {Record<string, any>} measuredPhase
  * @param {Record<string, any> | undefined} baselinePhase
  * @param {string} label
@@ -424,15 +369,7 @@ function buildDiffSection(measured, baseline) {
   return lines.join("\n");
 }
 
-// ---------------------------------------------------------------------------
-// `before` 段の usage* — 比較(mismatch のカウント)からは外すが、表示はする(ADR 0123)
-// ---------------------------------------------------------------------------
-
 /**
- * `before` 段の `usageChars`/`usageEstimatedTokens`/`usageIndexChars` を、unbudgeted +
- * 全 budget 段について集める。`baselinePhase` が無ければ `baseline` は常に `undefined`
- * ——このセクションは基準値の有無に関わらず表示する。
- *
  * @param {Record<string, any> | undefined} measuredBefore
  * @param {Record<string, any> | undefined} baselineBefore
  */
@@ -464,9 +401,6 @@ export function collectBeforeUsageInfoRows(measuredBefore, baselineBefore) {
 }
 
 /**
- * `before` 段の usage* を、基準値と実測を並べた表として出す。**mismatch には数えない**
- * ——`buildDiffSection` の一致/不一致判定はこの欄を見ない(`meanDiffFieldsForLabel` 参照)。
- *
  * @param {Record<string, any>} measured
  * @param {Record<string, any> | undefined} baseline
  */
@@ -502,17 +436,9 @@ export function buildBeforeUsageInfoSection(measured, baseline) {
   return lines.join("\n");
 }
 
-// ---------------------------------------------------------------------------
-// 退化検出(recalledActiveShare が 1.0 近傍 = 「全部載せる」に退化している)
-// ---------------------------------------------------------------------------
-
-/** `consolidation-cost-summary-lib.mjs` と同じ閾値・同じ理由。 */
 const DEGENERATE_SHARE_THRESHOLD = 0.999;
 
 /**
- * measured の before/after・全 budget 段(unbudgeted も含む)を洗い、
- * `mean.recalledActiveShare` が退化しきい値以上の行を集める。
- *
  * @param {Record<string, any>} measured
  * @returns {{ phase: string, label: string, recalledActiveShare: number }[]}
  */
@@ -541,7 +467,6 @@ export function findDegenerateRecalledActiveShareRows(measured) {
   return rows;
 }
 
-/** 退化検出の節を組み立てる。基準値とは比べない(`consolidation-cost-summary-lib.mjs` と同じ判断)。 */
 export function buildDegenerateShareSection(measured) {
   const rows = findDegenerateRecalledActiveShareRows(measured);
   const lines = ["## 退化検出(recalledActiveShare が 1.0 に近い行)", ""];
@@ -563,10 +488,6 @@ export function buildDegenerateShareSection(measured) {
   return lines.join("\n");
 }
 
-// ---------------------------------------------------------------------------
-// 注意書き
-// ---------------------------------------------------------------------------
-
 function buildCautionSection() {
   return [
     "## 読み方の注意",
@@ -584,11 +505,7 @@ function buildCautionSection() {
   ].join("\n");
 }
 
-/**
- * Markdown を組み立てる。`validateMeasured`/`validateBaseline` を通した値を渡すこと。
- *
- * @param {{ measured: Record<string, any>, baseline?: Record<string, any> }} input
- */
+/** @param {{ measured: Record<string, any>, baseline?: Record<string, any> }} input */
 export function buildSummaryMarkdown({ measured, baseline }) {
   const title =
     "# archive-sweep-cost bench の実測(掃引(ADR 0114)が「載る量」に効くかの実測。Issue #209)";
