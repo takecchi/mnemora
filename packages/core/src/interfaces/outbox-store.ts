@@ -109,6 +109,9 @@ export interface OutboxStore {
    *
    * ⚠ 既に終端が付いた行でも、行の `attempts` と違う `expectedAttempts` を渡せば {@link OutboxLeaseConflictError} を投げる。`fail` も同じ。
    *
+   * UUID 形式の `jobId` は大文字小文字を区別しない——大文字で渡しても同じジョブに当たる（CAS・先勝ちも同じ行に対して働く）。
+   * UUID 形式でない `jobId` の大文字小文字の扱いは約束しない。`fail` も同じ。
+   *
    * **`opts.at` を渡すと `completedAt` にその値を使う。省略時は実装が壁時計を使う。** runtime はこの欄に `clock.now()` を渡す（ADR 0355）。
    *
    * **`opts.at` が Invalid Date なら例外を投げ、行には触れない。検査は `jobId` の形・行の有無より先**——形の崩れた・存在しない `jobId` でも、`opts.at` が Invalid Date なら例外にする（ADR 0594）。**`opts.at` が `timestamptz` の下限（`Date.UTC(-4713, 10, 24)`）より前なら、同じく `jobId` の形・行の有無より先に `RangeError` を投げ、行には触れない**（下限ちょうどは書ける。ADR 0597）。渡された `Date` は複製して持つ。`fail` も同じ。
@@ -120,7 +123,7 @@ export interface OutboxStore {
     opts?: { at?: Date | undefined },
   ): Promise<void>;
   /**
-   * ジョブを失敗（終端）にし、`error` を記録する。自動の再試行はしない。CAS と冪等の扱いは `complete` と同じ（終端済みの行には、`failedAt`・`lastError` を含めて何も書かない。先勝ち、ADR 0440）。
+   * ジョブを失敗（終端）にし、`error` を記録する。自動の再試行はしない。CAS と冪等の扱いは `complete` と同じ（終端済みの行には、`failedAt`・`lastError` を含めて何も書かない。先勝ち、ADR 0440）。`jobId` の大文字小文字の扱いも `complete` と同じ。
    *
    * **`opts.at` を渡すと `failedAt` にその値を使う。省略時は実装が壁時計を使う。** ⚠ **`available_at` の再計算はしない。**
    *

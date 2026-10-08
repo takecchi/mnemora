@@ -98,6 +98,8 @@ export interface OutboxStoreConformanceOptions {
  */
 const DEFAULT_LEASE_MS = 60_000;
 
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 /**
  * 並行 claim の歯（ADR 0206）の並行数とラウンド数。
  *
@@ -702,6 +704,44 @@ export function describeOutboxStoreConformance(options: OutboxStoreConformanceOp
           leaseMs: DEFAULT_LEASE_MS,
         });
         expect(reclaimed.map((j) => j.id)).toContain(job.id);
+      });
+
+      // `complete` の doc: UUID 形式の `jobId` は大文字小文字を区別しない（CAS・先勝ちも同じ行に対して働く）。`fail` も同じ。
+      // UUID 形式でない `jobId` の扱いは約束していないので、jobId が UUID 形式の adapter でだけ測る。
+      it(`${how} は UUID 形式の jobId を大文字で渡しても、同じジョブの attempts を見て終端を付ける`, async ({
+        skip,
+      }) => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const job = await seedJob(ctx, { kind: "extract" });
+        if (!UUID_PATTERN.test(job.id)) {
+          skip("この adapter の jobId は UUID 形式ではない（大文字小文字の扱いは約束の外）");
+        }
+        const claimed = await store.claimBatch(ctx, {
+          limit: 10,
+          now: new Date(),
+          claimedBy: "worker-1",
+          leaseMs: DEFAULT_LEASE_MS,
+        });
+        const claimedJob = claimed.find((j) => j.id === job.id)!;
+        const upperId = job.id.toUpperCase();
+        const call = (attempts: number): Promise<void> =>
+          how === "complete"
+            ? store.complete(ctx, upperId, attempts)
+            : store.fail(ctx, upperId, "boom", attempts);
+
+        const conflict = await call(claimedJob.attempts - 1).catch((err: unknown) => err);
+        expectStoreError(conflict, isOutboxLeaseConflictError, "OutboxLeaseConflictError");
+
+        await call(claimedJob.attempts);
+
+        const reclaimed = await store.claimBatch(ctx, {
+          limit: 10,
+          now: new Date(Date.now() + DEFAULT_LEASE_MS + 1),
+          claimedBy: "worker-2",
+          leaseMs: DEFAULT_LEASE_MS,
+        });
+        expect(reclaimed.map((j) => j.id)).not.toContain(job.id);
       });
 
       it(`${how} は別テナントの ctx からは、attempts が一致しなくても OutboxLeaseConflictError にならない（存在しない id と同じ扱い）`, async () => {

@@ -619,6 +619,9 @@ export interface MemoryStore {
    *
    * ⚠ **返す順序は規定しない**（`@mnemora/postgres` は `ids` の順を保たず、testkit の fixture は保つ）。
    * `ids` に同じ id が2回以上あっても、結果には1回だけ現れる（両実装とも）。呼び出し側は id で引き当てること。
+   *
+   * UUID 形式の `id` は大文字小文字を区別しない——大文字で渡しても同じ Memory を返す。
+   * UUID 形式でない `id` の大文字小文字の扱いは約束しない。
    */
   getMany(ctx: Ctx, ids: MemoryId[]): Promise<Memory[]>;
   /**
