@@ -204,8 +204,8 @@ function memoryOnlyConditions(filter: VectorFilter): SQL[] {
  */
 function buildFilterConditions(ctx: Ctx, filter: VectorFilter) {
   const conditions = [
-    sql`e.tenant_id = ${filter.tenantId}`,
-    sql`e.tenant_id = ${ctx.tenantId}`,
+    sql`lower(e.tenant_id) = lower(${filter.tenantId})`,
+    sql`lower(e.tenant_id) = lower(${ctx.tenantId})`,
     ...memoryOnlyConditions(filter),
   ];
   return sql.join(conditions, sql` AND `);

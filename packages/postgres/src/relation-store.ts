@@ -152,11 +152,11 @@ export class PostgresRelationStore implements RelationStore {
     const result = kind
       ? await this.db.execute(sql`
           SELECT from_memory_id, to_memory_id, kind, created_at FROM memory_relations
-          WHERE tenant_id = ${ctx.tenantId} AND from_memory_id = ${id} AND kind = ${kind}
+          WHERE lower(tenant_id) = lower(${ctx.tenantId}) AND from_memory_id = ${id} AND kind = ${kind}
         `)
       : await this.db.execute(sql`
           SELECT from_memory_id, to_memory_id, kind, created_at FROM memory_relations
-          WHERE tenant_id = ${ctx.tenantId} AND from_memory_id = ${id}
+          WHERE lower(tenant_id) = lower(${ctx.tenantId}) AND from_memory_id = ${id}
         `);
     return result.rows.map((row) => {
       const r = row as unknown as MemoryRelationRow;
