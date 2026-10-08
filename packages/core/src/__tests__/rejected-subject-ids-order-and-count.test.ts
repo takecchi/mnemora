@@ -87,4 +87,22 @@ describe("ObserveResult.rejectedSubjectIds は、弾いた候補ごとに1件ず
     });
     expect(r.rejectedSubjectIds).toEqual(["user:z", "user:z"]);
   });
+
+  it("違う値が並ぶときも、弾いた順のまま返す（逆順にしない）", async () => {
+    const { runtime } = build(
+      llm([
+        { content: "一つ目", provenanceKind: "stated", subjectId: "user:x" },
+        { content: "一覧内", provenanceKind: "stated", subjectId: "user:a" },
+        { content: "二つ目", provenanceKind: "stated", subjectId: "user:y" },
+        { content: "三つ目", provenanceKind: "stated", subjectId: "user:z" },
+      ]),
+    );
+    const r = await runtime.observe(ctx, {
+      kind: "utterance",
+      text: "発話",
+      subjectId: "alice",
+      subjectCandidates: ["user:a"],
+    });
+    expect(r.rejectedSubjectIds).toEqual(["user:x", "user:y", "user:z"]);
+  });
 });
