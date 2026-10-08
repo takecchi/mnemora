@@ -10,6 +10,15 @@ class Boom extends Error {
 }
 const isBoom = (value: unknown): value is Boom => value instanceof Boom && value.kind === "boom";
 
+function messageOf(fn: () => unknown): string {
+  try {
+    fn();
+  } catch (error) {
+    return String((error as Error).message);
+  }
+  throw new Error("落ちるはずが、落ちなかった");
+}
+
 describe("expectStoreError（Issue #1734 / PR #1514 のすり抜け）", () => {
   it("判定関数を通る値は、そのまま返す", () => {
     const boom = new Boom("x");
@@ -23,6 +32,26 @@ describe("expectStoreError（Issue #1734 / PR #1514 のすり抜け）", () => {
     ["null", null],
   ])("判定関数を通らない値（%s）では落ちる", (_label, value) => {
     expect(() => expectStoreError(value, isBoom, "Boom")).toThrow(/Boom のはずが/);
+  });
+
+  it("落ちるときは、来た値の name・kind・message を添える", () => {
+    class Other extends Error {
+      override readonly name = "OtherError";
+      readonly kind = "other-kind" as const;
+    }
+    const thrown = messageOf(() => expectStoreError(new Other("来た中身"), isBoom, "Boom"));
+    expect(thrown).toContain("OtherError");
+    expect(thrown).toContain("other-kind");
+    expect(thrown).toContain("来た中身");
+  });
+
+  it.each([
+    ["文字列", "来た文字列", ["string", "来た文字列"]],
+    ["数", 42, ["number", "42"]],
+    ["undefined", undefined, ["undefined"]],
+  ])("オブジェクトでない値（%s）で落ちるときは、その型と値を添える", (_label, value, parts) => {
+    const thrown = messageOf(() => expectStoreError(value, isBoom, "Boom"));
+    for (const part of parts) expect(thrown).toContain(part);
   });
 });
 
@@ -58,6 +87,19 @@ describe("expectRejectsWithoutStoreError", () => {
     await expect(
       expectRejectsWithoutStoreError(Promise.reject(new Boom("x")), isBoom, "Boom"),
     ).rejects.toThrow(/Boom ではないはずが/);
+  });
+
+  it("判定関数を通る理由で落ちるときは、来た理由の kind・message を添える", async () => {
+    const thrown = await expectRejectsWithoutStoreError(
+      Promise.reject(new Boom("来た中身")),
+      isBoom,
+      "Boom",
+    ).then(
+      () => "",
+      (error: unknown) => String((error as Error).message),
+    );
+    expect(thrown).toContain("boom");
+    expect(thrown).toContain("来た中身");
   });
 
   it("reject しなければ落ちる", async () => {

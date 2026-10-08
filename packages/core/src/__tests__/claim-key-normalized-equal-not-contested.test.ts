@@ -67,6 +67,22 @@ describe("claim key の検出: 正規化すると同じ content は互いに con
     expect(memB?.status).toBe("active");
   });
 
+  it.each([
+    ["先頭の半角空白", " 住所は東京"],
+    ["先頭と末尾の改行", "\n住所は東京\n"],
+    ["先頭の全角空白（U+3000）", "\u3000住所は東京"],
+    ["末尾の全角空白（U+3000）", "住所は東京\u3000"],
+    ["末尾のタブ", "住所は東京\t"],
+  ])("%sだけが違う同じ文は contested にならない", async (_label, padded) => {
+    const { b, memA, memB } = await observeTwice("住所は東京", padded);
+    expect(b.contestedDetection).toEqual([
+      expect.objectContaining({ matchCount: 0, result: { kind: "no_conflict" } }),
+    ]);
+    expect(memA?.status).toBe("active");
+    expect(memB?.status).toBe("active");
+    expect(memB?.content).toBe(padded);
+  });
+
   it("陽性対照: 本当に違う文は今までどおり contested になる", async () => {
     const { b, memA, memB } = await observeTwice("住所は東京", "住所は大阪");
     expect(b.contestedDetection).toEqual([
