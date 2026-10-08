@@ -50,6 +50,21 @@ describe("toAnthropicRequest", () => {
     expect(result.system).toBe("基本指示\n追加指示");
   });
 
+  it("user と assistant のメッセージは、同じ順・同じ役割で messages に残す", () => {
+    const result = toAnthropicRequest({
+      messages: [
+        { role: "user", content: "1つ目の発話" },
+        { role: "assistant", content: "1つ目の応答" },
+        { role: "user", content: "2つ目の発話" },
+      ],
+    });
+    expect(result.messages).toEqual([
+      { role: "user", content: "1つ目の発話" },
+      { role: "assistant", content: "1つ目の応答" },
+      { role: "user", content: "2つ目の発話" },
+    ]);
+  });
+
   it("system が無ければ system キー自体を持たない", () => {
     const result = toAnthropicRequest({ messages: [{ role: "user", content: "hi" }] });
     expect(result.system).toBeUndefined();
@@ -105,6 +120,21 @@ describe("AnthropicLLMProvider.complete", () => {
     });
     const result = await provider.complete(ctx, { messages: [{ role: "user", content: "hi" }] });
     expect(result).toEqual({ content: "こんにちは" });
+  });
+
+  it("テキストブロックが複数あっても、返すのは最初のテキストブロックの text", async () => {
+    const create = vi.fn().mockResolvedValue({
+      content: [
+        { type: "text", text: "最初" },
+        { type: "text", text: "二番目" },
+      ],
+    });
+    const provider = new AnthropicLLMProvider({
+      model: "claude-test",
+      client: { messages: { create } } as never,
+    });
+    const result = await provider.complete(ctx, { messages: [{ role: "user", content: "hi" }] });
+    expect(result).toEqual({ content: "最初" });
   });
 
   it("テキストブロックが無ければ空文字を返す（例外にしない）", async () => {
@@ -165,6 +195,22 @@ describe("AnthropicLLMProvider.completeStructured", () => {
     expect(callArgs.output_config.format.schema.required).toEqual(["content"]);
   });
 
+  it("maxTokens を指定すれば、completeStructured にもそれが渡る", async () => {
+    const create = vi.fn().mockResolvedValue(textResponse(JSON.stringify({ content: "本文" })));
+    const provider = new AnthropicLLMProvider({
+      model: "claude-test",
+      maxTokens: 512,
+      client: { messages: { create } } as never,
+    });
+
+    await provider.completeStructured(ctx, {
+      prompt: { messages: [{ role: "user", content: "hi" }] },
+      schema: sampleSchema,
+    });
+
+    expect(create.mock.calls[0]![0].max_tokens).toBe(512);
+  });
+
   it("system と role: 'system' のメッセージを正しく組み立てて渡す", async () => {
     const create = vi.fn().mockResolvedValue(textResponse(JSON.stringify({ content: "本文" })));
     const provider = new AnthropicLLMProvider({
@@ -222,6 +268,21 @@ describe("AnthropicLLMProvider.completeStructured", () => {
 
   it("JSON として壊れていれば SyntaxError をそのまま伝播する", async () => {
     const create = vi.fn().mockResolvedValue(textResponse("{ not json"));
+    const provider = new AnthropicLLMProvider({
+      model: "claude-test",
+      client: { messages: { create } } as never,
+    });
+
+    await expect(
+      provider.completeStructured(ctx, {
+        prompt: { messages: [{ role: "user", content: "hi" }] },
+        schema: sampleSchema,
+      }),
+    ).rejects.toBeInstanceOf(SyntaxError);
+  });
+
+  it("text が空白だけなら、空ではなく壊れた JSON として SyntaxError を伝播する", async () => {
+    const create = vi.fn().mockResolvedValue(textResponse(" "));
     const provider = new AnthropicLLMProvider({
       model: "claude-test",
       client: { messages: { create } } as never,

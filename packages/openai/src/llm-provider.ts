@@ -240,7 +240,7 @@ function toOpenAIMessages(
     messages.push({ role: "system", content: prompt.system });
   }
   for (const message of prompt.messages) {
-    messages.push({ role: message.role, content: message.content });
+    messages.push({ role: message.role === "assistant" ? "user" : message.role, content: message.content });
   }
   return messages;
 }
