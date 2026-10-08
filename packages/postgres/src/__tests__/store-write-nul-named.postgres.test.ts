@@ -32,6 +32,7 @@ import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js"
 const A: Ctx = { tenantId: "write-nul-a" };
 const NUL = "x\u0000y";
 const LONE = "x\ud800y";
+const LONE_LOW = "x\udc00y";
 const PAIR = "x\u{1f600}y";
 
 afterAll(async () => {
@@ -288,7 +289,9 @@ const POISON: Array<[string, Partial<NewMemoryEvent>, RegExp]> = [
   ["meta の key の NUL", { meta: { [NUL]: "v" } }, /memory_events\.meta/],
   ["meta の入れ子の NUL", { meta: { a: [{ b: NUL }] } }, /memory_events\.meta/],
   ["meta の孤立サロゲート", { meta: { reason: LONE } }, /memory_events\.meta/],
+  ["meta の孤立した下位サロゲート", { meta: { reason: LONE_LOW } }, /memory_events\.meta/],
   ["actor.id の NUL", { actor: { type: "human", id: NUL } }, /memory_events\.actor/],
+  ["actor.id の孤立サロゲート", { actor: { type: "human", id: LONE } }, /memory_events\.actor/],
 ];
 
 for (const [kitName, makeKit] of KITS) {
@@ -339,6 +342,7 @@ async function listAll(kit: Kit): Promise<MemoryId[]> {
 const MEMORY_POISON: Array<[string, Partial<NewMemory>, RegExp, Partial<NewMemory>]> = [
   ["content", { content: NUL }, /content/, { content: PAIR }],
   ["digest", { digest: NUL }, /digest/, { digest: PAIR }],
+  ["contentHash", { contentHash: NUL }, /contentHash/, { contentHash: PAIR }],
   ["tags", { tags: ["ok", NUL] }, /tags/, { tags: ["ok", PAIR] }],
   ["attributes の値", { attributes: { k: NUL } }, /attributes/, { attributes: { k: PAIR } }],
   [
