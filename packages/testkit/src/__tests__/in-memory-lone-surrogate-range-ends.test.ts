@@ -10,17 +10,17 @@ const ctx: Ctx = { tenantId: "lone-surrogate-range-ends" };
 // 既存の置き換えの試験は U+D800・U+D83D・U+DC00 しか使っておらず、範囲の終わり側の端を縛っていない。
 const LONE_AT_RANGE_ENDS: ReadonlyArray<readonly [label: string, input: string, expected: string]> =
   [
-    ["上位サロゲートの終点 U+DBFF（後ろに文字）", "a\uDBFFb", "a�b"],
-    ["上位サロゲートの終点 U+DBFF（末尾）", "ab\uDBFF", "ab�"],
-    ["下位サロゲートの終点 U+DFFF（前に文字）", "a\uDFFFb", "a�b"],
-    ["下位サロゲートの終点 U+DFFF（先頭）", "\uDFFFab", "�ab"],
-    ["逆順に並んだ端（U+DFFF・U+DBFF）", "x\uDFFF\uDBFFy", "x��y"],
+    ["上位サロゲートの終点 U+DBFF（後ろに文字）", "a\uDBFFb", "a\uFFFDb"],
+    ["上位サロゲートの終点 U+DBFF（末尾）", "ab\uDBFF", "ab\uFFFD"],
+    ["下位サロゲートの終点 U+DFFF（前に文字）", "a\uDFFFb", "a\uFFFDb"],
+    ["下位サロゲートの終点 U+DFFF（先頭）", "\uDFFFab", "\uFFFDab"],
+    ["逆順に並んだ端（U+DFFF・U+DBFF）", "x\uDFFF\uDBFFy", "x\uFFFD\uFFFDy"],
   ];
 
 const PAIRS_AT_RANGE_ENDS: ReadonlyArray<readonly [label: string, value: string]> = [
-  ["U+D800 U+DFFF（U+103FF）", "p-𐏿-p"],
-  ["U+DBFF U+DC00（U+10FC00）", "p-􏰀-p"],
-  ["U+DBFF U+DFFF（U+10FFFF）", "p-􏿿-p"],
+  ["U+D800 U+DFFF（U+103FF）", "p-\uD800\uDFFF-p"],
+  ["U+DBFF U+DC00（U+10FC00）", "p-\uDBFF\uDC00-p"],
+  ["U+DBFF U+DFFF（U+10FFFF）", "p-\uDBFF\uDFFF-p"],
 ];
 
 let counter = 0;
