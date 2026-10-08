@@ -3,6 +3,7 @@ import type { EmbeddingSpaceId } from "@mnemora/core";
 import {
   assertSafeIdentifier,
   embeddingSpaceIndexName,
+  embeddingSpaceMemoryIdIndexName,
   embeddingSpaceTableName,
   embeddingSpaceZeroNormIndexName,
 } from "../embedding-space-table.js";
@@ -175,5 +176,59 @@ describe("embeddingSpaceZeroNormIndexName", () => {
       dimensions: 1536,
     };
     expect(embeddingSpaceZeroNormIndexName(space)).not.toBe(embeddingSpaceIndexName(space));
+  });
+});
+
+/**
+ * 導出は変えてはならない（既存のデプロイのテーブル名・索引名が変わる）ので、正規化の細部と、
+ * 63バイトちょうど（切り詰めない）と64バイト（切り詰める）の境目を、値そのもので固定する。
+ */
+describe("名前の導出の値（正規化と63バイトの境目）", () => {
+  it("英数字以外の連なりは `_` 1つに畳み、`_` を含む連なりも同じに扱い、先頭・末尾の `_` は落とす", () => {
+    expect(
+      embeddingSpaceTableName({ provider: "Open--AI", model: "_text_/-embedding!", dimensions: 3 }),
+    ).toBe("memory_embeddings_open_ai_text_embedding_3");
+  });
+
+  it("英数字を1つも含まない model は空の綴りになる", () => {
+    expect(embeddingSpaceTableName({ provider: "x", model: "日本語モデル", dimensions: 3 })).toBe(
+      "memory_embeddings_x__3",
+    );
+  });
+
+  it("テーブル名: 63バイトちょうどは切り詰めず、64バイトになる入力は切り詰めてハッシュ片を足す", () => {
+    expect(embeddingSpaceTableName({ provider: "p", model: "m".repeat(41), dimensions: 3 })).toBe(
+      `memory_embeddings_p_${"m".repeat(41)}_3`,
+    );
+    expect(embeddingSpaceTableName({ provider: "p", model: "m".repeat(42), dimensions: 3 })).toBe(
+      `memory_embeddings_p_${"m".repeat(34)}_b9751e69`,
+    );
+  });
+
+  it("HNSW 索引名: 63バイトちょうどは切り詰めず、64バイトになる入力は切り詰めてハッシュ片を足す", () => {
+    expect(embeddingSpaceIndexName({ provider: "p", model: "m".repeat(32), dimensions: 3 })).toBe(
+      `idx_memory_embeddings_hnsw_p_${"m".repeat(32)}_3`,
+    );
+    expect(embeddingSpaceIndexName({ provider: "p", model: "m".repeat(33), dimensions: 3 })).toBe(
+      `idx_memory_embeddings_hnsw_p_${"m".repeat(25)}_c084cf35`,
+    );
+  });
+
+  it("ゼロベクトル索引名: 63バイトちょうどは切り詰めず、64バイトになる入力は切り詰めてハッシュ片を足す", () => {
+    expect(
+      embeddingSpaceZeroNormIndexName({ provider: "p", model: "m".repeat(27), dimensions: 3 }),
+    ).toBe(`idx_memory_embeddings_zero_norm_p_${"m".repeat(27)}_3`);
+    expect(
+      embeddingSpaceZeroNormIndexName({ provider: "p", model: "m".repeat(28), dimensions: 3 }),
+    ).toBe(`idx_memory_embeddings_zero_norm_p_${"m".repeat(20)}_d3852a72`);
+  });
+
+  it("memory_id 索引名: 63バイトちょうどは切り詰めず、64バイトになる入力は切り詰めてハッシュ片を足す", () => {
+    expect(
+      embeddingSpaceMemoryIdIndexName({ provider: "p", model: "m".repeat(27), dimensions: 3 }),
+    ).toBe(`idx_memory_embeddings_memory_id_p_${"m".repeat(27)}_3`);
+    expect(
+      embeddingSpaceMemoryIdIndexName({ provider: "p", model: "m".repeat(28), dimensions: 3 }),
+    ).toBe(`idx_memory_embeddings_memory_id_p_${"m".repeat(20)}_d3852a72`);
   });
 });
