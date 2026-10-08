@@ -2955,6 +2955,22 @@ WHERE provenance->>'kind' IS NULL;
 
 **DB マイグレーション**: 要らない。
 
+### 76. conformance suite に約束が増えた——vector・lexical・relation の綴り違いのテナント、`filter.subjectId` の大文字小文字（`@mnemora/testkit`）
+
+[Issue #1940](https://github.com/takecchi/mnemora/issues/1940)。`Ctx` の TSDoc に既に書いてある約束（識別子は正規化せず、完全一致で比べる）を suite に足した。ADR 0546 の作法（足した約束は 🔴 に数える）に揃えた（クローンの判断で、オーナーの判断ではない）。
+
+**何が変わったか**: 中身は [CHANGELOG.md](../CHANGELOG.md) の `[1.4.0]` 節 `### Breaking` の「conformance suite に約束を足した——大文字小文字だけが違う `tenantId` を別のテナントとして扱うこと（`VectorStore`・`LexicalStore`・`RelationStore`）…」の箇条を見ること。**ここには複製しない。**型・シグネチャは変わらない。
+
+**なぜ破壊的と数えるか**: 自前の adapter が、増えた `it` の約束を守っていなければ、新しく落ちる（足した約束は外せない）。
+
+**誰が影響を受けるか**: 自前の `VectorStore`・`LexicalStore`・`RelationStore` を書き、`@mnemora/testkit` の conformance suite に当てている人。足した `it` はどれもフラグ無しで走る。特に、テナントの列や subject の列を、大文字小文字無視で比べている adapter（`lower(tenant_id) = lower($1)`、大文字小文字を区別しない照合順序の列〔MySQL の `_ci` など〕、`citext` の列）。`@mnemora/postgres` と `@mnemora/testkit` の fixture は緑。
+
+**どう直すか**: `tenantId`・`subjectId` は不透明な文字列として、そのままの値で比べる。
+
+**確かめたこと**: `@mnemora/postgres`（tsvector と trigram の両方）と fixture で緑。足した `it` は、それぞれの約束を破る変異（subject の比較を大文字小文字無視にする: InMemory の vector・lexical と Postgres の vector・lexical。テナントの比較を `lower()` にする: Postgres の vector・lexical・trigram・relation）で赤になった（Issue #1940）。**確かめていないこと**: 外部の adapter が実際に赤くなるか。
+
+**DB マイグレーション**: 要らない。
+
 ## 🟡 後方互換だが挙動が変わりうるもの（v0.1.9 → v0.2.0）
 
 （⚠ 2026-09-27: この見出しは PR #1192 が「v1.0.1 → 次の版」の節を書き換えたときに一緒に消えており、下の3項目が「v1.0.2 → 次の版」の節の中に在るように読めていた。見出しを戻した。下の3項目は v0.1.9 → v0.2.0 の話である）

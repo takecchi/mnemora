@@ -339,6 +339,28 @@ export function describeVectorStoreConformance(options: VectorStoreConformanceOp
       expect(hitsB).toEqual([]);
     });
 
+    // 大文字と小文字だけが違う tenantId は別のテナント（`Ctx.tenantId` は不透明な文字列）。上の歯のテナントは綴りがまるごと違うので、テナントの比較を大文字小文字無視にした実装でも緑になる。
+    it("大文字小文字だけが違う tenantId の search には、もう片方の綴りの vector が現れない", async () => {
+      const store = await createStore();
+      const upper: Ctx = { tenantId: "Tenant-Case-Vector" };
+      const lower: Ctx = { tenantId: "tenant-case-vector" };
+      const memoryId = await prepareMemoryId(upper);
+
+      await store.upsert(upper, space, memoryId, [1, 0, 0]);
+
+      const hitsLower = await store.search(lower, space, [1, 0, 0], {
+        limit: 10,
+        filter: { tenantId: lower.tenantId },
+      });
+      const hitsUpper = await store.search(upper, space, [1, 0, 0], {
+        limit: 10,
+        filter: { tenantId: upper.tenantId },
+      });
+
+      expect(hitsLower).toEqual([]);
+      expect(hitsUpper.map((hit) => hit.memoryId)).toEqual([memoryId]);
+    });
+
     // -------------------------------------------------------------------
     // space 分離（ADR 0065）: 同一 tenant で2つの embedding space を同時に使っても
     // search が混同しないこと。`InMemoryVectorStore` は key の prefix
@@ -631,6 +653,26 @@ export function describeVectorStoreConformance(options: VectorStoreConformanceOp
 
       expect(ids).toContain(matchingId);
       expect(ids).not.toContain(otherId);
+    });
+
+    // `subjectId` は等値一致（`VectorFilter.subjectId`）。上の歯の subject は綴りがまるごと違うので、比較を大文字小文字無視にした実装でも緑になる。
+    it("filter.subjectId: 大文字小文字だけが違う subject の Memory は返らない", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      const matchingId = await prepareMemoryId(ctx, { subjectId: "subject-a" });
+      const otherCaseId = await prepareMemoryId(ctx, { subjectId: "Subject-A" });
+
+      await store.upsert(ctx, space, matchingId, [1, 0, 0]);
+      await store.upsert(ctx, space, otherCaseId, [1, 0, 0]);
+
+      const hits = await store.search(ctx, space, [1, 0, 0], {
+        limit: 10,
+        filter: { tenantId: "tenant-1", subjectId: "subject-a" },
+      });
+      const ids = hits.map((hit) => hit.memoryId);
+
+      expect(ids).toContain(matchingId);
+      expect(ids).not.toContain(otherCaseId);
     });
 
     // -------------------------------------------------------------------

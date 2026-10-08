@@ -247,6 +247,26 @@ export function describeLexicalStoreConformance(options: LexicalStoreConformance
       expect(hitsB).toEqual([]);
     });
 
+    // 大文字と小文字だけが違う tenantId は別のテナント（`Ctx.tenantId` は不透明な文字列）。上の歯のテナントは綴りがまるごと違うので、テナントの比較を大文字小文字無視にした実装でも緑になる。
+    it("大文字小文字だけが違う tenantId の search には、もう片方の綴りの Memory が現れない", async () => {
+      const store = await createStore();
+      const upper: Ctx = { tenantId: "Tenant-Case-Lexical" };
+      const lower: Ctx = { tenantId: "tenant-case-lexical" };
+      const memoryId = await prepareMemory(upper, { content: "obsidian shards glimmer" });
+
+      const hitsLower = await store.search(lower, "obsidian shards", {
+        limit: 10,
+        filter: { tenantId: lower.tenantId },
+      });
+      const hitsUpper = await store.search(upper, "obsidian shards", {
+        limit: 10,
+        filter: { tenantId: upper.tenantId },
+      });
+
+      expect(hitsLower).toEqual([]);
+      expect(hitsUpper.map((hit) => hit.memoryId)).toEqual([memoryId]);
+    });
+
     // -------------------------------------------------------------------
     // coverage の降順（同値なら rank の降順）・limit の遵守（ADR 0092）。
     //
@@ -369,6 +389,29 @@ export function describeLexicalStoreConformance(options: LexicalStoreConformance
 
       expect(ids).toContain(matchingId);
       expect(ids).not.toContain(otherId);
+    });
+
+    // `subjectId` は等値一致（`LexicalFilter.subjectId`）。上の歯の subject は綴りがまるごと違うので、比較を大文字小文字無視にした実装でも緑になる。
+    it("filter.subjectId: 大文字小文字だけが違う subject の Memory は返らない", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      const matchingId = await prepareMemory(ctx, {
+        content: "obsidian shards glimmer",
+        subjectId: "subject-a",
+      });
+      const otherCaseId = await prepareMemory(ctx, {
+        content: "obsidian shards glimmer",
+        subjectId: "Subject-A",
+      });
+
+      const hits = await store.search(ctx, "obsidian shards", {
+        limit: 10,
+        filter: { tenantId: "tenant-1", subjectId: "subject-a" },
+      });
+      const ids = hits.map((hit) => hit.memoryId);
+
+      expect(ids).toContain(matchingId);
+      expect(ids).not.toContain(otherCaseId);
     });
 
     // -------------------------------------------------------------------
