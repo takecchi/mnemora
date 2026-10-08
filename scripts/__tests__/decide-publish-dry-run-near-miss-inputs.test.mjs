@@ -49,6 +49,7 @@ describe("decide-publish-dry-run.mjs —— EVENT_NAME が env に渡らなか�
     workDir = mkdtempSync(join(tmpdir(), "decide-publish-dry-run-no-event-"));
     const githubOutput = join(workDir, "github_output");
     writeFileSync(githubOutput, "");
+    /** @type {NodeJS.ProcessEnv} */
     const env = { ...process.env, GITHUB_OUTPUT: githubOutput };
     delete env.EVENT_NAME;
     delete env.DRY_RUN_INPUT;

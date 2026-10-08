@@ -176,14 +176,15 @@ describe("pack-publish-targets.mjs —— おかしな入力では一覧を書�
     expect(existsSync(join(dest, "publish-order.txt"))).toBe(false);
   });
 
-  it("pnpm pack が非0で終わる", () => {
+  it("pnpm pack が tarball を作ったあとで非0で終わる", () => {
+    // postpack は tarball を書いたあとに走る。tarball が1つ在っても、pack の失敗を通さないこと。
     sandbox = makeSandbox({
       manifests: {
         "@fx/alpha": {
           name: "@fx/alpha",
           version: "1.2.3",
           files: ["index.js"],
-          scripts: { prepack: "exit 7" },
+          scripts: { postpack: "exit 7" },
         },
       },
     });
