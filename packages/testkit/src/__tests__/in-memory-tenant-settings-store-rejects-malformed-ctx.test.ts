@@ -48,15 +48,18 @@ const ENTRIES: ReadonlyArray<
 
 describe("InMemoryTenantSettingsStore は ctx を取る全メソッドの入口で壊れた ctx を断る", () => {
   for (const [name, call] of ENTRIES) {
-    it.each(MALFORMED_CTX)(`${name}: %s は malformed_identifier で断り、何も書かない`, async (_label, bad) => {
-      const { store, eventRetentionDays } = setup();
-      const error = await call(store, bad).then(
-        () => undefined,
-        (e: unknown) => e,
-      );
-      expect(isMalformedIdentifierError(error)).toBe(true);
-      expect([...eventRetentionDays.keys()]).toEqual([]);
-    });
+    it.each(MALFORMED_CTX)(
+      `${name}: %s は malformed_identifier で断り、何も書かない`,
+      async (_label, bad) => {
+        const { store, eventRetentionDays } = setup();
+        const error = await call(store, bad).then(
+          () => undefined,
+          (e: unknown) => e,
+        );
+        expect(isMalformedIdentifierError(error)).toBe(true);
+        expect([...eventRetentionDays.keys()]).toEqual([]);
+      },
+    );
 
     it(`${name}: 対をなすサロゲート（絵文字）を含む ctx は断らない`, async () => {
       const { store } = setup();
