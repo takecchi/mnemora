@@ -32,6 +32,12 @@ describe("normalizeClaimKeyPart（Issue #371、ADR 0185/0315 決定3）", () => 
     expect(normalizeClaimKeyPart("favorite   food")).toBe("favorite_food");
   });
 
+  it("空白でない区切り（ハイフン・ドット・スラッシュ）は畳まず、そのまま残す", () => {
+    expect(normalizeClaimKeyPart("favorite-food")).toBe("favorite-food");
+    expect(normalizeClaimKeyPart("home.city")).toBe("home.city");
+    expect(normalizeClaimKeyPart("Work / Role")).toBe("work_/_role");
+  });
+
   it("normalizeClaimKey は subject/predicate の両方に正規化を適用する", () => {
     expect(normalizeClaimKey({ subject: " User ", predicate: "Favorite Food" })).toEqual({
       subject: "user",

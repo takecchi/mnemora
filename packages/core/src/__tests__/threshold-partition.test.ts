@@ -41,6 +41,20 @@ describe("partitionByThreshold（ADR 0044）", () => {
     expect(ids(p.notComparable)).toEqual(["nan-1"]);
   });
 
+  it("閾値のすぐ下（閾値より1つ小さい double）の total は閾値未満に入る", () => {
+    const threshold = 0.1;
+    const bits = new BigInt64Array(new Float64Array([threshold]).buffer);
+    bits[0] = bits[0]! - 1n;
+    const justBelow = new Float64Array(bits.buffer)[0]!;
+    expect(justBelow).toBeLessThan(threshold);
+    const p = partitionByThreshold(
+      [candidate("exact", threshold), candidate("just-below", justBelow)],
+      threshold,
+    );
+    expect(ids(p.passed)).toEqual(["exact"]);
+    expect(ids(p.belowThreshold)).toEqual(["just-below"]);
+  });
+
   it("🔴 三分割は網羅である（合計が入力の件数と一致する）", () => {
     const scored = [
       candidate("a", 0.5),
