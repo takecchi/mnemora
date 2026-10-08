@@ -90,6 +90,78 @@ describe("PostgresVectorStore.search — decayFloorSeqUsesSubjectCounters（ADR 
     expect(hitIds).not.toContain(bob.id);
   });
 
+  it("true のときも、decay_floor_seq が NULL の行は通す（段1の search と aggregateScope の両方）", async () => {
+    await resetTestDatabase();
+    const { db } = await getTestClient();
+    const memoryStore = new PostgresMemoryStore(db);
+    const vectorStore = new PostgresVectorStore(db);
+    const ctx: Ctx = { tenantId: `acpc-null-floor-${Date.now()}` };
+
+    const noFloor = await memoryStore.createMemory(
+      ctx,
+      buildNewMemoryFixture({
+        tenantId: ctx.tenantId,
+        subjectId: "bob",
+        decayBaseSeq: null,
+        decayFloorSeq: null,
+        halfLifeRecalls: null,
+      }),
+    );
+    await vectorStore.upsert(ctx, TEST_EMBEDDING_SPACE, noFloor.id, [1, 0, 0]);
+    // 陽性対照: 同じ subject で床を持つ行は、同じゲートで落ちる。
+    const floored = await memoryStore.createMemory(
+      ctx,
+      buildNewMemoryFixture({
+        tenantId: ctx.tenantId,
+        subjectId: "bob",
+        decayBaseSeq: 0,
+        decayFloorSeq: 9,
+        halfLifeRecalls: 2,
+      }),
+    );
+    await vectorStore.upsert(ctx, TEST_EMBEDDING_SPACE, floored.id, [0, 1, 0]);
+
+    for (let i = 0; i < 10; i += 1) {
+      await memoryStore.createRecall(ctx, {
+        tenantId: ctx.tenantId,
+        subjectId: "bob",
+        query: { text: "q" },
+        omitted: [],
+        usage: {
+          chars: 0,
+          estimatedTokens: 0,
+          counter: "heuristic",
+          byTier: { full: 0, digest: 0, index: 0 },
+          indexChars: 0,
+        },
+        indexBand: { groups: [], totalInScope: 0, countKind: "exact" },
+        explain: { stages: [] },
+        returnedMemories: [],
+        advanceActivityClock: { scope: "subject", subjectId: "bob" },
+      });
+    }
+
+    const hits = await vectorStore.search(ctx, TEST_EMBEDDING_SPACE, [1, 1, 0], {
+      limit: 10,
+      filter: {
+        tenantId: ctx.tenantId,
+        decayFloorSeqAfter: 0,
+        decayFloorSeqUsesSubjectCounters: true,
+      },
+    });
+    const hitIds = hits.map((h) => h.memoryId);
+    expect(hitIds).toContain(noFloor.id);
+    expect(hitIds).not.toContain(floored.id);
+
+    const agg = await memoryStore.aggregateScope(ctx, {
+      subjectId: "bob",
+      decayFloorSeqAfter: 0,
+      decayFloorSeqUsesSubjectCounters: true,
+    });
+    expect(agg.totalInScope).toBe(2);
+    expect(agg.filteredDecayed?.count).toBe(1);
+  });
+
   it("false（既定）のとき、tenant_subject_activity を無視して T のみと比較する（本 ADR 以前と同じ SQL）", async () => {
     await resetTestDatabase();
     const { db } = await getTestClient();

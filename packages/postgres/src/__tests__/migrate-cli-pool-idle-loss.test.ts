@@ -17,37 +17,50 @@ const PACKAGE_ROOT = fileURLToPath(new URL("../../", import.meta.url));
 const TSX_BIN = path.join(PACKAGE_ROOT, "node_modules", ".bin", "tsx");
 const CHILD = path.join("src", "__tests__", "__fixtures__", "migrate-cli-pool-child.ts");
 
-async function runChild(args: string[]): Promise<{ exitCode: number; output: string }> {
+async function runChild(
+  args: string[],
+): Promise<{ exitCode: number; output: string; stdout: string; stderr: string }> {
   const env = { PATH: process.env.PATH ?? "", DATABASE_URL: requireDatabaseUrl() };
   try {
     const { stdout, stderr } = await execFileAsync(TSX_BIN, [CHILD, ...args], {
       cwd: PACKAGE_ROOT,
       env,
     });
-    return { exitCode: 0, output: stdout + stderr };
+    return { exitCode: 0, output: stdout + stderr, stdout, stderr };
   } catch (err) {
     const failure = err as NodeJS.ErrnoException & { stdout?: string; stderr?: string };
     return {
       exitCode: typeof failure.code === "number" ? failure.code : 1,
       output: (failure.stdout ?? "") + (failure.stderr ?? ""),
+      stdout: failure.stdout ?? "",
+      stderr: failure.stderr ?? "",
     };
   }
 }
 
 describe("mnemora-postgres-migrate の Pool: 待機中の接続が DB 側から切られたとき", () => {
-  it("プロセスは落ちず、名乗って続行し、次の問い合わせは新しい接続で通る", async () => {
+  it("2回続けて切られても、そのたびにプロセスは落ちず、名乗って続行し、次の問い合わせは新しい接続で通る", async () => {
     const { exitCode, output } = await runChild([]);
     expect(exitCode, output).toBe(0);
     expect(output).toContain(POOL_ERROR_WARNING_HEAD);
     expect(output).toContain("terminating connection due to administrator command");
-    expect(output).toContain("next query: 1");
+    expect(output).toContain("next query 1: 1");
+    expect(output).toContain("next query 2: 1");
+    expect(output.split(POOL_ERROR_WARNING_HEAD)).toHaveLength(3);
+  });
+
+  it("警告は stderr に出し、stdout には出さない", async () => {
+    const { exitCode, output, stdout, stderr } = await runChild([]);
+    expect(exitCode, output).toBe(0);
+    expect(stderr).toContain(POOL_ERROR_WARNING_HEAD);
+    expect(stdout).not.toContain(POOL_ERROR_WARNING_HEAD);
   });
 
   it("陽性対照: error リスナー無しの素の pg.Pool なら、同じ操作で本当に落ちる", async () => {
     const { exitCode, output } = await runChild(["raw"]);
     expect(exitCode).not.toBe(0);
     expect(output).toContain("Unhandled 'error' event");
-    expect(output).not.toContain("next query:");
+    expect(output).not.toContain("next query");
   });
 
   it("bin/migrate.ts は Pool を自分で new せず、createMigrateCliPool を使う", () => {

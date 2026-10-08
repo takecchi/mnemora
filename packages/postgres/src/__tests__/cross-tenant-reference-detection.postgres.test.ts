@@ -88,6 +88,23 @@ async function seedCorrectRows(s: Awaited<ReturnType<typeof setup>>) {
   }
 }
 
+/** 「DB に触れる前」を確かめるための pool。どの口が呼ばれても記録し、接続は渡さない。 */
+function poolThatMustNotBeTouched(): { pool: Pool; touched: string[] } {
+  const touched: string[] = [];
+  const pool = new Proxy(
+    {},
+    {
+      get(_target, prop) {
+        return () => {
+          touched.push(String(prop));
+          return Promise.reject(new Error(`pool.${String(prop)} を呼んではいけない`));
+        };
+      },
+    },
+  ) as Pool;
+  return { pool, touched };
+}
+
 describe("陰性対照: 食い違いの無いデータは1件も数えない", () => {
   it("空の DB: 4種が決まった順に並び、すべて count 0・samples 空・total 0", async () => {
     const { pool } = await setup();
@@ -282,12 +299,20 @@ describe("count は sampleLimit に左右されない", () => {
   });
 
   it("sampleLimit が負・小数・上限超過・NaN なら、DB に触れる前に RangeError", async () => {
-    const { pool } = await setup();
+    const untouched = poolThatMustNotBeTouched();
     for (const bad of [-1, 1.5, 1001, Number.NaN]) {
-      await expect(findCrossTenantReferences(pool, { sampleLimit: bad })).rejects.toThrow(
+      await expect(findCrossTenantReferences(untouched.pool, { sampleLimit: bad })).rejects.toThrow(
         RangeError,
       );
     }
+    expect(untouched.touched).toEqual([]);
+  });
+
+  it("sampleLimit は上限の 1000 ちょうどまで受け付け、その件数まで返す", async () => {
+    const s = await seedThree();
+    const r = await findCrossTenantReferences(s.pool, { sampleLimit: 1000 });
+    expect(sup(r).count).toBe(3);
+    expect(sup(r).samples).toHaveLength(3);
   });
 });
 
@@ -384,10 +409,11 @@ describe("検出は読み取りだけ", () => {
   });
 
   it("安全でない schema 名は、DB に触れる前に弾く", async () => {
-    const { pool } = await setup();
+    const untouched = poolThatMustNotBeTouched();
     await expect(
-      findCrossTenantReferences(pool, { schema: 'x"; DROP TABLE memories; --' }),
+      findCrossTenantReferences(untouched.pool, { schema: 'x"; DROP TABLE memories; --' }),
     ).rejects.toThrow(/unsafe SQL/);
+    expect(untouched.touched).toEqual([]);
   });
 });
 
