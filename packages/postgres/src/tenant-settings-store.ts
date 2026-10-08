@@ -42,7 +42,7 @@ export class PostgresTenantSettingsStore implements TenantSettingsStore {
     `),
     );
     if (result.rows.length === 0) {
-      return DEFAULT_HALF_LIFE_HOURS;
+      return DEFAULT_HALF_LIFE_RECALLS;
     }
     const row = result.rows[0] as unknown as { default_half_life_hours: number };
     return row.default_half_life_hours;

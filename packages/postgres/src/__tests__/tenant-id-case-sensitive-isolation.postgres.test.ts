@@ -7,6 +7,7 @@ import { InMemoryMemoryStore } from "@mnemora/testkit/fixtures";
 import { buildNewMemoryFixture } from "@mnemora/testkit";
 import { createFakeRuntimeStores } from "../../../core/src/__tests__/runtime-fakes.js";
 import { PostgresMemoryStore } from "../memory-store.js";
+import { PostgresRelationStore } from "../relation-store.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
 const owner = { tenantId: "Tenant-Case-X" };
@@ -46,3 +47,52 @@ describe.each(backends)(
     });
   },
 );
+
+// `Ctx` の doc: 識別子は正規化せず、完全一致で比べる。`memory_relations` を読み書きする4つの口は、それぞれ自分の SQL で
+// `tenant_id` を比べるので、口ごとに綴り違いのテナントから呼ぶ（Postgres の実装を縛る。適合テストには足していない）。
+describe("PostgresRelationStore も tenantId の大文字小文字を区別する", () => {
+  async function linkedPair() {
+    await resetTestDatabase();
+    const { db } = await getTestClient();
+    const memories = new PostgresMemoryStore(db);
+    const relations = new PostgresRelationStore(db);
+    const [a, b] = await Promise.all(
+      ["case-rel-a", "case-rel-b"].map(
+        async (contentHash) =>
+          (
+            await memories.createMemory(
+              owner,
+              buildNewMemoryFixture({ tenantId: owner.tenantId, contentHash }),
+            )
+          ).id,
+      ),
+    );
+    await relations.link(owner, "contradicts", a!, b!);
+    return { relations, a: a!, b: b! };
+  }
+
+  it("link: 綴りだけ違うテナントの記憶を端に取ると、memory not found で断る", async () => {
+    const { relations, a, b } = await linkedPair();
+    await expect(relations.link(other, "contradicts", b, a)).rejects.toThrow(
+      /memory not found for tenant/,
+    );
+    expect(await relations.listRelated(owner, b)).toEqual([]);
+  });
+
+  it("listRelated・listRelatedMany: 綴りだけ違うテナントからは関係が見えない（kind の有無とも）", async () => {
+    const { relations, a, b } = await linkedPair();
+    expect(await relations.listRelated(other, a)).toEqual([]);
+    expect(await relations.listRelated(other, a, "contradicts")).toEqual([]);
+    expect(await relations.listRelatedMany(other, [a])).toEqual([[]]);
+    expect(await relations.listRelatedMany(other, [a], "contradicts")).toEqual([[]]);
+    // 陽性対照: 同じ綴りなら見える。
+    expect((await relations.listRelated(owner, a)).map((r) => r.memoryId)).toEqual([b]);
+    expect((await relations.listRelatedMany(owner, [a]))[0]!.map((r) => r.memoryId)).toEqual([b]);
+  });
+
+  it("unlink: 綴りだけ違うテナントからは、同じ組を指定しても行を消さない", async () => {
+    const { relations, a, b } = await linkedPair();
+    await relations.unlink(other, "contradicts", a, b);
+    expect((await relations.listRelated(owner, a)).map((r) => r.memoryId)).toEqual([b]);
+  });
+});
