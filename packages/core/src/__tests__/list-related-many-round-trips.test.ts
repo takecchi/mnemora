@@ -8,6 +8,7 @@ import { defaultDecayStrategy } from "../strategies/decay.js";
 import type { NewMemory } from "../memory.js";
 import type { MemoryId } from "../ids.js";
 import { createRuntime } from "../runtime.js";
+import { listRelatedLevel, listRelatedManyIfSupported } from "../relation-level.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
 const ctx: Ctx = { tenantId: "tenant-list-related-many" };
@@ -78,13 +79,27 @@ class SpyRelationStore implements RelationStore {
   unlink(c: Ctx, kind: RelationKind, fromId: MemoryId, toId: MemoryId): Promise<void> {
     return this.inner.unlink(c, kind, fromId, toId);
   }
-  listRelated(c: Ctx, memoryId: MemoryId, kind?: RelationKind): Promise<Relation[]> {
+  /** 前の `listRelated` が返る前に次が呼ばれた数の最大（直列なら 1）。 */
+  maxConcurrentListRelated = 0;
+  private inFlightListRelated = 0;
+
+  async listRelated(c: Ctx, memoryId: MemoryId, kind?: RelationKind): Promise<Relation[]> {
     this.listRelatedCalls.push(memoryId);
-    return this.inner.listRelated(c, memoryId, kind);
+    this.inFlightListRelated += 1;
+    this.maxConcurrentListRelated = Math.max(
+      this.maxConcurrentListRelated,
+      this.inFlightListRelated,
+    );
+    try {
+      return await this.inner.listRelated(c, memoryId, kind);
+    } finally {
+      this.inFlightListRelated -= 1;
+    }
   }
   reset(): void {
     this.listRelatedCalls = [];
     this.listRelatedManyCalls = [];
+    this.maxConcurrentListRelated = 0;
   }
 }
 
@@ -332,6 +347,16 @@ describe("recall 段3: listRelatedMany が無い store では今と同じ（起�
 
     expect(withoutMany.spy.listRelatedCalls).toHaveLength(1);
   });
+
+  it("子孫 60（子の段の途中で止まる）: 止まった子より後ろの子には listRelated を呼ばない", async () => {
+    const { stores, withoutMany } = buildRuntimes();
+    await buildTwoHop(stores, 60);
+
+    await withoutMany.runtime.recall(ctx, { vector: [1, 0] });
+
+    // 安全弁 100 = owner 1 + 子 60 + 孫 39。40件目の子の孫で止まるので、owner の1回と子の40回。
+    expect(withoutMany.spy.listRelatedCalls).toHaveLength(41);
+  });
 });
 
 describe("recall 段3: listRelatedMany があるときと無いときで結果が完全に一致する", () => {
@@ -539,6 +564,19 @@ describe("resolveContestedGroup: listRelatedMany が無い store では今と同
     expect(result.outcome.kind).toBe("resolved");
     expect(withoutMany.spy.listRelatedCalls).toEqual(ids);
   });
+
+  it("部分解消の確認は、前の listRelated が返ってから次を呼ぶ（並列に撃たない）", async () => {
+    const { stores, withMany, withoutMany } = buildRuntimes();
+    const ids = await buildComplete(stores, withMany.runtime, 6);
+    withoutMany.spy.reset();
+
+    await withoutMany.runtime.resolveContestedGroup!(ctx, ids.slice(0, 3), {
+      kind: "both_active",
+    });
+
+    expect(withoutMany.spy.listRelatedCalls.length).toBeGreaterThan(1);
+    expect(withoutMany.spy.maxConcurrentListRelated).toBe(1);
+  });
 });
 
 describe("claim key の群の検出: listRelatedMany があると、合併の探索が1段1往復になる", () => {
@@ -626,6 +664,51 @@ describe("claim key の群の検出: listRelatedMany があると、合併の探
     expect([...withMany.memberLabels].sort()).toEqual(
       ["new", "g1a", "g1b", "g1c", "g2a", "g2b", "g2c"].sort(),
     );
+  });
+
+  it("listRelatedMany が無い store では、前の listRelated が返ってから次を呼ぶ（並列に撃たない）", async () => {
+    const { spy } = await mergeTwoGroups(false);
+
+    expect(spy.listRelatedCalls.length).toBeGreaterThan(1);
+    expect(spy.maxConcurrentListRelated).toBe(1);
+  });
+});
+
+describe("1段ぶんの関係の返り値は、渡した ids と同じ並び（i 番目は ids[i] の関係）", () => {
+  /** 3件それぞれに、別の相手を1件ずつつなぐ。ids は昇順でない並びで返す。 */
+  async function threeOrigins(withMany: boolean) {
+    const stores = createFakeRuntimeStores();
+    const spy = new SpyRelationStore(stores.relationStore, withMany);
+    const pairs: Array<[MemoryId, MemoryId]> = [];
+    for (let i = 0; i < 3; i++) {
+      const origin = await contested(stores, `origin${i}`);
+      const partner = await contested(stores, `partner${i}`);
+      await link2(stores, origin.id, partner.id);
+      pairs.push([origin.id, partner.id]);
+    }
+    pairs.sort(([x], [y]) => (x < y ? -1 : x > y ? 1 : 0));
+    const ordered = [2, 0, 1].map((i) => pairs[i]!);
+    return {
+      spy,
+      ids: ordered.map(([origin]) => origin),
+      partners: ordered.map(([, partner]) => [partner]),
+    };
+  }
+
+  it("listRelatedManyIfSupported", async () => {
+    const { spy, ids, partners } = await threeOrigins(true);
+
+    const result = await listRelatedManyIfSupported(spy, ctx, ids, "contradicts");
+
+    expect(result?.map((rs) => rs.map((r) => r.memoryId))).toEqual(partners);
+  });
+
+  it.each([true, false])("listRelatedLevel（listRelatedMany あり: %s）", async (withMany) => {
+    const { spy, ids, partners } = await threeOrigins(withMany);
+
+    const result = await listRelatedLevel(spy, ctx, ids, "contradicts");
+
+    expect(result.map((rs) => rs.map((r) => r.memoryId))).toEqual(partners);
   });
 });
 

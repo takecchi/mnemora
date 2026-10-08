@@ -52,6 +52,7 @@ const SPACE: EmbeddingSpaceId = { provider: "enum-probe", model: "space", dimens
 const DECOYS = [
   "decoy_schema.memory_embeddings_decoy_other_schema",
   "decoy_not_prefixed",
+  "memoryxembeddings_decoy_underscore_as_wildcard",
   "memory_embeddings_decoy_other_column",
   "memory_embeddings_decoy_other_parent",
   "memory_embeddings_decoy_cross_schema_parent",
@@ -70,6 +71,11 @@ async function createDecoys(pool: Pool): Promise<void> {
   );
   await pool.query(
     "CREATE TABLE decoy_not_prefixed (tenant_id text, memory_id uuid REFERENCES memories (id))",
+  );
+  // 接頭辞の `_` の位置だけが別の字。接頭辞を LIKE のパターンとして比べると、`_` が任意の1字に当たって拾われる。
+  await pool.query(
+    `CREATE TABLE memoryxembeddings_decoy_underscore_as_wildcard (
+       tenant_id text, memory_id uuid REFERENCES memories (id))`,
   );
   await pool.query(
     `CREATE TABLE memory_embeddings_decoy_other_column (

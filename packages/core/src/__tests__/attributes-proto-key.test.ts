@@ -35,8 +35,10 @@ function build() {
 }
 
 const parse = (json: string) => JSON.parse(json) as Record<string, string>;
-const PROTO = '{"__proto__":"x"}';
-const PROTO_AND_OTHER = '{"visibility":"internal","__proto__":"x"}';
+/** 入力値が error に現れないことを見るための値。JSON の escape（`\"…\"`）を挟んでも部分一致で見つかるよう、引用符の外の文字列で探す。 */
+const PROTO_VALUE = "proto-value-not-in-error";
+const PROTO = `{"__proto__":"${PROTO_VALUE}"}`;
+const PROTO_AND_OTHER = `{"visibility":"internal","__proto__":"${PROTO_VALUE}"}`;
 
 async function rejection(p: Promise<unknown>): Promise<unknown> {
   return p.then(
@@ -59,7 +61,8 @@ describe("recall の attributes に __proto__", () => {
         origin: "record",
         path: ["attributes", "__proto__"],
       });
-      expect(JSON.stringify(issues)).not.toContain('"x"');
+      expect(JSON.stringify(issues)).not.toContain(PROTO_VALUE);
+      expect((err as ZodError).message).not.toContain(PROTO_VALUE);
     },
   );
 
@@ -113,6 +116,8 @@ describe("陽性対照（やりすぎを弾く）: __proto__ 以外のキーは�
     "__proto",
     "proto__",
     "__PROTO__",
+    "__proto__x",
+    "x__proto__",
   ])("%s は observe で属性として残り、recall の絞り込みにも使える", async (key) => {
     const { runtime, stores } = build();
     const attrs = parse(JSON.stringify({ [key]: "x" }));
