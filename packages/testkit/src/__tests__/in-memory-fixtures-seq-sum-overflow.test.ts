@@ -207,4 +207,24 @@ describe("nowSeq（decayFloorSeqAfter）そのものが bigint に収まらな�
       s.vec.search(ctx, SPACE, [1, 0, 0], { limit: 3, filter: filter(BIG) }),
     ).resolves.toBeDefined();
   });
+  // 下限側。-2^63 ちょうどは Postgres が断り fixture が通す差が残っている（ドライバが `"-9223372036854776000"` にする）ので、ここでは見ない。
+  it("下限の外（-2^63 より下の最初の double と -2^64）も断り、-2^63 の1つ上の double は通す", async () => {
+    const s = await empty();
+    const filter = (n: number) => ({ tenantId: ctx.tenantId, decayFloorSeqAfter: n });
+    for (const n of [-(2 ** 63) - 2048, -(2 ** 64)]) {
+      for (const clock of ["activity", "either"] as const) {
+        await expect(archive(clock, false, n)(await empty())).rejects.toThrow(OVERFLOW);
+      }
+      await expect(s.mem.aggregateScope(ctx, { decayFloorSeqAfter: n })).rejects.toThrow(OVERFLOW);
+      await expect(
+        s.vec.search(ctx, SPACE, [1, 0, 0], { limit: 3, filter: filter(n) }),
+      ).rejects.toThrow(OVERFLOW);
+    }
+    const above = -(2 ** 63) + 1024;
+    await expect(archive("activity", false, above)(await empty())).resolves.toBeDefined();
+    await expect(s.mem.aggregateScope(ctx, { decayFloorSeqAfter: above })).resolves.toBeDefined();
+    await expect(
+      s.vec.search(ctx, SPACE, [1, 0, 0], { limit: 3, filter: filter(above) }),
+    ).resolves.toBeDefined();
+  });
 });

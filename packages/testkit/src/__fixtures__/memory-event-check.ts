@@ -35,7 +35,7 @@ function containsNulOrLoneSurrogate(value: unknown): boolean {
   }
   if (value !== null && typeof value === "object") {
     return Object.entries(value).some(
-      ([k, v]) => hasNulOrLoneSurrogate(k) || containsNulOrLoneSurrogate(v),
+      ([, v]) => containsNulOrLoneSurrogate(v),
     );
   }
   return false;
