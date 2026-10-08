@@ -3025,6 +3025,22 @@ describe("observe: claimKey knownPredicatesFromStore（Issue #691続き、ADR 03
     ]);
   });
 
+  it("knownPredicatesFromStore: true（limit を指定しない）なら、既定の上限 20 件を store へ渡す（ADR 0329）", async () => {
+    const llm = sequencedLlm([
+      { memories: [{ content: "好きな食べ物はラーメン", provenanceKind: "stated" }] },
+      { claims: [{ subject: "user", predicate: "favorite_food" }] },
+    ]);
+    const { runtime, stores } = buildRuntime(llm);
+    const spy = spyOnListActiveClaimPredicates(stores.memoryStore);
+    await runtime.observe(ctx, {
+      kind: "utterance",
+      text: "好きな食べ物はラーメン",
+      claimKey: { enabled: true, knownPredicatesFromStore: true },
+    });
+    expect(DEFAULT_KNOWN_PREDICATES_FROM_STORE_LIMIT).toBe(20);
+    expect(spy.calls).toEqual([{ subjectId: null, limit: 20 }]);
+  });
+
   it("knownPredicatesFromStore: { limit } を渡すと、その件数を store へ渡す", async () => {
     const llm = sequencedLlm([
       { memories: [{ content: "好きな食べ物はラーメン", provenanceKind: "stated" }] },
