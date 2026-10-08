@@ -43,6 +43,10 @@ describe("toVectors", () => {
     ).toThrow(/pooling/);
   });
 
+  it("1階（batch の次元が無い1本のベクトル）なら例外になる", () => {
+    expect(() => toVectors(tensor([0.1, 0.2]))).toThrow(/0 番目が number\[\] ではない/);
+  });
+
   it("配列ですらないものは例外になる", () => {
     expect(() => toVectors(tensor("not a tensor"))).toThrow(/配列ではない/);
     expect(() => toVectors(undefined)).toThrow(/配列ではない/);

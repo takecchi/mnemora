@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Ctx } from "../ctx.js";
 import type { LLMProvider, StructuredRequest } from "../interfaces/llm-provider.js";
+import type { MemoryStore } from "../interfaces/memory-store.js";
 import { ExtractionResultSchema } from "../extraction.js";
 import type { NewMemory } from "../memory.js";
 import { createRuntime } from "../runtime.js";
@@ -135,4 +136,94 @@ describe("観測を持たない記憶は、どの観測の兄弟にもならな�
       }),
     ]);
   });
+});
+
+describe("冪等に既存の行へ解決した候補では、検出は走らない（ADR 0324）", () => {
+  // 1回目の observe が「好きな食べ物はラーメン」を置き、2回目の observe の抽出が同じ本文の候補を2件返す。
+  // 2件目は1件目と同じ行に解決する（`created: false`）ので、検出は1件目の1回だけ走る。
+  function duplicateCandidatesLlm(): LLMProvider {
+    const responses: unknown[] = [
+      { memories: [{ content: "好きな食べ物はラーメン", provenanceKind: "stated" }] },
+      { claims: [{ subject: "user", predicate: "favorite_food" }] },
+      {
+        memories: [
+          { content: "好きな食べ物は寿司", provenanceKind: "stated" },
+          { content: "好きな食べ物は寿司", provenanceKind: "stated" },
+        ],
+      },
+      {
+        claims: [
+          { subject: "user", predicate: "favorite_food" },
+          { subject: "user", predicate: "favorite_food" },
+        ],
+      },
+    ];
+    let index = 0;
+    return {
+      complete: async () => {
+        throw new Error("not used");
+      },
+      completeStructured: async <T>(_ctx: Ctx, req: StructuredRequest<T>): Promise<T> =>
+        req.schema.parse(responses[index++]) as T,
+    };
+  }
+
+  function buildWith(withBatchWrite: boolean) {
+    const stores = createFakeRuntimeStores();
+    if (withBatchWrite) {
+      const original = stores.memoryStore.createMemoryWithOutbox.bind(stores.memoryStore);
+      (stores.memoryStore as MemoryStore).createMemoriesWithOutboxAndEvents = async (
+        c,
+        news,
+        buildEvent,
+        opts,
+      ) => {
+        const written = [];
+        for (const [index, { input, jobKinds }] of news.entries()) {
+          const one = await original(c, input, jobKinds, opts);
+          if (one.created) {
+            await stores.eventStore.append(c, buildEvent(one.memory, []));
+          }
+          written.push({ index, ...one });
+        }
+        return { written, dropped: [] };
+      };
+    }
+    const runtime = createRuntime({
+      memoryStore: stores.memoryStore,
+      outboxStore: stores.outboxStore,
+      vectorStore: stores.vectorStore,
+      eventStore: stores.eventStore,
+      tenantSettingsStore: stores.tenantSettingsStore,
+      llmProvider: duplicateCandidatesLlm(),
+      embeddingProvider: stores.embeddingProvider,
+      hashContent: (content: string) => `sha256(${content})`,
+    });
+    return { runtime, stores };
+  }
+
+  it.each([
+    ["createMemoriesWithOutboxAndEvents を持たない store", false],
+    ["createMemoriesWithOutboxAndEvents を持つ store", true],
+  ] as const)(
+    "%s: 同じ本文の2件目は検出せず、contestedDetection は1件だけ",
+    async (_name, withBatchWrite) => {
+      const { runtime, stores } = buildWith(withBatchWrite);
+      const claimKey = { enabled: true, detectContested: true } as const;
+      const first = await runtime.observe(ctx, { kind: "utterance", text: "ラーメン", claimKey });
+      const active = spy(stores.memoryStore, "findActiveByClaimKey");
+
+      const second = await runtime.observe(ctx, { kind: "utterance", text: "寿司", claimKey });
+
+      expect(second.memoryIds).toHaveLength(2);
+      expect(second.memoryIds[1]).toBe(second.memoryIds[0]);
+      expect(active.calls()).toBe(1);
+      expect(second.contestedDetection).toEqual([
+        expect.objectContaining({
+          memoryId: second.memoryIds[0],
+          result: expect.objectContaining({ kind: "contested", withMemoryId: first.memoryIds[0] }),
+        }),
+      ]);
+    },
+  );
 });
