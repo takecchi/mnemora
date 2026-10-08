@@ -58,4 +58,13 @@ describe("InMemoryLexicalStore.search: クエリの上限の境界（#919）", (
     });
     expect(hits).toHaveLength(1);
   });
+
+  it("語数: token が取れない語（---）も上限の語数に数えるので、その後ろの33語目は使われない", async () => {
+    const lexicalStore = await setup("本文に tailword だけを含む");
+    const distinct = Array.from({ length: DISTINCT_WORDS_CAP - 1 }, (_, i) => `filler${i}`);
+    const search = (words: string[]) =>
+      lexicalStore.search(ctx, words.join(" "), { limit: 50, filter: { tenantId: TENANT } });
+    expect(await search([...distinct.slice(1), "---", "tailword"])).toHaveLength(1);
+    expect(await search([...distinct, "---", "tailword"])).toHaveLength(0);
+  });
 });

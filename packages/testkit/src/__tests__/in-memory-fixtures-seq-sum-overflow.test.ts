@@ -181,6 +181,17 @@ describe("壁時計と活動時計の2軸: 式の左（壁時計）で決まれ�
   });
 });
 
+describe("VectorStore.search: provenance の除外・期間の絞りで落ちる行では、S_x の式を評価しない", () => {
+  it.each([
+    ["excludeProvenanceKinds", () => ({ excludeProvenanceKinds: ["imported"] })],
+    ["occurredAfter", (m: Memory) => ({ occurredAfter: new Date(m.recordedAt.getTime() + 1) })],
+    ["occurredBefore", (m: Memory) => ({ occurredBefore: new Date(m.recordedAt.getTime() - 1) })],
+  ] as const)("%s", async (_, extra) => {
+    const s = await setup(5000);
+    expect(await search(true, extra)(s)).toEqual([]);
+  });
+});
+
 describe("nowSeq（decayFloorSeqAfter）そのものが bigint に収まらないなら、行が無くても断る", () => {
   const empty = async () => {
     const mem = new InMemoryMemoryStore();
