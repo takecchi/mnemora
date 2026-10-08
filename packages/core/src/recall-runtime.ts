@@ -1552,7 +1552,7 @@ async function runRecallBody(
           // ADR 0432 AL-1: 段1と同じ述語（`survivesStatusGate`）。ここでも数えない。
           if (!survivesStatusGate(memory)) continue;
           const effectiveTime = memory.occurredAt ?? memory.recordedAt;
-          if (scope.occurredAfter && effectiveTime < scope.occurredAfter) continue;
+          if (scope.occurredAfter && effectiveTime <= scope.occurredAfter) continue;
           if (scope.occurredBefore && effectiveTime > scope.occurredBefore) continue;
           if (excludeKinds.has(memory.provenance.kind)) continue;
           // 段1の後置ループと同じ述語（`survivesValidityGate` / `survivesDecayGate`）を呼ぶ。ここで述語を書き直すと、
