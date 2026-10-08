@@ -900,6 +900,22 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
       expect(result.map((m) => m.id)).toEqual([memory.id]);
     });
 
+    // `getMany` の doc: `ids` に同じ id が2回以上あっても、結果には1回だけ現れる（返す順序は規定しない）。
+    it("getMany は ids に同じ id が2回以上あっても、結果には1回だけ返す", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      const a = await store.createMemory(
+        ctx,
+        buildNewMemoryFixture({ tenantId: "tenant-1", contentHash: "get-many-dup-a" }),
+      );
+      const b = await store.createMemory(
+        ctx,
+        buildNewMemoryFixture({ tenantId: "tenant-1", contentHash: "get-many-dup-b" }),
+      );
+      const result = await store.getMany(ctx, [a.id, b.id, a.id, a.id]);
+      expect(result.map((m) => m.id).sort()).toEqual([a.id, b.id].sort());
+    });
+
     // -------------------------------------------------------------------
     // Issue #1412 A8（Issue #1238 棚卸し、ADR 0373）: 渡した入力・返した値が、
     // store の中の実体と切り離されている（呼び手が後から書き換えても、store 側は
@@ -1972,6 +1988,53 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
         expect(matches).toEqual([]);
       });
 
+      // 上の歯の「active でない」は archived だけ。contested は findContestedByClaimKey の側の行で、
+      // `status = 'active'` の約束から外れる——取り違えやすい隣の status なので、別に測る。
+      it("status が contested の行は返さない", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const target = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            subjectId: "user-1",
+            contentHash: "contested-gate-target",
+            claimKey: { subject: "user", predicate: "favorite_food" },
+          }),
+        );
+        // ADR 0140: contested は contestedWithId 無しでは作れない。対向は別の述語にして、この問いに紛れ込ませない。
+        const companion = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            subjectId: "user-1",
+            contentHash: "contested-gate-companion",
+            claimKey: { subject: "user", predicate: "favorite_drink" },
+          }),
+        );
+        await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            subjectId: "user-1",
+            contentHash: "contested-gate-other",
+            claimKey: { subject: "user", predicate: "favorite_food" },
+            status: "contested",
+            contestedWithId: companion.id,
+          }),
+        );
+
+        const matches = await store.findActiveByClaimKey!(ctx, {
+          subjectId: "user-1",
+          claimKey: { subject: "user", predicate: "favorite_food" },
+          excludeMemoryId: target.id,
+          contentHash: target.contentHash,
+          validFrom: null,
+          validUntil: null,
+        });
+        expect(matches).toEqual([]);
+      });
+
       it("有効期間が重ならなければ返さない（去年の住所と今の住所）", async () => {
         const store = await createStore();
         const ctx: Ctx = { tenantId: "tenant-1" };
@@ -2836,6 +2899,38 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
           }),
         );
         await store.updateStatus(ctx, memory.id, "archived");
+
+        const predicates = await store.listActiveClaimPredicates!(ctx, {
+          subjectId: "user-1",
+          limit: 10,
+        });
+        expect(predicates).toEqual([]);
+      });
+
+      // 上の歯の「active でない」は archived だけ。contested も `status = 'active'` の約束から外れる。
+      it("status が contested の行は対象にしない", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        // ADR 0140: contested は contestedWithId 無しでは作れない。対向は claim key を持たない行にして、数に紛れ込ませない。
+        const companion = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            subjectId: "user-1",
+            contentHash: "list-predicates-contested-companion",
+          }),
+        );
+        await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            subjectId: "user-1",
+            contentHash: "list-predicates-contested",
+            claimKey: { subject: "user", predicate: "favorite_food" },
+            status: "contested",
+            contestedWithId: companion.id,
+          }),
+        );
 
         const predicates = await store.listActiveClaimPredicates!(ctx, {
           subjectId: "user-1",
@@ -7771,6 +7866,105 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
           eventKinds: ["purged"],
         });
       });
+
+      // ADR 0499（`updateStatus` の doc）: purge 済みの記憶（`status` は "forgotten" のまま `purgedAt` が入った行）は、
+      // どの `expectedStatus` にも一致しない——"forgotten" にも。`updateStatusWithEvent`・`supersedeWithNewMemories` の
+      // `supersede[].expectedStatus`（弾かれた対象は `conflicted` に載る）も同じ。
+      // status だけで CAS を比べる実装は、"forgotten" を期待した呼び出しを通してしまう。
+      it("updateStatus は purge 済みの記憶には expectedStatus: 'forgotten' でも MemoryStatusConflictError を投げ、行を変えない（ADR 0499）", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const memory = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            contentHash: "purged-cas-update-status",
+            status: "forgotten",
+          }),
+        );
+        await store.purgeMemory!(
+          ctx,
+          memory.id,
+          { content: "[purged]", digest: "[purged]" },
+          {
+            tenantId: "tenant-1",
+            memoryId: memory.id,
+            kind: "purged",
+            actor: { type: "system" },
+            digestSnapshot: memory.digest,
+            meta: {},
+          },
+        );
+
+        await expectRejectsWithStoreError(
+          store.updateStatus(ctx, memory.id, "active", { expectedStatus: "forgotten" }),
+          isMemoryStatusConflictError,
+          "MemoryStatusConflictError",
+        );
+
+        const after = await store.get(ctx, memory.id);
+        expect({ status: after?.status, purged: after?.purgedAt instanceof Date }).toEqual({
+          status: "forgotten",
+          purged: true,
+        });
+      });
+
+      if (supportsSupersedeWithNewMemories) {
+        it("supersedeWithNewMemories は purge 済みの対象を expectedStatus: 'forgotten' でも conflicted に積み、書き換えない（ADR 0499）", async () => {
+          const store = await createStore();
+          const ctx: Ctx = { tenantId: "tenant-1" };
+          const memory = await store.createMemory(
+            ctx,
+            buildNewMemoryFixture({
+              tenantId: "tenant-1",
+              contentHash: "purged-cas-supersede",
+              status: "forgotten",
+            }),
+          );
+          await store.purgeMemory!(
+            ctx,
+            memory.id,
+            { content: "[purged]", digest: "[purged]" },
+            {
+              tenantId: "tenant-1",
+              memoryId: memory.id,
+              kind: "purged",
+              actor: { type: "system" },
+              digestSnapshot: memory.digest,
+              meta: {},
+            },
+          );
+
+          const result = await store.supersedeWithNewMemories!(
+            ctx,
+            [
+              {
+                input: buildNewMemoryFixture({
+                  tenantId: "tenant-1",
+                  contentHash: "purged-cas-supersede-news",
+                }),
+                jobKinds: [],
+              },
+            ],
+            [
+              {
+                id: memory.id,
+                supersededByIndex: 0,
+                expectedStatus: "forgotten",
+                event: buildSupersedeEvent(ctx, memory.id, memory.digest),
+              },
+            ],
+          );
+
+          expect(result.conflicted).toEqual([{ id: memory.id, observedStatus: "forgotten" }]);
+          expect(result.superseded).toEqual([]);
+          const after = await store.get(ctx, memory.id);
+          expect({ status: after?.status, supersededById: after?.supersededById ?? null }).toEqual({
+            status: "forgotten",
+            supersededById: null,
+          });
+        });
+      }
 
       /**
        * ADR 0639: `Runtime.observe` の冪等な再送の内訳（`ObserveResult.resend`）は、
@@ -14586,6 +14780,24 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
         const store = await createStore();
         const ctx: Ctx = { tenantId: `tenant-no-labels-${Math.random()}` };
         expect(await store.listLabels!(ctx)).toEqual([]);
+      });
+
+      // `listLabels` の doc: `name` のコードポイント順（Postgres の `COLLATE "C"` と同じ）の昇順。ロケール依存の自然順は
+      // 契約に含めない。名前は、ロケール順（大文字小文字を寄せる）とも、UTF-16 コード単位順（JS の `<`。BMP の U+E000〜U+FFFF と
+      // 補助面の文字で食い違う）とも、並びが変わる組にしてある。
+      it("listLabels: name のコードポイント順で返す（ロケール順・UTF-16 コード単位順にしない）", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: `tenant-label-codepoint-order-${Math.random()}` };
+        await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: ctx.tenantId,
+            tags: ["foo", "😀", "B", "_a", "！", "Foo"],
+          }),
+        );
+
+        const labels = await store.listLabels!(ctx);
+        expect(labels.map((label) => label.name)).toEqual(["B", "Foo", "_a", "foo", "！", "😀"]);
       });
     } else if (supportsLabels === false) {
       it("listLabels/registerLabel は任意メソッドであり、この adapter は実装していない", async () => {

@@ -215,6 +215,32 @@ export function describeOutboxStoreConformance(options: OutboxStoreConformanceOp
       expect(claimed.length).toBeGreaterThanOrEqual(1);
     });
 
+    // `kinds` は「この種別のジョブだけを取る」。空配列はどの種別にも当たらないので、何も取らない
+    // （`Runtime.tick` の `kinds` の doc「空配列は何も claim しない」は、tick がそのまま渡すこの口に頼っている）。
+    it("claimBatch は kinds: [] なら何も claim しない（絞り込みなしと同じにしない）", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      const job = await seedJob(ctx, { kind: "extract" });
+
+      const claimedEmpty = await store.claimBatch(ctx, {
+        kinds: [],
+        limit: 10,
+        now: new Date(),
+        claimedBy: "worker-1",
+        leaseMs: DEFAULT_LEASE_MS,
+      });
+      expect(claimedEmpty).toEqual([]);
+
+      // 何も取らなかったので、kinds を省いた次の呼び出しでは取れる（「常に空を返す」実装で緑にならない対照）。
+      const claimedAll = await store.claimBatch(ctx, {
+        limit: 10,
+        now: new Date(),
+        claimedBy: "worker-1",
+        leaseMs: DEFAULT_LEASE_MS,
+      });
+      expect(claimedAll.map((j) => j.id)).toEqual([job.id]);
+    });
+
     it("claimBatch は limit を超えない件数を返す", async () => {
       const store = await createStore();
       const ctx: Ctx = { tenantId: "tenant-1" };
@@ -304,6 +330,53 @@ export function describeOutboxStoreConformance(options: OutboxStoreConformanceOp
       const after = await peekJob!(ctx, job.id);
       expect(after?.failedAt).toEqual(at);
     });
+
+    // `complete`/`fail` は互いに排他（interface の doc）。attempts が一致していても、相手側の終端が既に付いていれば、
+    // 先に付いた終端が勝つ——行を変えず、例外も投げない。
+    (peekJob ? it : it.skip)(
+      "fail のあとに同じ attempts で complete しても、failed のまま（completedAt は付かず、例外も投げない）",
+      async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const job = await seedJob(ctx, { kind: "extract" });
+        const failedAt = new Date("2020-01-01T00:00:00.000Z");
+
+        await store.fail(ctx, job.id, "simulated failure", job.attempts, { at: failedAt });
+        await expect(
+          store.complete(ctx, job.id, job.attempts, { at: new Date("2020-01-02T00:00:00.000Z") }),
+        ).resolves.toBeUndefined();
+
+        const after = await peekJob!(ctx, job.id);
+        expect({ failedAt: after?.failedAt, completedAt: after?.completedAt ?? null }).toEqual({
+          failedAt,
+          completedAt: null,
+        });
+      },
+    );
+
+    (peekJob ? it : it.skip)(
+      "complete のあとに同じ attempts で fail しても、completed のまま（failedAt・lastError は付かず、例外も投げない）",
+      async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const job = await seedJob(ctx, { kind: "extract" });
+        const completedAt = new Date("2020-01-01T00:00:00.000Z");
+
+        await store.complete(ctx, job.id, job.attempts, { at: completedAt });
+        await expect(
+          store.fail(ctx, job.id, "late failure", job.attempts, {
+            at: new Date("2020-01-02T00:00:00.000Z"),
+          }),
+        ).resolves.toBeUndefined();
+
+        const after = await peekJob!(ctx, job.id);
+        expect({
+          completedAt: after?.completedAt,
+          failedAt: after?.failedAt ?? null,
+          lastError: after?.lastError ?? null,
+        }).toEqual({ completedAt, failedAt: null, lastError: null });
+      },
+    );
 
     /**
      * `opts.at` が Invalid Date のとき、Postgres は `timestamptz` への変換で拒む（`22007`）。

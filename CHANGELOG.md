@@ -53,6 +53,11 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - **無条件の追加（新しく赤になりうる）**: `describeOutboxStoreConformance` に、`claimBatch` が綴り違いのテナントのジョブを返さないこと、`complete`・`fail` が綴り違いのテナントの ctx からは終端を付けないこと、取り直しで `availableAt` が `opts.now` になり初めての claim では変わらないこと、の `it` が増えた。`describeEventStoreConformance` に、`get`・`list` が綴り違いのテナントのイベントを返さないこと、`describeTenantSettingsStoreConformance` に、綴り違いのテナントに設定した event retention が見えないこと、の `it` が増えた。
   - **フラグに応じた追加**: `describeTenantSettingsStoreConformance` の `supportsDecayClock`・`supportsTaxonomyMode`・`supportsEraseTenant` の枝に、それぞれ綴り違いのテナントの `getDecayClock`・`getTaxonomyMode`・`eraseTenant` の `it` が増えた。
   - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目73。DB マイグレーションは無い。
+- **conformance suite に、TSDoc・ADR に書いてあったのに suite が呼んでいなかった約束を足した——`claimBatch` の `kinds: []`、`complete`・`fail` の相互排他、`EventStore.list` の `limit: 0`、UUID 形式の id の大文字小文字、purge 済みの記憶への CAS（ADR 0499）、`getMany` の重複 id、claim key の口が contested を含めないこと、`listLabels` のコードポイント順**（[Issue #1935](https://github.com/takecchi/mnemora/issues/1935) の続き。どれも変異試験で、Postgres 専用・fixture 専用の試験でしか赤にならなかった。ADR 0546 の作法どおり、足した約束は Breaking に数える。クローンの判断で、オーナーの判断ではない）。`@mnemora/postgres` と `@mnemora/testkit` の fixture は変わっておらず、どれも緑。
+  - **無条件の追加（新しく赤になりうる）**: `describeOutboxStoreConformance` に「`claimBatch` は `kinds: []` なら何も claim しない」、`describeEventStoreConformance` に「`list` の `limit: 0` は0件」「UUID 形式の id は大文字で渡しても `get`・`list(memoryId)` で同じ行に当たる」（id が UUID 形式でない adapter では skip）、`describeMemoryStoreConformance` に「`getMany` は同じ id を1回だけ返す」の `it` が増えた。
+  - **フック・フラグに応じた追加**: `peekJob` を渡した adapter に、`fail` のあとの `complete`・`complete` のあとの `fail` が先の終端を保つことの `it` が増えた。`supportsPurgeMemory` の枝に purge 済みの記憶への `updateStatus` の CAS（`supportsSupersedeWithNewMemories` も真なら `supersedeWithNewMemories` の CAS も）、`supportsFindActiveByClaimKey`・`supportsListActiveClaimPredicates` の枝に contested の行を含めないこと、`supportsLabels: true` の枝に `listLabels` のコードポイント順の `it` が増えた。
+  - `packages/testkit/README.md` の「動く最小の例」（自作の `EventStore`）は、UUID 形式の id を大文字小文字を区別して比べていて、新しい `it` で赤になった。例を約束どおりに直した——**この例を写して作った adapter は同じく赤になる。**
+  - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目74。DB マイグレーションは無い。
 
 ### Changed（後方互換だが挙動が変わりうるもの）
 

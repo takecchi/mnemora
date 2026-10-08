@@ -88,7 +88,10 @@ class MyEventStore implements EventStore {
 
   async get(ctx: Ctx, id: EventId): Promise<MemoryEvent | null> {
     assertWellFormedCtx(ctx);
-    const row = this.rows.find((row) => row.tenantId === ctx.tenantId && row.id === id);
+    // UUID 形式の id は大文字小文字を区別しない（適合テストが検査する約束）。この例の id は randomUUID() の小文字。
+    const row = this.rows.find(
+      (row) => row.tenantId === ctx.tenantId && row.id === id.toLowerCase(),
+    );
     // 返す値も複製する——呼び手が受け取った値を書き換えても、次の get は影響を受けない。
     return row ? structuredClone(row) : null;
   }
@@ -98,7 +101,9 @@ class MyEventStore implements EventStore {
     return this.rows
       .filter((row) => row.tenantId === ctx.tenantId)
       .filter((row) => filter.kind === undefined || row.kind === filter.kind)
-      .filter((row) => filter.memoryId === undefined || row.memoryId === filter.memoryId)
+      .filter(
+        (row) => filter.memoryId === undefined || row.memoryId === filter.memoryId.toLowerCase(),
+      )
       .filter((row) => filter.since === undefined || row.at >= filter.since)
       .filter((row) => filter.until === undefined || row.at <= filter.until)
       .sort((a, b) => a.at.getTime() - b.at.getTime())

@@ -2914,6 +2914,31 @@ WHERE provenance->>'kind' IS NULL;
 
 **DB マイグレーション**: 要らない。
 
+### 74. conformance suite に約束が増えた——`kinds: []`・`complete`/`fail` の排他・`limit: 0`・UUID の大文字・purge 済みの CAS・`getMany` の重複・contested・`listLabels` の並び（`@mnemora/testkit`）
+
+[Issue #1935](https://github.com/takecchi/mnemora/issues/1935) の続き。どれも interface の TSDoc か採用済みの ADR に書いてあった約束で、suite がその入力を渡していなかった。ADR 0546 の作法（足した約束は 🔴 に数える）に揃えた（クローンの判断で、オーナーの判断ではない）。
+
+**何が変わったか**: 中身は [CHANGELOG.md](../CHANGELOG.md) の `[1.4.0]` 節 `### Breaking` の「conformance suite に、TSDoc・ADR に書いてあったのに suite が呼んでいなかった約束を足した…」の箇条を見ること。**ここには複製しない。**型・シグネチャは変わらない。
+
+**なぜ破壊的と数えるか**: 自前の adapter が、増えた `it` の約束を守っていなければ、新しく落ちる（足した約束は外せない）。
+
+**誰が影響を受けるか**: 自前の `OutboxStore`・`EventStore`・`MemoryStore` を書き、`@mnemora/testkit` の conformance suite に当てている人。`kinds: []`・`limit: 0`・UUID の大文字・`getMany` の重複の分はフラグ無しで走る（UUID の大文字は、id が UUID 形式の adapter だけ）。終端の排他は `peekJob` を渡している人、purge 済みの CAS は `supportsPurgeMemory: true`、contested は `supportsFindActiveByClaimKey`・`supportsListActiveClaimPredicates`、`listLabels` の並びは `supportsLabels: true` を渡している人だけ。**`packages/testkit/README.md` の「動く最小の例」の `EventStore` を写して作った adapter は、UUID の大文字の `it` で赤になる**（例はこの変更で直した）。`@mnemora/postgres` と `@mnemora/testkit` の fixture は緑。
+
+**どう直すか**: 落ちた `it` の名前が約束そのものである。
+
+1. `claimBatch` の `kinds: []` は「どの種別にも当たらない」として何も取らない（省略と同じにしない）。
+2. `complete`・`fail` は、相手側の終端が付いていれば何も書かない。
+3. `EventStore.list` の `limit: 0` は0件を返す。
+4. UUID 形式の id は、比べる前に小文字にそろえる（`get` と `list` の `filter.memoryId`）。
+5. CAS は、`status` に加えて `purgedAt` が `null` であることも条件にする。
+6. `getMany` は同じ id を1回だけ返す。
+7. `findActiveByClaimKey`・`listActiveClaimPredicates` は `status = 'active'` の行だけを見る。
+8. `listLabels` は `name` のコードポイント順に並べる（Postgres なら `COLLATE "C"`。JS の `<` は UTF-16 コード単位順でずれる）。
+
+**確かめたこと**: `@mnemora/postgres` と fixture で緑。足した `it` は、それぞれの約束を破る変異（InMemory と Postgres の両方）で赤になった（Issue #1935）。**確かめていないこと**: 外部の adapter が実際に赤くなるか。
+
+**DB マイグレーション**: 要らない。
+
 ## 🟡 後方互換だが挙動が変わりうるもの（v0.1.9 → v0.2.0）
 
 （⚠ 2026-09-27: この見出しは PR #1192 が「v1.0.1 → 次の版」の節を書き換えたときに一緒に消えており、下の3項目が「v1.0.2 → 次の版」の節の中に在るように読めていた。見出しを戻した。下の3項目は v0.1.9 → v0.2.0 の話である）
