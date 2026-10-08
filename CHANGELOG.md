@@ -49,6 +49,10 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   以前は、元の制約 `memories_provenance_kind_matches_provenance` が `provenance->>'kind'` の NULL を通すため、そういう行が入った。いまは生 SQL などでそういう行を書くと実行時の例外になり、すでにそういう行がある DB では `0034` が失敗する（`0033` の保護は残る）。`PostgresMemoryStore` 経由の書き込みは同じ値から列と jsonb の両方を書くので影響しない。型・シグネチャは変わらない。
   - **破壊的と数える理由**: 以前は通っていた書き込みが例外になる。`0016`/`0017` を非破壊と数えた前例は、一致を強制しただけで正規の行が全部通った点が違う。
   - **誰が影響を受けるか・どう直すか**: [docs/migration-v1.md](./docs/migration-v1.md) の「72.」。
+- **conformance suite に約束を足した——大文字小文字だけが違う `tenantId` を別のテナントとして扱うこと（`OutboxStore`・`EventStore`・`TenantSettingsStore`）、`OutboxStore.claimBatch` の取り直しで `availableAt` を `opts.now` へ進め、初めての claim では変えないこと（ADR 0357）**（[Issue #1935](https://github.com/takecchi/mnemora/issues/1935)。変異試験で、テナントの比較を大文字小文字無視にした実装と、取り直しで `availableAt` を進めない実装が suite で緑になると分かった。ADR 0546 の作法どおり、足した約束は Breaking に数える。クローンの判断で、オーナーの判断ではない）。`@mnemora/postgres` と `@mnemora/testkit` の fixture は変わっておらず、どれも緑。
+  - **無条件の追加（新しく赤になりうる）**: `describeOutboxStoreConformance` に、`claimBatch` が綴り違いのテナントのジョブを返さないこと、`complete`・`fail` が綴り違いのテナントの ctx からは終端を付けないこと、取り直しで `availableAt` が `opts.now` になり初めての claim では変わらないこと、の `it` が増えた。`describeEventStoreConformance` に、`get`・`list` が綴り違いのテナントのイベントを返さないこと、`describeTenantSettingsStoreConformance` に、綴り違いのテナントに設定した event retention が見えないこと、の `it` が増えた。
+  - **フラグに応じた追加**: `describeTenantSettingsStoreConformance` の `supportsDecayClock`・`supportsTaxonomyMode`・`supportsEraseTenant` の枝に、それぞれ綴り違いのテナントの `getDecayClock`・`getTaxonomyMode`・`eraseTenant` の `it` が増えた。
+  - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目73。DB マイグレーションは無い。
 
 ### Changed（後方互換だが挙動が変わりうるもの）
 
