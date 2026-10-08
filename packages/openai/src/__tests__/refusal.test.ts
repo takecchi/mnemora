@@ -89,6 +89,24 @@ describe("completeStructured: 拒否と空応答を区別する", () => {
     expect(error.refusalMessage).toBe("I can't help with that request.");
   });
 
+  it("message.refusal が1文字でも拒否として扱う（拒否なしと読むのは空文字だけ）", async () => {
+    const { provider } = buildWithResponse({
+      choices: [{ finish_reason: "stop", message: { refusal: "x", content: null } }],
+    });
+    const error = await captureError(() => provider.completeStructured(ctx, structuredRequest));
+
+    expect(error.kind).toBe("refusal");
+    expect(error.refusalMessage).toBe("x");
+  });
+
+  it("message.refusal による拒否でも、生の finish_reason を残す", async () => {
+    const { provider } = buildWithResponse(refusalResponse);
+    const error = await captureError(() => provider.completeStructured(ctx, structuredRequest));
+
+    expect(error.kind).toBe("refusal");
+    expect(error.finishReason).toBe("stop");
+  });
+
   it("⚠ 拒否の判定は content より先に走る（正常っぽい JSON が在っても拒否は拒否）", async () => {
     // 順序を測る歯。`content` を先に読む実装だと、この応答は「普通の成功」に化ける。
     const { provider } = buildWithResponse({
@@ -142,6 +160,20 @@ describe("completeStructured: 切り詰めを『壊れた JSON』と混ぜない
       choices: [
         {
           finish_reason: "stop",
+          message: { refusal: null, content: JSON.stringify({ content: "ok" }) },
+        },
+      ],
+    });
+    await expect(provider.completeStructured(ctx, structuredRequest)).resolves.toEqual({
+      content: "ok",
+    });
+  });
+
+  it("length 以外の finish_reason（tool_calls）は切り詰めと読まず、素通りする", async () => {
+    const { provider } = buildWithResponse({
+      choices: [
+        {
+          finish_reason: "tool_calls",
           message: { refusal: null, content: JSON.stringify({ content: "ok" }) },
         },
       ],
