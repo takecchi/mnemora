@@ -174,4 +174,34 @@ describe("PostgresVectorStore.upsert と ANALYZE の自動発火（Issue #360 / 
     expect(afterStat.rows[0]?.last_autoanalyze).toBeNull();
     expect(afterStat.rows[0]?.last_analyze).toEqual(lastAnalyzeBefore);
   }, 120_000);
+
+  it("(丙) 同じ空間を upsert ごとに別のオブジェクトで渡しても、累計は空間ごとに積まれ、閾値ちょうどで ANALYZE を撃つ", async () => {
+    const { db, pool } = client!;
+    const memoryStore = new PostgresMemoryStore(db);
+    const vectorStore = new PostgresVectorStore(db);
+    const ctx: Ctx = { tenantId: TENANT };
+
+    const space = uniqueSpace("fresh-object");
+    await registerEmbeddingSpace(pool, space);
+    const table = embeddingSpaceTableName(space);
+    await disableAutovacuum(pool, table);
+
+    // (甲)(乙) は同じ `space` を使い回すので、累計を値でなくオブジェクトで数える実装を見分けられない。
+    const lastAnalyze = async (): Promise<unknown> =>
+      (await pool.query(`SELECT last_analyze FROM pg_stat_user_tables WHERE relname = $1`, [table]))
+        .rows[0]?.last_analyze;
+    const rand = seededRandom(20261009);
+    for (let i = 0; i < INITIAL_ANALYZE_THRESHOLD; i += 1) {
+      if (i === INITIAL_ANALYZE_THRESHOLD - 1) {
+        expect(await lastAnalyze(), "閾値の1つ手前までは撃たない").toBeNull();
+      }
+      const memory = await memoryStore.createMemory(
+        ctx,
+        buildNewMemoryFixture({ tenantId: ctx.tenantId }),
+      );
+      await vectorStore.upsert(ctx, { ...space }, memory.id, [rand(), rand(), rand()]);
+    }
+
+    expect(await lastAnalyze()).not.toBeNull();
+  }, 120_000);
 });
