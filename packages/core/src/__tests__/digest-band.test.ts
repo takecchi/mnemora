@@ -53,6 +53,15 @@ describe("packDigestBand — limitedBy の決め方", () => {
     expect(result.limitedBy).toBeUndefined();
   });
 
+  it("どの上限にも当たらなければ limitedBy の鍵そのものを省く（undefined の値を持つ鍵を生やさない）", () => {
+    const result = packDigestBand([entry("m1", "a")], 1, {
+      limit: 10,
+      maxChars: 10_000,
+      maxEntryChars: 100,
+    });
+    expect(Object.keys(result)).toEqual(["band"]);
+  });
+
   it("件数の上限で切れたら limitedBy === 'entry_limit'", () => {
     const candidates = [
       entry("m1", "aaaaa"),
@@ -85,6 +94,20 @@ describe("packDigestBand — limitedBy の決め方", () => {
     expect(result.limitedBy).toBe("char_budget");
   });
 
+  it("文字数の予算は、2件分の費用（138）ちょうどなら2件載り、1字足りない（137）と1件で char_budget になる", () => {
+    const candidates = [entry("m1", "aaaaa"), entry("m2", "bbbbb")];
+    const exact = packDigestBand(candidates, 2, { limit: 10, maxChars: 138, maxEntryChars: 100 });
+    expect(exact.band).toHaveLength(2);
+    expect(exact.limitedBy).toBeUndefined();
+    const oneShort = packDigestBand(candidates, 2, {
+      limit: 10,
+      maxChars: 137,
+      maxEntryChars: 100,
+    });
+    expect(oneShort.band.map((e) => e.memoryId)).toEqual(["m1"]);
+    expect(oneShort.limitedBy).toBe("char_budget");
+  });
+
   it("同じ件で件数上限と文字数予算の両方に同時に当たったら limitedBy === 'both'", () => {
     // limit=2 なので3件目は entry_limit に当たる。同時に、1〜2件目の合計コストを
     // ちょうど maxChars に一致させておくと、3件目を足すと文字数も超える
@@ -93,6 +116,19 @@ describe("packDigestBand — limitedBy の決め方", () => {
     const result = packDigestBand(candidates, 3, { limit: 2, maxChars: 138, maxEntryChars: 100 });
     expect(result.band).toHaveLength(2);
     expect(result.limitedBy).toBe("both");
+  });
+});
+
+describe("packDigestBand — eligible では打ち切らない（保証は band.length <= candidates.length まで）", () => {
+  it("candidates が eligible より多く渡っても、eligible の件数で切らず、上限の内側なら全件載せる", () => {
+    const candidates = [entry("m1", "a"), entry("m2", "b"), entry("m3", "c")];
+    const result = packDigestBand(candidates, 2, {
+      limit: 10,
+      maxChars: 10_000,
+      maxEntryChars: 100,
+    });
+    expect(result.band.map((e) => e.memoryId)).toEqual(["m1", "m2", "m3"]);
+    expect(result.limitedBy).toBeUndefined();
   });
 });
 

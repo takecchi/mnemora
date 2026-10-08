@@ -121,6 +121,39 @@ describe("RecordedEmbeddingProvider（ADR 0051）", () => {
     const text = cassette.embedding.entries[key]?.text as string;
     await expect(replay.embed(ctx, [text])).rejects.toThrow(/次元が空間と食い違って/);
   });
+
+  it.each([
+    ["provider だけ", { ...SPACE, provider: "other" }],
+    ["model だけ", { ...SPACE, model: "text-embedding-3-large" }],
+    ["dimensions だけ（1つ少ない）", { ...SPACE, dimensions: 2 }],
+    ["dimensions だけ（1つ多い）", { ...SPACE, dimensions: 4 }],
+  ])("期待する空間と記録元が %s 違っても、構築時に落ちる", async (_label, expectedSpace) => {
+    const cassette = await recordRoundTrip();
+    expect(
+      () => new RecordedEmbeddingProvider({ section: cassette.embedding, expectedSpace }),
+    ).toThrow(/埋め込み空間が、呼び出し側の期待と違う/);
+  });
+
+  it.each([
+    ["後ろ", ["青", "録っていない文"]],
+    ["前", ["録っていない文", "青"]],
+  ])(
+    "記録に無い入力が1つでも（%s）混ざれば、記録にある分も返さずに落ちる",
+    async (_label, texts) => {
+      const cassette = await recordRoundTrip();
+      const replay = new RecordedEmbeddingProvider({ section: cassette.embedding });
+      await expect(replay.embed(ctx, texts)).rejects.toThrow(/記録に無い/);
+    },
+  );
+
+  it("記録されたベクトルが空間より長くても、返さずに落ちる", async () => {
+    const cassette = await recordRoundTrip();
+    const key = Object.keys(cassette.embedding.entries)[0] as string;
+    (cassette.embedding.entries[key] as { vector: number[] }).vector = [1, 2, 3, 4];
+    const replay = new RecordedEmbeddingProvider({ section: cassette.embedding });
+    const text = cassette.embedding.entries[key]?.text as string;
+    await expect(replay.embed(ctx, [text])).rejects.toThrow(/次元が空間と食い違って/);
+  });
 });
 
 describe("RecordedLLMProvider（ADR 0051）", () => {
@@ -152,6 +185,43 @@ describe("RecordedLLMProvider（ADR 0051）", () => {
       () => new RecordedLLMProvider({ section: cassette.llm, expectedModel: "gpt-4o" }),
     ).toThrow(/モデルが、呼び出し側の期待と違う/);
   });
+
+  it("期待するモデルと記録元が一致すれば、構築でき、記録を再生する", async () => {
+    const cassette = await recordRoundTrip();
+    const replay = new RecordedLLMProvider({ section: cassette.llm, expectedModel: "gpt-4o-mini" });
+    await expect(
+      replay.completeStructured(ctx, { prompt: PROMPT, schema: SCHEMA }),
+    ).resolves.toEqual({ memories: [{ content: "録った中身" }] });
+  });
+
+  it("complete でも、記録に無いプロンプトは擬似応答へ倒れず例外になる", async () => {
+    const replay = new RecordedLLMProvider({
+      section: {
+        model: "m",
+        entries: { [llmCassetteKey(PROMPT)]: { prompt: PROMPT, value: { content: "録った応答" } } },
+      },
+    });
+    await expect(replay.complete(ctx, PROMPT)).resolves.toEqual({ content: "録った応答" });
+    await expect(
+      replay.complete(ctx, { messages: [{ role: "user", content: "録っていない質問" }] }),
+    ).rejects.toThrow(/記録に無い/);
+  });
+
+  it.each([
+    ["null", null],
+    ["文字列", "録った応答"],
+    ["数", 42],
+    ["content の無いオブジェクト", { text: "録った応答" }],
+    ["配列", ["録った応答"]],
+  ])(
+    "complete の記録が LLMResponse の形をしていない（%s）なら、返さずに落ちる",
+    async (_label, value) => {
+      const replay = new RecordedLLMProvider({
+        section: { model: "m", entries: { [llmCassetteKey(PROMPT)]: { prompt: PROMPT, value } } },
+      });
+      await expect(replay.complete(ctx, PROMPT)).rejects.toThrow(/LLMResponse の形をしていない/);
+    },
+  );
 });
 
 describe("鍵の導出（ADR 0051）", () => {

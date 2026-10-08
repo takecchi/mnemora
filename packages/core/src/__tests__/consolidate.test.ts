@@ -5,6 +5,7 @@ import type { MemoryStore } from "../interfaces/memory-store.js";
 import { defaultDecayStrategy } from "../strategies/decay.js";
 import {
   buildConsolidatedMemory,
+  buildConsolidationPrompt,
   computeAffinity,
   intersectAttributes,
 } from "../strategies/consolidate.js";
@@ -1160,6 +1161,24 @@ describe("buildConsolidatedMemory（純関数）", () => {
     expect(split.subjectId).toBeNull();
   });
 
+  it("subjectId が null（主題なし）と値で割れていれば null（null を「どれでもよい」として値に寄せない）", () => {
+    for (const subjectIds of [
+      [null, "subject-x"],
+      ["subject-x", null],
+    ] as const) {
+      const memory = buildConsolidatedMemory({
+        ctx,
+        eligible: subjectIds.map((subjectId, i) => fixtureMemory({ id: `m${i}`, subjectId })),
+        llmResult: { content: "統合後" },
+        hashContent: (c) => `hash(${c})`,
+        digestFallbackLength: 200,
+        halfLifeHours: 24,
+        now: NOW,
+      });
+      expect(memory.subjectId).toBeNull();
+    }
+  });
+
   it("occurredAt は eligible のうち最も新しいもの。全部 null なら null", () => {
     const withDates = buildConsolidatedMemory({
       ctx,
@@ -1244,6 +1263,59 @@ describe("buildConsolidatedMemory（純関数）", () => {
     });
     expect(memory.digestSource).toBe("fallback");
     expect(memory.digest.length).toBeLessThanOrEqual(11); // 10文字 + "…"
+  });
+
+  it("occurredAt を持つ eligible が1件だけなら、その値を引き継ぐ（null の eligible は候補にならない）", () => {
+    const memory = buildConsolidatedMemory({
+      ctx,
+      eligible: [
+        fixtureMemory({ id: "m1" }),
+        fixtureMemory({ id: "m2", occurredAt: new Date("2026-02-01T00:00:00.000Z") }),
+      ],
+      llmResult: { content: "統合後" },
+      hashContent: (c) => `hash(${c})`,
+      digestFallbackLength: 200,
+      halfLifeHours: 24,
+      now: NOW,
+    });
+    expect(memory.occurredAt).toEqual(new Date("2026-02-01T00:00:00.000Z"));
+  });
+
+  it("eligible が Observation 由来でも、sourceObservationId と extractorVersion は null（統合はどの Observation にも由来しない）", () => {
+    const memory = buildConsolidatedMemory({
+      ctx,
+      eligible: [
+        fixtureMemory({ id: "m1", sourceObservationId: "obs-1", extractorVersion: "v1" }),
+        fixtureMemory({ id: "m2", sourceObservationId: "obs-2", extractorVersion: "v1" }),
+      ],
+      llmResult: { content: "統合後" },
+      hashContent: (c) => `hash(${c})`,
+      digestFallbackLength: 200,
+      halfLifeHours: 24,
+      now: NOW,
+    });
+    expect(memory.sourceObservationId).toBeNull();
+    expect(memory.extractorVersion).toBeNull();
+  });
+
+  it("activitySeq と halfLifeRecalls の片方だけでは、活動時計の3つ組を作らない", () => {
+    const base = {
+      ctx,
+      eligible: [fixtureMemory({ id: "m1" }), fixtureMemory({ id: "m2" })],
+      llmResult: { content: "統合後" },
+      hashContent: (c: string) => `hash(${c})`,
+      digestFallbackLength: 200,
+      halfLifeHours: 24,
+      now: NOW,
+    };
+    for (const memory of [
+      buildConsolidatedMemory({ ...base, activitySeq: 7 }),
+      buildConsolidatedMemory({ ...base, halfLifeRecalls: 50 }),
+    ]) {
+      expect(memory.decayBaseSeq).toBeUndefined();
+      expect(memory.decayFloorSeq).toBeUndefined();
+      expect(memory.halfLifeRecalls).toBeUndefined();
+    }
   });
 
   describe("attributes は eligible 全件に同じキー・同じ値で入っているものだけを残す（積集合）", () => {
@@ -1428,6 +1500,31 @@ describe("buildConsolidatedMemory（純関数）", () => {
       expect(memory.validFrom).toEqual(new Date("2026-01-01T00:00:00.000Z"));
       expect(memory.validUntil).toEqual(new Date("2026-06-01T00:00:00.000Z"));
     });
+  });
+});
+
+describe("buildConsolidationPrompt（純関数）", () => {
+  it("件数で切り詰めず、eligible の content と digest を全件並べる", () => {
+    const eligible: Memory[] = ["一", "二", "三", "四"].map((n, i) => ({
+      ...newMemory({ content: `本文${n}`, digest: `要旨${n}` }),
+      id: `m${i + 1}`,
+      status: "active",
+      supersededById: null,
+      contestedWithId: null,
+      createdAt: NOW,
+      updatedAt: NOW,
+    }));
+
+    const userContent = buildConsolidationPrompt(eligible).messages[0]!.content;
+
+    expect(userContent).toBe(
+      [
+        "[1] content: 本文一\ndigest: 要旨一",
+        "[2] content: 本文二\ndigest: 要旨二",
+        "[3] content: 本文三\ndigest: 要旨三",
+        "[4] content: 本文四\ndigest: 要旨四",
+      ].join("\n\n"),
+    );
   });
 });
 
