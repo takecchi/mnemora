@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { assertWellFormedNewMemory } from "../new-memory-check.js";
+import { MemorySchema } from "../memory.js";
 import type { NewMemory } from "../memory.js";
 import { MALFORMED_NEW_MEMORY_CASES } from "./malformed-new-memory-cases.js";
 
@@ -40,6 +41,32 @@ describe("assertWellFormedNewMemory の例外の形（ADR 0630 決定4）", () =
       expect(error.constructor).toBe(Error);
       expect(error.message).toMatch(
         /^Owner: [A-Za-z.0-9]+ is malformed \(.+\); the stored Memory would not pass MemorySchema when read back$/,
+      );
+    },
+  );
+
+  it.each([
+    ["digest が空文字", { digest: "" }, () => MemorySchema.shape.digest.safeParse("")],
+    [
+      "claimKey.subject が空文字",
+      { claimKey: { subject: "", predicate: "p" } },
+      () => MemorySchema.shape.claimKey.safeParse({ subject: "", predicate: "p" }),
+    ],
+    [
+      "provenance: imported で batchId が空文字",
+      { provenance: { kind: "imported", batchId: "" } },
+      () => MemorySchema.shape.provenance.safeParse({ kind: "imported", batchId: "" }),
+    ],
+  ] as const)(
+    "%s: 括弧の中の理由は、同じ欄の MemorySchema が出す zod の説明そのもの",
+    (_label, over, parse) => {
+      const result = parse();
+      if (result.success) throw new Error("前提: MemorySchema がこの値を拒むこと");
+      const zodMessage = result.error.issues[0]!.message;
+      expect(zodMessage).not.toBe("invalid");
+
+      expect(thrown(base(over as Partial<NewMemory>)).message).toContain(
+        ` is malformed (${zodMessage}); `,
       );
     },
   );

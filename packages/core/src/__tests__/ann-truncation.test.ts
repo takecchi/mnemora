@@ -165,6 +165,7 @@ describe("decideAnnTruncation — 端の入力は黙って握り潰さず undeci
     ["sim_k' が 0", 0],
     ["sim_k' が負（コサインは負になりうる）", -0.3],
     ["sim_k' が NaN", Number.NaN],
+    ["sim_k' が Infinity（非有限）", Number.POSITIVE_INFINITY],
   ])("%s なら undecidable", (_label, sim) => {
     const v = decideAnnTruncation({ ...base, lastAnnSimilarity: sim, lastReturnedTotal: 0.5 });
     expect(v.kind).toBe("undecidable");
