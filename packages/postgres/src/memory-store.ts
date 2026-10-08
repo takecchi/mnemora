@@ -1397,7 +1397,10 @@ export class PostgresMemoryStore implements MemoryStore {
           throw new Error(`PostgresMemoryStore: memory not found for tenant: ${target.id}`);
         }
         const expectedStatus = target.expectedStatus;
-        const statusCondition = expectedStatusCondition(expectedStatus);
+        const statusCondition =
+          expectedStatus !== undefined
+            ? sql`AND status = ${expectedStatus} AND purged_at IS NULL AND status <> 'forgotten'`
+            : expectedStatusCondition(expectedStatus);
 
         const anchorId = created[target.supersededByIndex]!.memory.id;
         const result = await tx.execute(sql`
