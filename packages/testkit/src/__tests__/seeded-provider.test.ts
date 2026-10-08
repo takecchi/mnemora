@@ -240,6 +240,16 @@ describe("SeededEmbeddingProvider", () => {
     ).toThrow(/埋め込み空間/);
   });
 
+  // 同上: 種と委譲先が一致していると、expectedSpace の provider の照合が外れても他の歯では見えない。
+  it("種・委譲先と同じ空間で expectedSpace だけ provider が違えば、構築時に例外", () => {
+    const seed = seedEmbeddingSection([]);
+    const delegate = new ThrowingEmbeddingProvider();
+    const wrongProvider: EmbeddingSpaceId = { ...SPACE, provider: "local" };
+    expect(
+      () => new SeededEmbeddingProvider(delegate, { seed, expectedSpace: wrongProvider }),
+    ).toThrow(/埋め込み空間/);
+  });
+
   it("委譲先が欠けた入力の件数と違う件数を返したら例外", async () => {
     const seed = seedEmbeddingSection([]);
     const delegate: EmbeddingProvider = {
