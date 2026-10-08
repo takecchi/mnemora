@@ -238,6 +238,35 @@ async function scenario(env: Env): Promise<Result> {
       await claimAt(2000, 5),
     ];
   }
+  {
+    // リースが切れた行の取り直しは `availableAt` を claim の時刻へ進め、待ち行列の後ろへ回す（ADR 0357）
+    const ctx = fresh();
+    await seedJobs(ctx, "embed");
+    const at = Date.now() + 60_000;
+    const labels = new Map<string, string>();
+    const claimAt = async (offset: number, limit: number) =>
+      (
+        await ob.claimBatch(ctx, {
+          limit,
+          now: new Date(at + offset),
+          claimedBy: "w",
+          leaseMs: 1000,
+          kinds: ["embed"],
+        })
+      )
+        .map((j) => {
+          if (!labels.has(j.id)) labels.set(j.id, `job ${labels.size + 1}`);
+          const moved = j.availableAt.getTime() - at;
+          return [labels.get(j.id), j.attempts, moved >= 0 ? moved : "as seeded"];
+        })
+        .sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
+    out["claim: a re-claim after the lease moves availableAt to now and the row to the tail"] = [
+      await claimAt(0, 1),
+      await claimAt(5000, 2),
+      await claimAt(10000, 1),
+      await claimAt(15000, 1),
+    ];
+  }
   return out;
 }
 
@@ -524,6 +553,15 @@ const EXPECTED: Result = {
     [2],
     [2],
     [3],
+  ],
+  "claim: a re-claim after the lease moves availableAt to now and the row to the tail": [
+    [["job 1", 1, "as seeded"]],
+    [
+      ["job 1", 2, 5000],
+      ["job 2", 1, "as seeded"],
+    ],
+    [["job 2", 2, 10000]],
+    [["job 1", 3, 15000]],
   ],
 };
 const space = TEST_EMBEDDING_SPACE;
