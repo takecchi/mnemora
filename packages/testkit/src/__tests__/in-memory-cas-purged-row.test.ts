@@ -115,6 +115,37 @@ describe("InMemoryMemoryStore の CAS は purge 済みの行を弾く（ADR 0549
     expect(store.events.length).toBe(total);
   });
 
+  // この ADR が直すのは CAS（`expectedStatus` を渡した更新）の約束だけで、`expectedStatus` を渡さない更新は purge 済みの行にも今までどおり通る。
+  // `@mnemora/postgres` の `store-status-write-checks.postgres.test.ts`（ADR 0499）と同じ約束を InMemory で縛る。
+  it("updateStatus: expectedStatus を渡さなければ、purge 済みの行でも通る", async () => {
+    const { store, m } = await makePurged();
+    const after = await store.updateStatus(A, m.id, "archived");
+    expect(after.status).toBe("archived");
+    expect((await store.get(A, m.id))?.status).toBe("archived");
+  });
+
+  it("updateStatusWithEvent: expectedStatus を渡さなければ、purge 済みの行でも通り、イベントが積まれる", async () => {
+    const { store, m } = await makePurged();
+    const total = store.events.length;
+    const result = await store.updateStatusWithEvent(A, m.id, "archived", {}, ev(m.id));
+    expect(result.memory.status).toBe("archived");
+    expect(store.events.length).toBe(total + 1);
+  });
+
+  it("supersedeWithNewMemories: 対象に expectedStatus を渡さなければ、purge 済みの行でも置き換わる（conflicted に入らない）", async () => {
+    const { store, m } = await makePurged();
+    const total = store.events.length;
+    const result = await store.supersedeWithNewMemories(
+      A,
+      [{ input: newMemory(A), jobKinds: [] }],
+      [{ id: m.id, supersededByIndex: 0, event: ev(m.id) }],
+    );
+    expect(result.conflicted).toEqual([]);
+    expect(result.superseded).toHaveLength(1);
+    expect((await store.get(A, m.id))?.status).toBe("superseded");
+    expect(store.events.length).toBeGreaterThan(total);
+  });
+
   it("対照: purge していない forgotten の行は、expectedStatus 'forgotten' で通る", async () => {
     const store = new InMemoryMemoryStore();
     const m = await store.createMemory(A, newMemory(A, { status: "forgotten" }));
