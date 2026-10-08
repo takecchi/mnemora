@@ -8,7 +8,7 @@ export function formatRecall(result: RecallResult, label: string): string {
   for (const m of result.memories) {
     // 連想枠（affinityMeasured: false）は total を持たないので「n/a」にする。
     const total = scoreTotalOrNull(m.score);
-    const scoreText = total === null ? "n/a" : total.toFixed(3);
+    const scoreText = "n/a";
     lines.push(`  - [${m.retrievedVia}] score=${scoreText} digest="${m.digest}"`);
   }
   lines.push(`omitted (${result.omitted.length} 件):`);
