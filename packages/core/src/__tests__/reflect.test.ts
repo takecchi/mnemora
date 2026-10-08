@@ -1097,6 +1097,24 @@ describe("buildReflectedMemory（純関数） — attributes は積集合（Issu
     });
     expect(memory.attributes).toEqual({});
   });
+
+  it("subjectId が null（主題なし）と値で割れていれば null（null を「どれでもよい」として値に寄せない）", () => {
+    for (const subjectIds of [
+      [null, "subject-x"],
+      ["subject-x", null],
+    ] as const) {
+      const memory = buildReflectedMemory({
+        ctx,
+        eligible: subjectIds.map((subjectId, i) => fixtureMemory({ id: `m${i}`, subjectId })),
+        llmResult: { outcome: "reflected", content: "反芻結果" },
+        hashContent: (c) => `hash(${c})`,
+        digestFallbackLength: 200,
+        halfLifeHours: 24,
+        now: NOW,
+      });
+      expect(memory.subjectId).toBeNull();
+    }
+  });
 });
 
 describe("buildReflectedMemory（純関数） — validFrom/validUntil は eligible 全件の区間の積（ADR 0368）", () => {

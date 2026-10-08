@@ -68,6 +68,14 @@ describe("observationPayloadText: 空白だけの title は前置きにしない
     ).toBe("T\n\n  C  ");
   });
 
+  it("title だけにするのは content が空文字のときだけで、空白だけの content は区切りの後にそのまま続く", () => {
+    for (const [, content] of BLANKS.filter(([, blank]) => blank !== "")) {
+      expect(
+        observationPayloadText(documentObservation({ title: "T", content, extractTitle: true })),
+      ).toBe(`T\n\n${content}`);
+    }
+  });
+
   it("範囲外（今は変えない）: event の name は空白だけでも前置きになりうる", () => {
     const text = observationPayloadText({
       id: "obs-1",
