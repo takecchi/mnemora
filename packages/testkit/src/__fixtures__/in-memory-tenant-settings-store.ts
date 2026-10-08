@@ -208,7 +208,7 @@ export class InMemoryTenantSettingsStore implements TenantSettingsStore {
   /** 行が無ければ `DEFAULT_TAXONOMY_MODE`（`'open'`）。 */
   async getTaxonomyMode(ctx: Ctx): Promise<TaxonomyMode> {
     assertWellFormedCtx(ctx);
-    return this.rows.get(ctx.tenantId)?.taxonomyMode ?? DEFAULT_TAXONOMY_MODE;
+    return [...this.rows].find(([k]) => k.toLowerCase() === ctx.tenantId.toLowerCase())?.[1].taxonomyMode ?? DEFAULT_TAXONOMY_MODE;
   }
 
   /** 不正な値は core 共有の `assertValidTaxonomyMode` で拒む。 */
