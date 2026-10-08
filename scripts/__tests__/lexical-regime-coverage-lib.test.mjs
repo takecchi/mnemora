@@ -76,6 +76,14 @@ describe("evaluateCoverage", () => {
       expect(result.problems.join(" ")).toMatch(/1 種類|種類しかない/);
     }
   });
+
+  it("⭐ 期待していない3脚目が別の値を測っていても、期待した2脚が揃っていれば ok(種類数は下限であって一致ではない)", () => {
+    const result = evaluateCoverage([present("UTF8"), present("SQL_ASCII"), present("LATIN1")]);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.distinctMeasured.sort()).toEqual(["LATIN1", "SQL_ASCII", "UTF8"]);
+    }
+  });
 });
 
 describe("buildCoverageSummaryMarkdown", () => {
