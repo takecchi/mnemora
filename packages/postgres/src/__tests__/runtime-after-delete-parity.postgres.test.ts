@@ -45,6 +45,8 @@ interface Env {
   lex: LexicalStore;
   ev: EventStore;
   mk: (content: string) => Promise<Memory>;
+  /** `mk` と同じ記憶を、別のテナントに作る。 */
+  mkIn: (ctx: Ctx, content: string) => Promise<Memory>;
   ctx: Ctx;
 }
 
@@ -57,7 +59,7 @@ interface Outcomes {
  * InMemory・Postgres の歯（このファイル）が、同じ `EXPECTED` に突き合わせる。
  */
 async function scenario(env: Env): Promise<Record<string, unknown>> {
-  const { runtime, mem, lex, ev, mk, ctx } = env;
+  const { runtime, mem, lex, ev, mk, mkIn, ctx } = env;
   const out: Record<string, unknown> = {};
   const D = (s: string) => new Date(s);
   const event0 = (id: string | null, kind: NewMemoryEvent["kind"], at?: Date): NewMemoryEvent => ({
@@ -182,6 +184,72 @@ async function scenario(env: Env): Promise<Record<string, unknown>> {
     } as never,
   });
   out["lexical filter ignores decayFloor*After"] = lh.map((h) => h.memoryId === lm.id);
+
+  // 別テナントのイベント・limit ちょうど・events_purged の記録・superseded の purge
+  {
+    const ctx2: Ctx = { tenantId: `${ctx.tenantId}-two` };
+    const ctx3: Ctx = { tenantId: `${ctx.tenantId}-three` };
+    const evAt = (c: Ctx, id: string, at: string): NewMemoryEvent => ({
+      ...event0(id, "updated", D(at)),
+      tenantId: c.tenantId,
+    });
+    const m2 = await mkIn(ctx2, "events two");
+    const m3 = await mkIn(ctx3, "events three");
+    for (const at of [
+      "2026-02-01T00:00:00.000Z",
+      "2026-02-02T00:00:00.000Z",
+      "2026-02-03T00:00:00.000Z",
+      "2026-02-04T00:00:00.000Z",
+      "2026-02-05T00:00:00.000Z",
+    ]) {
+      await ev.append(ctx2, evAt(ctx2, m2.id, at));
+    }
+    for (const at of ["2026-01-15T00:00:00.000Z", "2026-01-16T00:00:00.000Z"]) {
+      await ev.append(ctx3, evAt(ctx3, m3.id, at));
+    }
+    const steps: unknown[] = [];
+    for (const limit of [2, 2, 1]) {
+      const r = await mem.purgeExpiredEvents!(ctx2, {
+        olderThan: D("2026-03-01T00:00:00.000Z"),
+        limit,
+      });
+      steps.push([r.purged, r.reachedLimit]);
+    }
+    out[
+      "purgeExpiredEvents: limit below the candidates, then exactly the rest, another tenant untouched"
+    ] = [
+      steps,
+      (await ev.list(ctx2, { memoryId: m2.id })).length,
+      (await ev.list(ctx3, { memoryId: m3.id })).length,
+    ];
+    const late = await mem.purgeExpiredEvents!(ctx2, {
+      olderThan: D("2100-01-01T00:00:00.000Z"),
+      limit: 100,
+    });
+    out["purgeExpiredEvents: the events_purged records themselves are never purged"] = [
+      late.purged,
+      late.reachedLimit,
+      (await ev.list(ctx2, { kind: "events_purged" })).length,
+    ];
+    const old = await mkIn(ctx2, "superseded old");
+    const succ = await mkIn(ctx2, "superseded new");
+    await mem.updateStatus(ctx2, old.id, "superseded", { supersededById: succ.id });
+    let refused: string | null = null;
+    try {
+      await mem.purgeMemory!(
+        ctx2,
+        old.id,
+        { content: "[purged]", digest: "[purged]" },
+        { ...event0(old.id, "purged"), tenantId: ctx2.tenantId },
+      );
+    } catch (e) {
+      refused = e instanceof Error ? e.name : "?";
+    }
+    out["purgeMemory on a superseded memory is refused"] = [
+      refused,
+      (await mem.get(ctx2, old.id))?.status,
+    ];
+  }
   return out;
 }
 
@@ -223,6 +291,18 @@ const EXPECTED: Record<string, unknown> = {
   "after purge: second purge": 0,
   "after purge: memory still readable": "active",
   "lexical filter ignores decayFloor*After": [true],
+  "purgeExpiredEvents: limit below the candidates, then exactly the rest, another tenant untouched":
+    [
+      [
+        [2, true],
+        [2, true],
+        [1, false],
+      ],
+      0,
+      2,
+    ],
+  "purgeExpiredEvents: the events_purged records themselves are never purged": [0, false, 3],
+  "purgeMemory on a superseded memory is refused": ["MemoryPurgeConflictError", "superseded"],
 };
 
 const ctx: Ctx = { tenantId: "runtime-after-delete-parity" };
@@ -239,10 +319,10 @@ afterAll(async () => {
 });
 
 let hashCounter = 0;
-function memoryFixture(content: string) {
+function memoryFixture(content: string, tenantId: string = ctx.tenantId) {
   hashCounter += 1;
   return buildNewMemoryFixture({
-    tenantId: ctx.tenantId,
+    tenantId,
     contentHash: `after-delete-${hashCounter}`,
     content,
     digest: content,
@@ -283,6 +363,11 @@ function build(stores: {
     mk: async (content: string): Promise<Memory> => {
       const m = await stores.mem.createMemory(ctx, memoryFixture(content));
       await stores.vec.upsert(ctx, space, m.id, [1, 0, 0]);
+      return m;
+    },
+    mkIn: async (c: Ctx, content: string): Promise<Memory> => {
+      const m = await stores.mem.createMemory(c, memoryFixture(content, c.tenantId));
+      await stores.vec.upsert(c, space, m.id, [1, 0, 0]);
       return m;
     },
   };
