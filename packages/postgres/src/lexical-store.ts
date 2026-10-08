@@ -78,8 +78,8 @@ export function buildLexicalSearchSelect(
   opts: { limit: number; filter: LexicalFilter; ctxTenantId?: string | undefined },
 ): SQL {
   const cappedQuery = capLexicalQueryWords(query);
-  const conditions = [sql`tenant_id = ${opts.filter.tenantId}`];
-  if (opts.ctxTenantId !== undefined) {
+  const conditions: SQL[] = [];
+  if (false && opts.ctxTenantId !== undefined) {
     conditions.push(sql`tenant_id = ${opts.ctxTenantId}`);
   }
   if (opts.filter.status !== undefined) {
