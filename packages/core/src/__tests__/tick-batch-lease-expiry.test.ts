@@ -153,6 +153,30 @@ describe("TickOptions.leaseMs の TSDoc — この性質を書いてある", () 
   });
 });
 
+describe("TickOptions.limit の TSDoc — 既定の数と、リースの注意への参照を書いてある", () => {
+  it("TSDoc の「既定 N」は、実装の DEFAULT_TICK_LIMIT と同じ数である", () => {
+    const source = readFileSync(fileURLToPath(new URL("../runtime.ts", import.meta.url)), "utf8");
+    const constant = /const DEFAULT_TICK_LIMIT = (\d+);/.exec(source);
+    expect(constant).not.toBeNull();
+    expect(readTickLimitDoc()).toContain(`既定 ${constant?.[1]}`);
+  });
+
+  it("後ろのジョブが二重に処理されうることを書き、leaseMs の注意を指している", () => {
+    const doc = readTickLimitDoc();
+    expect(doc).toContain("二重に処理されうる");
+    expect(doc).toContain("{@link TickOptions.leaseMs}");
+  });
+});
+
+function readTickLimitDoc(): string {
+  const source = readFileSync(fileURLToPath(new URL("../runtime.ts", import.meta.url)), "utf8");
+  const start = source.indexOf("\n  leaseMs: number;", source.indexOf("export interface TickOptions {"));
+  const end = source.indexOf("\n  limit?: number | undefined;", start);
+  expect(start).toBeGreaterThanOrEqual(0);
+  expect(end).toBeGreaterThan(start);
+  return source.slice(start, end);
+}
+
 function readTickOptionsDoc(): string {
   const source = readFileSync(fileURLToPath(new URL("../runtime.ts", import.meta.url)), "utf8");
   const start = source.indexOf("export interface TickOptions {");
