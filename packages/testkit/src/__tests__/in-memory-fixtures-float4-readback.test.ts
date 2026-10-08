@@ -15,6 +15,8 @@ const FLOAT4_READBACK_CASES: ReadonlyArray<readonly [input: number, readBack: nu
   [1 / 7, 0.14285715],
   [16777217, 16777216],
   [123456.789, 123456.79],
+  // 最短表記が9桁要る値（8桁で打ち切ると 101.83401489257812 になる）。
+  [101.83401346641752, 101.834015],
 ];
 
 describe("InMemoryMemoryStore: float4 の列は Postgres が読み戻す値で返す", () => {
