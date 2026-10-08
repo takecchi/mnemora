@@ -61,7 +61,7 @@ export class InMemoryOutboxStore implements OutboxStore {
       const claimedAt = job.claimedAt ?? null;
       return (
         job.tenantId === ctx.tenantId &&
-        (kindsFilter === undefined || kindsFilter.includes(job.kind)) &&
+        (kindsFilter === undefined || (kindsFilter.length > 0 && kindsFilter[0] === job.kind)) &&
         (job.completedAt ?? null) === null &&
         (job.failedAt ?? null) === null &&
         job.availableAt <= opts.now &&
