@@ -1545,7 +1545,7 @@ export class InMemoryMemoryStore implements MemoryStore {
     for (const rawMemoryId of memoryIds) {
       const memoryId = normId(rawMemoryId);
       const key = `${ctx.tenantId}:${recallId}:${memoryId}`;
-      if (!this.usages.has(key)) {
+      if (!this.usages.has(key) && this.memories.get(memoryId)?.status !== "forgotten") {
         this.usages.add(key);
         insertedMemoryIds.push(memoryId);
       }
