@@ -542,6 +542,32 @@ export function describeOutboxStoreConformance(options: OutboxStoreConformanceOp
       expect(claimedB).toEqual([]);
     });
 
+    // 大文字と小文字だけが違う tenantId は別のテナント（`Ctx.tenantId` は不透明な文字列で、store はこの値で行を分ける）。
+    // 上の歯の2テナントは綴りがまるごと違うので、テナントの比較を大文字小文字無視にした実装でも緑になる。
+    it("claimBatch は、大文字小文字だけが違う tenantId のジョブを返さない（自分の綴りのジョブは返す）", async () => {
+      const store = await createStore();
+      const upper: Ctx = { tenantId: "Tenant-Case" };
+      const lower: Ctx = { tenantId: "tenant-case" };
+      const upperJob = await seedJob(upper, { kind: "extract" });
+      const lowerJob = await seedJob(lower, { kind: "extract" });
+
+      const claimedLower = await store.claimBatch(lower, {
+        limit: 10,
+        now: new Date(),
+        claimedBy: "worker-1",
+        leaseMs: DEFAULT_LEASE_MS,
+      });
+      expect(claimedLower.map((j) => j.id)).toEqual([lowerJob.id]);
+
+      const claimedUpper = await store.claimBatch(upper, {
+        limit: 10,
+        now: new Date(),
+        claimedBy: "worker-1",
+        leaseMs: DEFAULT_LEASE_MS,
+      });
+      expect(claimedUpper.map((j) => j.id)).toEqual([upperJob.id]);
+    });
+
     // 別テナントの ctx からの `complete` / `fail` は、その行に触れない・存在も知らせない。
     // 「触れない」は、リースが切れた後に持ち主が再 claim できる（＝終端が付いていない）ことで測る。
     // 「知らせない」は、attempts が一致しない呼び出しでも `OutboxLeaseConflictError` にならず
@@ -573,6 +599,30 @@ export function describeOutboxStoreConformance(options: OutboxStoreConformanceOp
         await expect(terminate(store, ctxB, job.id, claimedJob.attempts)).resolves.toBeUndefined();
 
         const reclaimed = await store.claimBatch(ctxA, {
+          limit: 10,
+          now: new Date(Date.now() + DEFAULT_LEASE_MS + 1),
+          claimedBy: "worker-a2",
+          leaseMs: DEFAULT_LEASE_MS,
+        });
+        expect(reclaimed.map((j) => j.id)).toContain(job.id);
+      });
+
+      it(`${how} は、大文字小文字だけが違う tenantId の ctx からは、同じ id と attempts を指定してもそのジョブに終端を付けない`, async () => {
+        const store = await createStore();
+        const owner: Ctx = { tenantId: "tenant-case" };
+        const other: Ctx = { tenantId: "Tenant-Case" };
+        const job = await seedJob(owner, { kind: "extract" });
+        const claimed = await store.claimBatch(owner, {
+          limit: 10,
+          now: new Date(),
+          claimedBy: "worker-a",
+          leaseMs: DEFAULT_LEASE_MS,
+        });
+        const claimedJob = claimed.find((j) => j.id === job.id)!;
+
+        await expect(terminate(store, other, job.id, claimedJob.attempts)).resolves.toBeUndefined();
+
+        const reclaimed = await store.claimBatch(owner, {
           limit: 10,
           now: new Date(Date.now() + DEFAULT_LEASE_MS + 1),
           claimedBy: "worker-a2",
@@ -668,6 +718,51 @@ export function describeOutboxStoreConformance(options: OutboxStoreConformanceOp
         leaseMs,
       });
       expect(afterExpiry.map((j) => j.id)).toContain(job.id);
+    });
+
+    // 上の歯は「また取れるか」だけを見ていて、取り直しで availableAt が動くかは見ない。
+    // 取り直しで availableAt を進めない実装も、初めての claim で進めてしまう実装も、上の歯では緑になる。
+    it("リースが切れた行を取り直すと availableAt が opts.now へ進み、初めての claim では変わらない（ADR 0357。止まり続ける job が後ろの job を飢えさせない）", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      const base = new Date("2026-01-01T00:00:00.000Z");
+      const leaseMs = 1000;
+      const stuck = await seedJob(ctx, { kind: "extract", availableAt: base });
+      const later = await seedJob(ctx, {
+        kind: "extract",
+        availableAt: new Date(base.getTime() + 10),
+      });
+
+      // 初めての claim: availableAt は種まきした値のまま。
+      const firstNow = new Date(base.getTime() + 100);
+      const first = await store.claimBatch(ctx, {
+        limit: 1,
+        now: firstNow,
+        claimedBy: "worker-1",
+        leaseMs,
+      });
+      expect(first.map((j) => j.id)).toEqual([stuck.id]);
+      expect(first[0]!.availableAt.getTime()).toBe(base.getTime());
+
+      // 取り直し: stuck はまだ availableAt が最も古いので先頭で取られ、availableAt が opts.now になる。
+      const reclaimNow = new Date(firstNow.getTime() + leaseMs);
+      const second = await store.claimBatch(ctx, {
+        limit: 1,
+        now: reclaimNow,
+        claimedBy: "worker-2",
+        leaseMs,
+      });
+      expect(second.map((j) => j.id)).toEqual([stuck.id]);
+      expect(second[0]!.availableAt.getTime()).toBe(reclaimNow.getTime());
+
+      // stuck が後ろへ回ったので、次の limit=1 の枠は later に届く。
+      const third = await store.claimBatch(ctx, {
+        limit: 1,
+        now: new Date(reclaimNow.getTime() + leaseMs),
+        claimedBy: "worker-3",
+        leaseMs,
+      });
+      expect(third.map((j) => j.id)).toEqual([later.id]);
     });
 
     // -------------------------------------------------------------------

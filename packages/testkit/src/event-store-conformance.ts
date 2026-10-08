@@ -199,6 +199,23 @@ export function describeEventStoreConformance(options: EventStoreConformanceOpti
       expect(listB).toEqual([]);
     });
 
+    // 大文字と小文字だけが違う tenantId は別のテナント（`Ctx.tenantId` は不透明な文字列で、store はこの値で行を分ける）。
+    // 上の2つの歯の2テナントは綴りがまるごと違うので、テナントの比較を大文字小文字無視にした実装でも緑になる。
+    it("get・list は、大文字小文字だけが違う tenantId のイベントを返さない（自分の綴りからは見える）", async () => {
+      const store = await createStore();
+      const upper: Ctx = { tenantId: "Tenant-Case" };
+      const lower: Ctx = { tenantId: "tenant-case" };
+
+      const upperEvent = await store.append(
+        upper,
+        buildNewMemoryEventFixture({ tenantId: upper.tenantId }),
+      );
+
+      expect(await store.get(lower, upperEvent.id)).toBeNull();
+      expect(await store.list(lower, {})).toEqual([]);
+      expect((await store.list(upper, {})).map((e) => e.id)).toEqual([upperEvent.id]);
+    });
+
     it("list は at 昇順で返す（挿入順ではない）", async () => {
       const store = await createStore();
       const ctx: Ctx = { tenantId: "tenant-1" };
