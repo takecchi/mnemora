@@ -1161,6 +1161,24 @@ describe("buildConsolidatedMemory（純関数）", () => {
     expect(split.subjectId).toBeNull();
   });
 
+  it("subjectId が null（主題なし）と値で割れていれば null（null を「どれでもよい」として値に寄せない）", () => {
+    for (const subjectIds of [
+      [null, "subject-x"],
+      ["subject-x", null],
+    ] as const) {
+      const memory = buildConsolidatedMemory({
+        ctx,
+        eligible: subjectIds.map((subjectId, i) => fixtureMemory({ id: `m${i}`, subjectId })),
+        llmResult: { content: "統合後" },
+        hashContent: (c) => `hash(${c})`,
+        digestFallbackLength: 200,
+        halfLifeHours: 24,
+        now: NOW,
+      });
+      expect(memory.subjectId).toBeNull();
+    }
+  });
+
   it("occurredAt は eligible のうち最も新しいもの。全部 null なら null", () => {
     const withDates = buildConsolidatedMemory({
       ctx,
