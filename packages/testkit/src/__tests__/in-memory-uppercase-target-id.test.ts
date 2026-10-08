@@ -214,6 +214,14 @@ describe("InMemoryMemoryStore: 大文字の対象 id を同じ記憶として受
     expect((await stores.eventStore.list(ctx, { memoryId: up(a) })).length).toBe(1);
   });
 
+  it("VectorStore.getVectors: 大文字だけで渡した id でも、小文字の id の行を返す", async () => {
+    const { make, up, stores } = setup();
+    const a = await make();
+    await stores.vectorStore.upsert(ctx, SPACE, a, [0.5, 0.5, 0.5]);
+    const got = await stores.vectorStore.getVectors!(ctx, SPACE, [up(a)]);
+    expect(got.map((g) => g.memoryId)).toEqual([a]);
+  });
+
   it("同じ記憶を綴り違いで2回渡した markContested は、同じ記憶どうしとして断る（Postgres と同じ）", async () => {
     const { rt, make, up } = setup();
     const a = await make();

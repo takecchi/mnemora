@@ -26,6 +26,8 @@ const CASES: [string, string, number | null][] = [
   ["日本語text", "日本語", null],
   ["a b", "---", null],
   ["a b", "a ---", 1],
+  // 綴りは違うが同じ token 列（foo <-> bar）の語は、分母で1語に数える。
+  ["foo bar", "foo_bar foo__bar zzz", 0.5],
 ];
 
 describe("InMemoryLexicalStore.search — query の単位は空白区切りの語で、語の中の token は隣接を要る（ADR 0513、Postgres に実測で揃える）", () => {
