@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Ctx } from "@mnemora/core";
 import {
   DEFAULT_LOCAL_EMBEDDING_DIMENSIONS,
@@ -419,6 +419,42 @@ describe("defaultLocalEmbeddingRetryDelayMs（既定のバックオフ）", () =
       expect(defaultLocalEmbeddingRetryDelayMs(20)).toBeLessThan(4_000);
     }
   });
+
+  /** 本物の乱数では、上限の手前まで届いたか（頭打ちが 4000ms より低くないか）も、jitter を掛けているかも見分けられない。`Math.random` を [0, 1) の両端に固定して見る（ADR 0141: 200ms 起点・4000ms で頭打ち・full jitter）。 */
+  describe("Math.random を両端に固定したとき", () => {
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    it("乱数が 0 なら、どの attempt でも 0ms（full jitter は下端が 0）", () => {
+      vi.spyOn(Math, "random").mockReturnValue(0);
+
+      for (const attempt of [1, 2, 5, 6, 20]) {
+        expect(defaultLocalEmbeddingRetryDelayMs(attempt)).toBe(0);
+      }
+    });
+
+    it.each([
+      [1, 200],
+      [2, 400],
+      [3, 800],
+      [4, 1_600],
+      [5, 3_200],
+      [6, 4_000],
+      [7, 4_000],
+      [20, 4_000],
+    ])(
+      "乱数が 1 の手前なら、attempt %i の待ちは上限 %ims のすぐ手前（200ms 起点で倍々、4000ms で頭打ち）",
+      (attempt, upper) => {
+        vi.spyOn(Math, "random").mockReturnValue(1 - 2 ** -53);
+
+        const delay = defaultLocalEmbeddingRetryDelayMs(attempt);
+
+        expect(delay).toBeLessThan(upper);
+        expect(delay).toBeCloseTo(upper, 6);
+      },
+    );
+  });
 });
 
 describe("読み込み失敗のメッセージ", () => {
@@ -589,6 +625,57 @@ describe("次元の検査", () => {
     const vectors = await provider.embed(ctx, ["あ", "い"]);
     expect(vectors.map((v) => v.length)).toEqual([256, 256]);
   });
+
+  it.each([255, 257])("宣言（256）と1次元だけ違う（%i 次元）ときも例外になる", async (actual) => {
+    const recorder = createRecordingPipeline({ dimensions: actual });
+    const provider = new LocalEmbeddingProvider({
+      dimensions: 256,
+      createPipeline: recorder.createPipeline,
+    });
+
+    await expect(provider.embed(ctx, ["テキスト"])).rejects.toThrow(
+      new RegExp(`256.*${actual} 次元`, "s"),
+    );
+  });
+
+  it("2本目以降のベクトルだけ次元が違っても例外になり、何番目かを名指しする", async () => {
+    const provider = new LocalEmbeddingProvider({
+      dimensions: 2,
+      createPipeline: async () =>
+        fakeLocalEmbeddingPipeline(async () => [
+          [0.1, 0.2],
+          [0.1, 0.2],
+          [0.1, 0.2, 0.3],
+        ]),
+    });
+
+    await expect(provider.embed(ctx, ["あ", "い", "う"])).rejects.toThrow(/3 次元だった（2 番目）/);
+  });
+
+  it("例外の型は素の Error で、kind を持たない", async () => {
+    const recorder = createRecordingPipeline({ dimensions: 384 });
+    const provider = new LocalEmbeddingProvider({
+      dimensions: 256,
+      createPipeline: recorder.createPipeline,
+    });
+
+    const error = await provider.embed(ctx, ["テキスト"]).catch((err: unknown) => err);
+
+    expect(error).toBeInstanceOf(Error);
+    expect(isLocalEmbeddingProviderError(error)).toBe(false);
+  });
+
+  it("件数が maxBatchSize を超えて分割されても、次元の食い違いは例外になる", async () => {
+    const recorder = createRecordingPipeline({ dimensions: 384 });
+    const provider = new LocalEmbeddingProvider({
+      dimensions: 256,
+      maxBatchSize: 2,
+      createPipeline: recorder.createPipeline,
+    });
+
+    await expect(provider.embed(ctx, ["あ", "い", "う"])).rejects.toThrow(/256.*384 次元/s);
+    expect(recorder.embeddedBatches).toHaveLength(2);
+  });
 });
 
 describe("成分の検査（Issue #992）", () => {
@@ -653,6 +740,28 @@ describe("件数の検査", () => {
     const provider = new LocalEmbeddingProvider({ createPipeline: recorder.createPipeline });
 
     await expect(provider.embed(ctx, ["あ"])).rejects.toThrow(/1 件.*2 件/s);
+  });
+
+  it("例外の型は素の Error で、kind を持たない", async () => {
+    const recorder = createRecordingPipeline({ countDelta: -1 });
+    const provider = new LocalEmbeddingProvider({ createPipeline: recorder.createPipeline });
+
+    const error = await provider.embed(ctx, ["あ", "い"]).catch((err: unknown) => err);
+
+    expect(error).toBeInstanceOf(Error);
+    expect(isLocalEmbeddingProviderError(error)).toBe(false);
+  });
+
+  it("件数が maxBatchSize を超えて分割されても、連結した件数の食い違いは例外になる", async () => {
+    // 各チャンクで1件ずつ欠けるので、3件（[あ,い] [う]）に対して1件しか返らない。
+    const recorder = createRecordingPipeline({ countDelta: -1 });
+    const provider = new LocalEmbeddingProvider({
+      maxBatchSize: 2,
+      createPipeline: recorder.createPipeline,
+    });
+
+    await expect(provider.embed(ctx, ["あ", "い", "う"])).rejects.toThrow(/3 件.*1 件/s);
+    expect(recorder.embeddedBatches).toHaveLength(2);
   });
 });
 
