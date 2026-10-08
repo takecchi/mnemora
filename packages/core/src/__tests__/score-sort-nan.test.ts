@@ -97,6 +97,17 @@ describe("compareScoredCandidates: NaN な total が混ざっても有限候補�
     const sorted = [nanOlder, nanNewer].sort(compareScoredCandidates);
     expect(sorted.map((c) => c.memory.id)).toEqual(["NAN-NEW", "NAN-OLD"]);
   });
+
+  it("NaN どうしの同点は、どちらを先に渡しても実効時刻（→id）で同じ向きに決まる", () => {
+    const nanNewer = candidate("NAN-NEW", NaN, new Date(t.getTime() + 1000));
+    const nanOlder = candidate("NAN-OLD", NaN, t);
+    expect(compareScoredCandidates(nanNewer, nanOlder)).toBeLessThan(0);
+    expect(compareScoredCandidates(nanOlder, nanNewer)).toBeGreaterThan(0);
+    const sameTimeA = candidate("NAN-A", NaN, t);
+    const sameTimeB = candidate("NAN-B", NaN, t);
+    expect(compareScoredCandidates(sameTimeA, sameTimeB)).toBeLessThan(0);
+    expect(compareScoredCandidates(sameTimeB, sameTimeA)).toBeGreaterThan(0);
+  });
 });
 
 describe("compareDescendingNaNLast（段2・段3.5で共有する比較 helper。Issue #938）", () => {

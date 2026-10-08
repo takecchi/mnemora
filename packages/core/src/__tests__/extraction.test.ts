@@ -14,6 +14,7 @@ import {
 import { z } from "zod";
 import type { LLMProvider, PromptSpec, StructuredRequest } from "../interfaces/llm-provider.js";
 import type { Observation } from "../observation.js";
+import { defaultDecayStrategy } from "../strategies/decay.js";
 
 /** `llmCassetteKey` と同じ正規化・ハッシュ手順のローカル再実装。core は testkit に devDependency を持てない（`dependency-boundary.test.ts` が検査しており、testkit は core に依存する側なので循環になる）ため、`node:crypto` だけで再現する。 */
 function llmCassetteKeyLocal(prompt: PromptSpec): string {
@@ -118,6 +119,51 @@ describe("extractCandidates（roadmap.md 段階3の基本抽出）", () => {
     expect(result.failure).toEqual({ kind: "refusal", message: "the model refused to answer" });
   });
 
+  describe("投げ直すかは signal で決め、例外の名前では決めない（ADR 0359 決めたこと4）", () => {
+    function llmThrowingAbortError(): LLMProvider {
+      return {
+        complete: async () => {
+          throw new Error("not used in this test");
+        },
+        completeStructured: async () => {
+          throw new DOMException("provider aborted on its own", "AbortError");
+        },
+      };
+    }
+
+    it.each([
+      ["signal を渡さない", undefined],
+      ["abort されていない signal を渡す", new AbortController().signal],
+    ])(
+      "%s呼び出しで provider が AbortError を投げたら、全文フォールバックへ倒す",
+      async (_, signal) => {
+        const result = await extractCandidates(
+          llmThrowingAbortError(),
+          ctx,
+          makeObservation(),
+          undefined,
+          signal,
+        );
+        expect(result.usedWholeObservationFallback).toBe(true);
+        expect(result.failure).toEqual({ kind: null, message: "provider aborted on its own" });
+      },
+    );
+
+    it("abort 済みの signal を渡した呼び出しなら、投げ直す", async () => {
+      const controller = new AbortController();
+      controller.abort();
+      await expect(
+        extractCandidates(
+          llmThrowingAbortError(),
+          ctx,
+          makeObservation(),
+          undefined,
+          controller.signal,
+        ),
+      ).rejects.toBeDefined();
+    });
+  });
+
   it("フォールバック候補は payload.text が無い document/event でも空文字にならない", async () => {
     const provider = throwingLlmProvider();
     const observation = makeObservation({
@@ -144,6 +190,14 @@ describe("resolveDigest（docs/memory-model.md §4 の安全弁）", () => {
   it("digest が空白のみならフォールバックする（LLM が空文字を返した場合と同じ扱い）", () => {
     const resolved = resolveDigest({ content: "本文", digest: "   " }, 200);
     expect(resolved.digestSource).toBe("fallback");
+  });
+
+  it.each([
+    ["1文字なら、LLM の digest として採る", "a", { digest: "a", digestSource: "llm" }],
+    ["trim して1文字なら、LLM の digest として採る", " 要 ", { digest: "要", digestSource: "llm" }],
+    ["trim して0文字なら、フォールバックする", " ", { digest: "本文", digestSource: "fallback" }],
+  ])("digest が%s", (_, digest, expected) => {
+    expect(resolveDigest({ content: "本文", digest }, 200)).toEqual(expected);
   });
 });
 
@@ -243,6 +297,41 @@ describe("buildNewMemoryFromCandidate", () => {
       candidate: { content: "推論した内容", provenanceKind: "inferred" },
     });
     expect(memory.provenance.kind === "inferred" && memory.provenance.confidence).toBe(0.5);
+  });
+
+  it.each([0, 0.01])(
+    "provenanceKind: 'inferred' で confidence が %s なら、既定値に置き換えずにそのまま使う",
+    (confidence) => {
+      const memory = buildNewMemoryFromCandidate({
+        ...baseParams,
+        observation: makeObservation(),
+        candidate: { content: "推論した内容", provenanceKind: "inferred", confidence },
+      });
+      expect(memory.provenance.kind === "inferred" && memory.provenance.confidence).toBe(
+        confidence,
+      );
+    },
+  );
+
+  it("recordedAt と減衰の床の起点は now であり、observation の recordedAt ではない", () => {
+    const observation = makeObservation();
+    // runtime の observe は observation の recordedAt と now に同じ時刻を使うので、違う値は直接呼んで作る。
+    expect(baseParams.now.getTime()).not.toBe(observation.recordedAt.getTime());
+    const memory = buildNewMemoryFromCandidate({
+      ...baseParams,
+      observation,
+      candidate: { content: "本文", provenanceKind: "stated" },
+    });
+    const floorFrom = (recordedAt: Date) =>
+      defaultDecayStrategy.floorAt({
+        recordedAt,
+        lastReinforcedAt: null,
+        strength: 1,
+        halfLifeHours: baseParams.halfLifeHours,
+      });
+    expect(memory.recordedAt).toEqual(baseParams.now);
+    expect(memory.decayFloorAt).toEqual(floorFrom(baseParams.now));
+    expect(memory.decayFloorAt).not.toEqual(floorFrom(observation.recordedAt));
   });
 
   it("occurredAt が無い Observation では recordedAt を freshness の起点として使う（stated.at）", () => {
