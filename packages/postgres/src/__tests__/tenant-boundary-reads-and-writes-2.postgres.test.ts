@@ -11,8 +11,8 @@ import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js"
  * テナントごとに別のカウンタになることを縛る。
  */
 
-const A: Ctx = { tenantId: "teeth2-tenant-a" };
-const B: Ctx = { tenantId: "teeth2-tenant-b" };
+const A: Ctx = { tenantId: "tenant-boundary-2-a" };
+const B: Ctx = { tenantId: "tenant-boundary-2-b" };
 const usage = {
   chars: 0,
   estimatedTokens: 0,
