@@ -267,6 +267,46 @@ async function scenario(env: Env): Promise<Result> {
       await claimAt(15000, 1),
     ];
   }
+  {
+    // 取り直しの候補だったが `limit` で落ちた行の `availableAt` は変わらない（ADR 0357: 書き直すのは、取り直した行だけ）。
+    // 4件を積んだ順に1件ずつ claim し（リースは 5000 までに切れる）、5000 で1件だけ取り直す（job 1）。落ちた job 2〜4 は候補だった
+    // が、積んだままの古い `availableAt` を保つ。7000 の claim は、まず job 2〜4（積んだ順）を取り、そのあと 5000 に進んだ job 1 を取る。
+    // 落ちた行まで 5000 に進める実装では、4件が 5000 で並び、7000 の最初の claim が job 1 になる。
+    const ctx = fresh();
+    await seedJobs(ctx, "embed");
+    await seedJobs(ctx, "embed");
+    const at = Date.now() + 60_000;
+    const labels = new Map<string, string>();
+    const claimAt = async (offset: number, limit: number) =>
+      (
+        await ob.claimBatch(ctx, {
+          limit,
+          now: new Date(at + offset),
+          claimedBy: "w",
+          leaseMs: 1000,
+          kinds: ["embed"],
+        })
+      )
+        .map((j) => {
+          if (!labels.has(j.id)) labels.set(j.id, `job ${labels.size + 1}`);
+          const moved = j.availableAt.getTime() - at;
+          return [labels.get(j.id), j.attempts, moved >= 0 ? moved : "as seeded"];
+        })
+        .sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
+    out[
+      "claim: a candidate dropped by limit keeps its availableAt, only the re-claimed row moves"
+    ] = [
+      await claimAt(0, 1),
+      await claimAt(0, 1),
+      await claimAt(0, 1),
+      await claimAt(0, 1),
+      await claimAt(5000, 1),
+      await claimAt(7000, 1),
+      await claimAt(7000, 1),
+      await claimAt(7000, 1),
+      await claimAt(7000, 1),
+    ];
+  }
   return out;
 }
 
@@ -562,6 +602,17 @@ const EXPECTED: Result = {
     ],
     [["job 2", 2, 10000]],
     [["job 1", 3, 15000]],
+  ],
+  "claim: a candidate dropped by limit keeps its availableAt, only the re-claimed row moves": [
+    [["job 1", 1, "as seeded"]],
+    [["job 2", 1, "as seeded"]],
+    [["job 3", 1, "as seeded"]],
+    [["job 4", 1, "as seeded"]],
+    [["job 1", 2, 5000]],
+    [["job 2", 2, 7000]],
+    [["job 3", 2, 7000]],
+    [["job 4", 2, 7000]],
+    [["job 1", 3, 7000]],
   ],
 };
 const space = TEST_EMBEDDING_SPACE;
