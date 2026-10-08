@@ -58,7 +58,19 @@ describe.each(kits)("RelationStore の入力と冪等（ADR 0488）: %s", (_name
     expect((await rs.listRelated(ctx, a)).map((r) => r.memoryId)).toEqual([a]);
   });
 
-  it.each(["", null, "Contradicts", "bogus", "__proto__", "toString", 0])(
+  // 前後に空白・改行が付いた "contradicts" も範囲外（trim して通す変異を捕まえる入力）。
+  it.each([
+    "",
+    null,
+    "Contradicts",
+    "bogus",
+    "__proto__",
+    "toString",
+    0,
+    "contradicts ",
+    " contradicts",
+    "contradicts\n",
+  ])(
     "link は範囲外の kind (%j) を unknown relation kind で断り、unlink は何もしない",
     async (kind) => {
       const kit = await build();
