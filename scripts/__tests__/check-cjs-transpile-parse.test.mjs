@@ -141,4 +141,35 @@ describe("scripts/check-cjs-transpile-parse.mjs（CJS 構文解析の門）", ()
     expect(status, `期待した非0にならなかった。出力:\n${output}`).not.toBe(0);
     expect(output).toContain("検査対象のファイルが1件も見つかりませんでした");
   });
+
+  it.each(["index.cjs", "index.mjs"])(
+    "拡張子が %s の配布物も検査し、import.meta を使っていれば赤くなる",
+    (fileName) => {
+      fixtureRoot = newFixtureRoot();
+      writeCleanDistForAll(fixtureRoot);
+      writeFileSync(
+        join(fixtureRoot, "core", "dist", fileName),
+        "export const selfUrl = new URL(import.meta.url);\n",
+      );
+
+      const { status, output } = runGate(fixtureRoot);
+
+      expect(status, `期待した非0にならなかった。出力:\n${output}`).not.toBe(0);
+      expect(output).toContain(`${fileName} は CommonJS として解析できません`);
+    },
+  );
+
+  it("dist の下のサブディレクトリに在る配布物も検査し、import.meta を使っていれば赤くなる", () => {
+    fixtureRoot = newFixtureRoot();
+    writeCleanDistForAll(fixtureRoot);
+    const nestedDir = join(fixtureRoot, "postgres", "dist", "bin");
+    mkdirSync(nestedDir, { recursive: true });
+    writeFileSync(join(nestedDir, "migrate.js"), "export const here = import.meta.url;\n");
+
+    const { status, output } = runGate(fixtureRoot);
+
+    expect(status, `期待した非0にならなかった。出力:\n${output}`).not.toBe(0);
+    expect(output).toContain(join("bin", "migrate.js"));
+    expect(output).toContain("CommonJS として解析できません");
+  });
 });
