@@ -143,6 +143,77 @@ describe.each(KITS)("memory_events の meta（%s）", (_name, build) => {
     });
   });
 
+  it("群（markContestedGroup → resolveContestedGroup supersede）が書くイベントの meta は、2実装で同じ", async () => {
+    const { runtime, memoryStore, eventStore } = await build();
+    const [a, b, c] = await Promise.all(
+      ["a", "b", "c"].map((n) =>
+        memoryStore.createMemory(
+          ctx,
+          buildNewMemoryFixture({ tenantId: ctx.tenantId, contentHash: `meta-parity-group-${n}` }),
+        ),
+      ),
+    );
+    const members = [a!.id, b!.id, c!.id];
+    const marked = await runtime.markContestedGroup!(ctx, members, { reason: "mark-note" });
+    expect(marked.supported && marked.outcome.kind).toBe("contested_group");
+    const out = await runtime.resolveContestedGroup!(
+      ctx,
+      members,
+      { kind: "supersede", winnerId: c!.id },
+      { reason: "resolve-note" },
+    );
+    expect(out.supported && out.outcome.kind).toBe("resolved");
+
+    // 群のイベントは contestedWithId を持たない（2者版との違い）。マークは全員に `updated`、解決は勝者が `updated`・敗者が `superseded`。
+    const metasOf = async (id: string, kind: "updated" | "superseded") =>
+      (await eventStore.list(ctx, { memoryId: id as never, kind })).map((e) => e.meta);
+    for (const id of members) {
+      expect((await metasOf(id, "updated")).filter((m) => m.reason === "contested")).toEqual([
+        { reason: "contested", note: "mark-note" },
+      ]);
+    }
+    expect(
+      (await metasOf(c!.id, "updated")).filter((m) => m.reason === "contested_resolved"),
+    ).toEqual([{ reason: "contested_resolved", resolution: "supersede", note: "resolve-note" }]);
+    for (const loser of [a!.id, b!.id]) {
+      expect(await metasOf(loser, "superseded")).toEqual([
+        {
+          reason: "contested_resolved",
+          resolution: "supersede",
+          note: "resolve-note",
+          supersededById: c!.id,
+        },
+      ]);
+    }
+  });
+
+  it("群の both_active が書くイベントの meta は、2実装で同じ", async () => {
+    const { runtime, memoryStore, eventStore } = await build();
+    const [a, b, c] = await Promise.all(
+      ["a", "b", "c"].map((n) =>
+        memoryStore.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: ctx.tenantId,
+            contentHash: `meta-parity-group-ba-${n}`,
+          }),
+        ),
+      ),
+    );
+    const members = [a!.id, b!.id, c!.id];
+    await runtime.markContestedGroup!(ctx, members);
+    const out = await runtime.resolveContestedGroup!(ctx, members, { kind: "both_active" });
+    expect(out.supported && out.outcome.kind).toBe("resolved");
+    for (const id of members) {
+      const metas = (await eventStore.list(ctx, { memoryId: id, kind: "updated" })).map(
+        (e) => e.meta,
+      );
+      expect(metas).toHaveLength(2);
+      expect(metas).toContainEqual({ reason: "contested" });
+      expect(metas).toContainEqual({ reason: "contested_resolved", resolution: "both_active" });
+    }
+  });
+
   it("purgeExpiredEvents の events_purged は、meta の日時を ISO 8601 の文字列で持つ", async () => {
     const { runtime, memoryStore, eventStore } = await build();
     const a = await memoryStore.createMemory(
@@ -165,5 +236,39 @@ describe.each(KITS)("memory_events の meta（%s）", (_name, build) => {
     }
     expect(meta.olderThan).toBe(olderThan.toISOString());
     expect(result.oldestPurgedAt).toBeInstanceOf(Date);
+  });
+
+  it("purgeExpiredEvents は、別テナントのより古い期限切れイベントに limit を食われず、消した件数・reachedLimit・purgedCount が正確", async () => {
+    const { eventStore, memoryStore } = await build();
+    const other: Ctx = { tenantId: "memory-events-meta-parity-other" };
+    const at = (day: number) => new Date(Date.UTC(2025, 0, day));
+    const put = (c: Ctx, day: number) =>
+      eventStore.append(c, {
+        tenantId: c.tenantId,
+        memoryId: null,
+        kind: "updated",
+        at: at(day),
+        actor: { type: "system" },
+        meta: {},
+      });
+    // 別テナントの3件は、こちらの3件より古い（テナントの絞りが SELECT から抜けると、limit + 1 件をこちらが全部食われる）。
+    for (const day of [1, 2, 3]) await put(other, day);
+    for (const day of [11, 12, 13]) await put(ctx, day);
+
+    const result = await memoryStore.purgeExpiredEvents!(ctx, {
+      olderThan: at(28),
+      limit: 2,
+    });
+    expect(result).toMatchObject({ purged: 2, reachedLimit: true, dryRun: false });
+    expect(result.oldestPurgedAt).toEqual(at(11));
+    expect(result.newestPurgedAt).toEqual(at(12));
+
+    const purged = await eventStore.list(ctx, { kind: "events_purged" });
+    expect(purged).toHaveLength(1);
+    expect(purged[0]!.meta.purgedCount).toBe(2);
+    expect(await eventStore.list(ctx, { kind: "updated" })).toHaveLength(1);
+    // 別テナントは何も消えず、events_purged も積まれない。
+    expect(await eventStore.list(other, { kind: "updated" })).toHaveLength(3);
+    expect(await eventStore.list(other, { kind: "events_purged" })).toEqual([]);
   });
 });
