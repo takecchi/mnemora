@@ -131,11 +131,6 @@ export async function findCrossTenantReferences(
   if (schema !== undefined) {
     assertSafeSchemaName(schema);
   }
-  if (!Number.isInteger(sampleLimit) || sampleLimit < 0 || sampleLimit > MAX_SAMPLE_LIMIT) {
-    throw new RangeError(
-      `findCrossTenantReferences: sampleLimit must be an integer between 0 and ${MAX_SAMPLE_LIMIT} (got ${String(sampleLimit)})`,
-    );
-  }
   const tables: Tables = {
     memories: qualify(schema, "memories"),
     observations: qualify(schema, "observations"),
@@ -144,6 +139,11 @@ export async function findCrossTenantReferences(
   };
 
   const client = await pool.connect();
+  if (!Number.isInteger(sampleLimit) || sampleLimit < 0 || sampleLimit > MAX_SAMPLE_LIMIT) {
+    throw new RangeError(
+      `findCrossTenantReferences: sampleLimit must be an integer between 0 and ${MAX_SAMPLE_LIMIT} (got ${String(sampleLimit)})`,
+    );
+  }
   let broken: Error | undefined;
   try {
     await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
