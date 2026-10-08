@@ -178,6 +178,14 @@ describe("parseMigrateCliOptions: --extension-mode（ADR 0093）", () => {
     expect(result.error.message).toMatch(/extension-mode/i);
   });
 
+  it.each(["VERIFY", "Create", " verify", "verify "])(
+    "create / verify と大文字小文字や空白だけが違う値（%j）も、引数・環境変数のどちらでもエラーになる",
+    (value) => {
+      expectErr(parseMigrateCliOptions(["--extension-mode", value], {}));
+      expectErr(parseMigrateCliOptions([], { MNEMORA_EXTENSION_MODE: value }));
+    },
+  );
+
   it("--schema と組み合わせても解決できる（extensionSchema とは独立）", () => {
     const result = parseMigrateCliOptions(["--schema", "s", "--extension-mode", "verify"], {});
     expectOk(result);
@@ -253,6 +261,22 @@ describe("parseMigrateCliOptions: 優先順位（引数 > 環境変数）", () =
     });
     expectOk(result);
     expect(result.options.schema).toBe("schema_env");
+    expect(result.options.extensionSchema).toBe("ext_arg");
+  });
+
+  it("--extension-mode が正しければ、不正な MNEMORA_EXTENSION_MODE は見ない", () => {
+    const result = parseMigrateCliOptions(["--extension-mode", "verify"], {
+      MNEMORA_EXTENSION_MODE: "skip",
+    });
+    expectOk(result);
+    expect(result.options.extensionMode).toBe("verify");
+  });
+
+  it("--extension-schema が正しければ、不正な MNEMORA_EXTENSION_SCHEMA は見ない", () => {
+    const result = parseMigrateCliOptions(["--schema", "s", "--extension-schema", "ext_arg"], {
+      MNEMORA_EXTENSION_SCHEMA: "Bad-Name",
+    });
+    expectOk(result);
     expect(result.options.extensionSchema).toBe("ext_arg");
   });
 });
