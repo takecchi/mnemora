@@ -58,6 +58,9 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - **フック・フラグに応じた追加**: `peekJob` を渡した adapter に、`fail` のあとの `complete`・`complete` のあとの `fail` が先の終端を保つことの `it` が増えた。`supportsPurgeMemory` の枝に purge 済みの記憶への `updateStatus` の CAS（`supportsSupersedeWithNewMemories` も真なら `supersedeWithNewMemories` の CAS も）、`supportsFindActiveByClaimKey`・`supportsListActiveClaimPredicates` の枝に contested の行を含めないこと、`supportsLabels: true` の枝に `listLabels` のコードポイント順の `it` が増えた。
   - `packages/testkit/README.md` の「動く最小の例」（自作の `EventStore`）は、UUID 形式の id を大文字小文字を区別して比べていて、新しい `it` で赤になった。例を約束どおりに直した——**この例を写して作った adapter は同じく赤になる。**
   - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目74。DB マイグレーションは無い。
+- **conformance suite に約束を足した——大文字小文字だけが違う `tenantId` を別のテナントとして扱うこと（`VectorStore`・`LexicalStore`・`RelationStore`）、`filter.subjectId` を大文字小文字を区別して比べること（`VectorStore`・`LexicalStore`）、`VectorStore.delete` が渡した space の行だけを消すこと**（[Issue #1940](https://github.com/takecchi/mnemora/issues/1940)。変異試験で、これらを破る実装が suite でも他のどの試験でも緑になると分かった。ADR 0546 の作法どおり、足した約束は Breaking に数える。**足すかはオーナーが決める**——この箇条はその提案で、クローンの判断で、オーナーの判断ではない）。`@mnemora/postgres` と `@mnemora/testkit` の fixture は変わっておらず、どれも緑。
+  - **無条件の追加（新しく赤になりうる）**: `describeVectorStoreConformance` に、綴り違いのテナントの `search` に vector が現れないこと、大文字小文字だけが違う subject の記憶が `filter.subjectId` で返らないこと、`delete` が別の space にある同じ memoryId の行を残すこと、の `it` が増えた。`describeLexicalStoreConformance` に、綴り違いのテナントと大文字小文字だけが違う subject の `it` が増えた。`describeRelationStoreConformance` に、綴り違いのテナントの ctx の `listRelated` が関係を返さないことの `it` が増えた。
+  - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目75。DB マイグレーションは無い。
 
 ### Changed（後方互換だが挙動が変わりうるもの）
 
