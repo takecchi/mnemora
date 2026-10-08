@@ -1,10 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { defaultActivityDecayStrategy, defaultDecayStrategy } from "../strategies/decay.js";
 
-/**
- * `strategies/decay.ts` に変異をまとめて当てたとき、どの歯も赤くならなかった形を縛る（Issue #1948）。
- */
-
 const HOUR = 1000 * 60 * 60;
 const MAX_DATE_MS = 8_640_000_000_000_000;
 
@@ -31,8 +27,8 @@ describe("strengthAt: now が起点より前なら strength を超える値を�
 });
 
 /**
- * 上限で丸めるのは「超えるとき」だけである。既存の歯は上限ちょうど・上限を超える側と、上限から遠く離れた
- * 内側だけを見ており、上限の1つ内側の値を上限へ繰り上げる実装を見分けられなかった。
+ * 上限で丸めるのは「超えるとき」だけである。上限から遠い内側の値では、上限の1つ内側を上限へ繰り上げる実装と
+ * 区別できないので、上限ちょうどと1つ内側の両方を置く。
  * 下の入力は offset = 1 × log2(0.2 / 0.05) = 2（整数ちょうど）で、浮動小数の誤差が入らない。
  */
 describe("floorAt: 上限の1つ内側の値は、上限へ丸めずそのまま返す", () => {

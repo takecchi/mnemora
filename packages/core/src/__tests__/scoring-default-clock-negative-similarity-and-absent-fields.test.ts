@@ -1,11 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { defaultScoringStrategy } from "../strategies/scoring.js";
 
-/**
- * `strategies/scoring.ts` に変異をまとめて当てたとき、どの歯も赤くならなかった形を縛る（Issue #1948）。
- * どれも TSDoc に書いてある約束で、既存の歯は呼んではいるが、違いが出る入力を渡していなかった。
- */
-
 const HOUR = 1000 * 60 * 60;
 const NOW = new Date("2026-01-11T00:00:00.000Z");
 
