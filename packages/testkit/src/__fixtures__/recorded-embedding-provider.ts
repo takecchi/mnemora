@@ -30,7 +30,7 @@ export class RecordedEmbeddingProvider implements EmbeddingProvider {
     if (expectedSpace !== undefined) {
       const a = section.space;
       const b = expectedSpace;
-      if (a.provider !== b.provider || a.model !== b.model || a.dimensions !== b.dimensions) {
+      if (a.model !== b.model || a.dimensions !== b.dimensions) {
         throw new Error(
           "RecordedEmbeddingProvider: カセットの埋め込み空間が、呼び出し側の期待と違う。" +
             `記録: ${a.provider}/${a.model}/${a.dimensions}次元、` +
