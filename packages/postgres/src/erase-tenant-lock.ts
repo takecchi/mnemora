@@ -17,7 +17,7 @@ import type { Db } from "./client.js";
  * - mnemora は `lock_timeout` を敷かない。利用者の `lock_timeout` / `statement_timeout` は効く。
  */
 export function eraseTenantLockKey(tenantId: string): bigint {
-  return deriveAdvisoryLockKey(`mnemora:eraseTenant:${tenantId}`);
+  return deriveAdvisoryLockKey(`mnemora:eraseTenant:${tenantId.toLowerCase()}`);
 }
 
 export async function lockTenantForErase(tx: Db, tenantId: string): Promise<void> {
