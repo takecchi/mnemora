@@ -22,7 +22,7 @@ export function buildStoredMemoryEvent(ctx: Ctx, event: NewMemoryEvent): MemoryE
     id: nextId("evt"),
     tenantId: ctx.tenantId,
     // uuid の列は小文字の正規形で読み戻る（`@mnemora/postgres`）ので、小文字にそろえて積む。
-    memoryId: event.memoryId === null ? null : event.memoryId.toLowerCase(),
+    memoryId: event.memoryId,
     kind: event.kind,
     at: event.at ?? new Date(),
     actor: event.actor,
