@@ -181,6 +181,17 @@ describe("壁時計と活動時計の2軸: 式の左（壁時計）で決まれ�
   });
 });
 
+describe("VectorStore.search: provenance の除外・期間の絞りで落ちる行では、S_x の式を評価しない", () => {
+  it.each([
+    ["excludeProvenanceKinds", () => ({ excludeProvenanceKinds: ["imported"] })],
+    ["occurredAfter", (m: Memory) => ({ occurredAfter: new Date(m.recordedAt.getTime() + 1) })],
+    ["occurredBefore", (m: Memory) => ({ occurredBefore: new Date(m.recordedAt.getTime() - 1) })],
+  ] as const)("%s", async (_, extra) => {
+    const s = await setup(5000);
+    expect(await search(true, extra)(s)).toEqual([]);
+  });
+});
+
 describe("nowSeq（decayFloorSeqAfter）そのものが bigint に収まらないなら、行が無くても断る", () => {
   const empty = async () => {
     const mem = new InMemoryMemoryStore();
@@ -205,6 +216,26 @@ describe("nowSeq（decayFloorSeqAfter）そのものが bigint に収まらな�
     ).rejects.toThrow(OVERFLOW);
     await expect(
       s.vec.search(ctx, SPACE, [1, 0, 0], { limit: 3, filter: filter(BIG) }),
+    ).resolves.toBeDefined();
+  });
+  // 下限側。-2^63 ちょうどは Postgres が断り fixture が通す差が残っている（ドライバが `"-9223372036854776000"` にする）ので、ここでは見ない。
+  it("下限の外（-2^63 より下の最初の double と -2^64）も断り、-2^63 の1つ上の double は通す", async () => {
+    const s = await empty();
+    const filter = (n: number) => ({ tenantId: ctx.tenantId, decayFloorSeqAfter: n });
+    for (const n of [-(2 ** 63) - 2048, -(2 ** 64)]) {
+      for (const clock of ["activity", "either"] as const) {
+        await expect(archive(clock, false, n)(await empty())).rejects.toThrow(OVERFLOW);
+      }
+      await expect(s.mem.aggregateScope(ctx, { decayFloorSeqAfter: n })).rejects.toThrow(OVERFLOW);
+      await expect(
+        s.vec.search(ctx, SPACE, [1, 0, 0], { limit: 3, filter: filter(n) }),
+      ).rejects.toThrow(OVERFLOW);
+    }
+    const above = -(2 ** 63) + 1024;
+    await expect(archive("activity", false, above)(await empty())).resolves.toBeDefined();
+    await expect(s.mem.aggregateScope(ctx, { decayFloorSeqAfter: above })).resolves.toBeDefined();
+    await expect(
+      s.vec.search(ctx, SPACE, [1, 0, 0], { limit: 3, filter: filter(above) }),
     ).resolves.toBeDefined();
   });
 });

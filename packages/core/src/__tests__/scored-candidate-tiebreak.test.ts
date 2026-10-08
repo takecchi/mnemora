@@ -35,26 +35,28 @@ describe("compareScoredCandidates（Issue #339 / ADR 0170）", () => {
   });
 
   it("score.total が同点なら、実効時刻（occurredAt ?? recordedAt）が新しい方を先にする", () => {
-    const older = candidate("older", 0.5, { recordedAt: new Date("2026-01-01T00:00:00Z") });
-    const newer = candidate("newer", 0.5, { recordedAt: new Date("2026-01-02T00:00:00Z") });
+    // id の昇順では古い方が先になる組にする（時刻で決まらず id へ落ちれば順が逆になる）。
+    const older = candidate("a-older", 0.5, { recordedAt: new Date("2026-01-01T00:00:00Z") });
+    const newer = candidate("z-newer", 0.5, { recordedAt: new Date("2026-01-02T00:00:00Z") });
     expect(compareScoredCandidates(older, newer)).toBeGreaterThan(0);
     expect(compareScoredCandidates(newer, older)).toBeLessThan(0);
     const sorted = [older, newer].sort(compareScoredCandidates);
-    expect(sorted.map((c) => c.memory.id)).toEqual(["newer", "older"]);
+    expect(sorted.map((c) => c.memory.id)).toEqual(["z-newer", "a-older"]);
     const sortedReverseInput = [newer, older].sort(compareScoredCandidates);
-    expect(sortedReverseInput.map((c) => c.memory.id)).toEqual(["newer", "older"]);
+    expect(sortedReverseInput.map((c) => c.memory.id)).toEqual(["z-newer", "a-older"]);
   });
 
   it("occurredAt が在ればそちらを実効時刻として使う（recordedAt は無視する）", () => {
-    const a = candidate("a-id", 0.5, {
-      occurredAt: new Date("2020-06-01T00:00:00Z"),
-      recordedAt: new Date("2026-01-02T00:00:00Z"),
-    });
-    const b = candidate("b-id", 0.5, {
+    // recordedAt の新しい方を id の大きい側に置く（recordedAt で決まれば id の昇順と逆の順になる）。
+    const olderRecorded = candidate("a-id", 0.5, {
       occurredAt: new Date("2020-06-01T00:00:00Z"),
       recordedAt: new Date("2026-01-01T00:00:00Z"),
     });
-    const sorted = [b, a].sort(compareScoredCandidates);
+    const newerRecorded = candidate("b-id", 0.5, {
+      occurredAt: new Date("2020-06-01T00:00:00Z"),
+      recordedAt: new Date("2026-01-02T00:00:00Z"),
+    });
+    const sorted = [newerRecorded, olderRecorded].sort(compareScoredCandidates);
     expect(sorted.map((c) => c.memory.id)).toEqual(["a-id", "b-id"]);
   });
 
@@ -64,5 +66,15 @@ describe("compareScoredCandidates（Issue #339 / ADR 0170）", () => {
     const a = candidate("aaa", 0.5, { recordedAt: sameTime });
     const sorted = [z, a].sort(compareScoredCandidates);
     expect(sorted.map((c) => c.memory.id)).toEqual(["aaa", "zzz"]);
+  });
+
+  it("score.total の差がごく小さくても（1e-12）同点とみなさず、total の高い方を先にする", () => {
+    // 実効時刻と id は、どちらも total の低い方を先にする向きに置く（同点扱いに落ちれば順が逆になる）。
+    const higher = candidate("zzz-higher", 0.5 + 1e-12, {
+      recordedAt: new Date("2026-01-01T00:00:00Z"),
+    });
+    const lower = candidate("aaa-lower", 0.5, { recordedAt: new Date("2026-01-02T00:00:00Z") });
+    expect(compareScoredCandidates(higher, lower)).toBeLessThan(0);
+    expect(compareScoredCandidates(lower, higher)).toBeGreaterThan(0);
   });
 });

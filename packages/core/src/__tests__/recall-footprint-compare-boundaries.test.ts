@@ -92,6 +92,18 @@ describe("compareWithFullLog: 判定の境界", () => {
     );
   });
 
+  it("tolerance が NaN なら、見積もり比がちょうど 1 でも too_close_to_call にならず、within_tolerance も立たない", () => {
+    const shape = { memoryCountInScope: 0 };
+    const compare = (fullLogChars: number) =>
+      compareWithFullLog({ fullLogChars, shape, profile: fixed100, tolerance: Number.NaN });
+    const even = compare(100);
+    expect(even.estimatedShare).toBe(1);
+    expect(even.verdict).not.toBe("too_close_to_call");
+    expect(even.reasons.map((r) => r.code)).not.toContain("within_tolerance");
+    expect(compare(1000).verdict).toBe("mnemora_smaller");
+    expect(compare(10).verdict).toBe("full_log_smaller");
+  });
+
   it("負の fullLogChars は 0 として扱い、full_log_smaller と full_log_below_fixed_cost を返す", () => {
     const result = compareWithFullLog({
       fullLogChars: -50,

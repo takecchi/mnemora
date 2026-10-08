@@ -121,7 +121,11 @@ describe("PostgresRelationStore.listRelatedMany（本物の Postgres）", () => 
   });
 
   it("返す createdAt は、同じ関係の listRelated の createdAt と等しい（固定値ではない。#1499）", async () => {
+    // `memory_relations.created_at` は DB の now()。両方の口が同じ固定値を返しても「等しい」は通るので、行を作った時刻の幅にも入れる。
+    // 同じ器の時計を比べるだけなので、幅は1秒だけ広げる。
+    const before = Date.now() - 1000;
     const { ids, relationStore } = await createClique(4);
+    const after = Date.now() + 1000;
 
     const many = await relationStore.listRelatedMany(ctx, ids);
 
@@ -134,6 +138,8 @@ describe("PostgresRelationStore.listRelatedMany（本物の Postgres）", () => 
       expect(many[i]!).toHaveLength(expected.size);
       for (const r of many[i]!) {
         expect(r.createdAt.getTime()).toBe(expected.get(r.memoryId));
+        expect(r.createdAt.getTime()).toBeGreaterThanOrEqual(before);
+        expect(r.createdAt.getTime()).toBeLessThanOrEqual(after);
       }
     }
   });

@@ -11,6 +11,7 @@ import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js"
 const ctx: Ctx = { tenantId: "relation-link-both-absent" };
 const ABSENT_FROM = "00000000-0000-4000-8000-0000000000f1" as MemoryId;
 const ABSENT_TO = "00000000-0000-4000-8000-0000000000f2" as MemoryId;
+const MALFORMED = "not-a-uuid" as MemoryId;
 
 afterAll(async () => {
   await closeTestClient();
@@ -54,6 +55,26 @@ describe("PostgresRelationStore.link: 存在しない端の報告（ADR 0571 の
     const fromAbsent = await thrownOf(() => rs.link(ctx, "contradicts", ABSENT_FROM, exists));
     expect((fromAbsent as Error).message).toBe(
       `PostgresRelationStore: memory not found for tenant: ${ABSENT_FROM}`,
+    );
+  });
+
+  // uuid の形でない端は DB へ投げる前に断る別の枝なので、上の2本（uuid の形をした id）とは別に見る。
+  it("uuid の形でない端も、その端の id を報告する（片方だけが uuid の形でない）", async () => {
+    const { db } = await getTestClient();
+    const rs = new PostgresRelationStore(db);
+    const exists = (
+      await new PostgresMemoryStore(db).createMemory(
+        ctx,
+        buildNewMemoryFixture({ tenantId: ctx.tenantId, contentHash: "h-link-malformed" }),
+      )
+    ).id;
+    const toMalformed = await thrownOf(() => rs.link(ctx, "contradicts", exists, MALFORMED));
+    expect((toMalformed as Error).message).toBe(
+      `PostgresRelationStore: memory not found for tenant: ${MALFORMED}`,
+    );
+    const fromMalformed = await thrownOf(() => rs.link(ctx, "contradicts", MALFORMED, exists));
+    expect((fromMalformed as Error).message).toBe(
+      `PostgresRelationStore: memory not found for tenant: ${MALFORMED}`,
     );
   });
 });

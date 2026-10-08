@@ -1230,6 +1230,28 @@ describe("runtime.sweepArchive（ADR 0114: 減衰しきった Memory の掃引�
     });
   });
 
+  it("呼び出し側の now がそのまま境になる: decayFloorAt が now ちょうどなら archived、1ms 先なら active のまま", async () => {
+    const { runtime, stores } = buildRuntime(llmReturning([]));
+    const atNow = await createDecayedMemory(stores, "sweep-archive-at-now", NOW);
+    const justAfter = await createDecayedMemory(
+      stores,
+      "sweep-archive-just-after-now",
+      new Date(NOW.getTime() + 1),
+    );
+
+    const result = await runtime.sweepArchive(ctx, { now: NOW, limit: 10 });
+
+    expect({
+      archivedIds: result.archived.map((a) => a.memoryId),
+      atNowStatus: (await stores.memoryStore.get(ctx, atNow.id))?.status,
+      justAfterStatus: (await stores.memoryStore.get(ctx, justAfter.id))?.status,
+    }).toEqual({
+      archivedIds: [atNow.id],
+      atNowStatus: "archived",
+      justAfterStatus: "active",
+    });
+  });
+
   it("口が無い adapter では supported: false を名乗り、archived は常に空・reachedLimit は常に false（黙って0件を返さない、ADR 0082 と同じ哲学）", async () => {
     const { runtime, stores } = buildRuntime(llmReturning([]));
     await createDecayedMemory(stores, "sweep-archive-unsupported", new Date(NOW.getTime() - 1_000));
@@ -3023,6 +3045,22 @@ describe("observe: claimKey knownPredicatesFromStore（Issue #691続き、ADR 03
     expect(spy.calls).toEqual([
       { subjectId: "user-1", limit: DEFAULT_KNOWN_PREDICATES_FROM_STORE_LIMIT },
     ]);
+  });
+
+  it("knownPredicatesFromStore: true（limit を指定しない）なら、既定の上限 20 件を store へ渡す（ADR 0329）", async () => {
+    const llm = sequencedLlm([
+      { memories: [{ content: "好きな食べ物はラーメン", provenanceKind: "stated" }] },
+      { claims: [{ subject: "user", predicate: "favorite_food" }] },
+    ]);
+    const { runtime, stores } = buildRuntime(llm);
+    const spy = spyOnListActiveClaimPredicates(stores.memoryStore);
+    await runtime.observe(ctx, {
+      kind: "utterance",
+      text: "好きな食べ物はラーメン",
+      claimKey: { enabled: true, knownPredicatesFromStore: true },
+    });
+    expect(DEFAULT_KNOWN_PREDICATES_FROM_STORE_LIMIT).toBe(20);
+    expect(spy.calls).toEqual([{ subjectId: null, limit: 20 }]);
   });
 
   it("knownPredicatesFromStore: { limit } を渡すと、その件数を store へ渡す", async () => {

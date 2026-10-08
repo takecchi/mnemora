@@ -27,6 +27,17 @@ const places = {
   "meta.reason": (value: string) => eventWith({ reason: value }),
   "meta.note": (value: string) => eventWith({ note: value }),
   "actor.id": (value: string) => eventWith({ actorId: value }),
+  // キーと、配列の中の文字列も Postgres は拒む（`jsonb` へ渡す前の検査が、キーと配列の要素まで辿る）。
+  "meta のキー": (value: string) => ({ ...eventWith({}), meta: { [value]: "x" } }),
+  "meta の配列の要素": (value: string) => ({ ...eventWith({}), meta: { tags: ["ok", value] } }),
+  "meta の配列の中のオブジェクトの値": (value: string) => ({
+    ...eventWith({}),
+    meta: { items: [{ note: value }] },
+  }),
+  "actor のキー": (value: string) => ({
+    ...eventWith({}),
+    actor: { type: "system", [value]: "x" } as NewMemoryEvent["actor"],
+  }),
 } as const;
 
 const REJECTED: [label: string, value: string][] = [
