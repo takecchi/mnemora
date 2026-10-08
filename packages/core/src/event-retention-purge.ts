@@ -131,5 +131,5 @@ async function purgeExpiredEventsForTenantBody(
     limit: opts.limit,
     dryRun: opts.dryRun,
   });
-  return outcome;
+  return outcome.kind === "unlimited" ? { kind: "unset" } : outcome;
 }
