@@ -40,6 +40,23 @@ describe("sanitizeCandidateAuxFields", () => {
     expect(dropped[0]!.tagIndexes).toHaveLength(DROPPED_TAG_INDEXES_MAX);
   });
 
+  it.each([20, 21])(
+    "NUL の tag が %i 件: 添字は LLM が返した順の先頭から 20 個まで、数は全件",
+    (nulCount) => {
+      const tags = Array.from({ length: nulCount }, (_, i) => [`ok${i}`, `\u0000${i}`]).flat();
+      const { candidate, dropped } = sanitizeCandidateAuxFields({ ...base, tags });
+      expect(candidate.tags).toEqual(Array.from({ length: nulCount }, (_, i) => `ok${i}`));
+      expect(dropped).toEqual([
+        {
+          field: "tags",
+          reason: "nul_character",
+          count: nulCount,
+          tagIndexes: Array.from({ length: 20 }, (_, i) => 2 * i + 1),
+        },
+      ]);
+    },
+  );
+
   it("NUL の要素を捨てるときも、残す要素の前後の空白・空白だけの要素・重複はそのまま残す", () => {
     const result = sanitizeCandidateAuxFields({
       ...base,

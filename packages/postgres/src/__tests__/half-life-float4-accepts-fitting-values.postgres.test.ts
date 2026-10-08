@@ -20,6 +20,18 @@ const build = (override: Record<string, unknown>) =>
     ...override,
   });
 
+/** float4 の範囲の両端で、まだ収まる値（`Math.fround` が有限かつ 0 でない）。 */
+const FLOAT4_EDGES: Array<[string, number]> = [
+  ["float4 の最大ちょうど（3.4028234663852886e38）", 3.4028234663852886e38],
+  ["float4 の最大に丸まる最大の値（3.4028235677973362e38）", 3.4028235677973362e38],
+  ["float4 の正規数の最小（1.1754943508222875e-38）", 1.1754943508222875e-38],
+  ["float4 の非正規数の最小ちょうど（2^-149）", 2 ** -149],
+  [
+    "0 でなく float4 の非正規数の最小に丸まる最小の値（7.006492321624087e-46）",
+    7.006492321624087e-46,
+  ],
+];
+
 describe("float4 に収まる値は断らない", () => {
   it.each([
     ["float4 で正確に表せない小数（0.1）", { halfLifeHours: 0.1 }],
@@ -30,6 +42,14 @@ describe("float4 に収まる値は断らない", () => {
       { decayBaseSeq: 0, decayFloorSeq: 5, halfLifeRecalls: 0.3 },
     ],
     ["halfLifeRecalls が null", { halfLifeRecalls: null }],
+    ...FLOAT4_EDGES.map(([label, value]): [string, Record<string, unknown>] => [
+      `halfLifeHours が ${label}`,
+      { halfLifeHours: value },
+    ]),
+    ...FLOAT4_EDGES.map(([label, value]): [string, Record<string, unknown>] => [
+      `halfLifeRecalls が ${label}`,
+      { decayBaseSeq: 0, decayFloorSeq: 5, halfLifeRecalls: value },
+    ]),
   ])("createMemoryWithOutbox・supersedeWithNewMemories: %s", async (_label, override) => {
     await resetTestDatabase();
     const { db } = await getTestClient();
@@ -52,5 +72,12 @@ describe("float4 に収まる値は断らない", () => {
     const settings = new PostgresTenantSettingsStore(db);
     await settings.setDefaultHalfLifeRecalls(ctx, 0.1);
     await settings.setDefaultHalfLifeRecalls(ctx, 1e38);
+  });
+
+  it.each(FLOAT4_EDGES)("setDefaultHalfLifeRecalls: %s は通る", async (_label, recalls) => {
+    await resetTestDatabase();
+    const { db } = await getTestClient();
+    const settings = new PostgresTenantSettingsStore(db);
+    await settings.setDefaultHalfLifeRecalls(ctx, recalls);
   });
 });
