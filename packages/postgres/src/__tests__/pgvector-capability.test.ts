@@ -76,6 +76,28 @@ describe("assertPgvectorCapabilityRow: 判定は pg_settings の行だけで決�
     ).not.toThrow();
   });
 
+  it("extversion が読めない（null）行でも、vartype/enumvals が対応していれば通る", () => {
+    expect(() =>
+      assertPgvectorCapabilityRow({ ...PGVECTOR_0_8_0_ROW, extversion: null }),
+    ).not.toThrow();
+  });
+
+  it("vartype が enum で enumvals が null の行は、TypeError でなく PgvectorVersionUnsupportedError で落ちる", () => {
+    expect(() =>
+      assertPgvectorCapabilityRow({ extversion: "0.8.0", vartype: "enum", enumvals: null }),
+    ).toThrow(PgvectorVersionUnsupportedError);
+  });
+
+  it("enumvals に relaxed_order そのものが無ければ、relaxed で始まる別の値があっても落ちる", () => {
+    expect(() =>
+      assertPgvectorCapabilityRow({
+        extversion: "0.8.0",
+        vartype: "enum",
+        enumvals: ["off", "relaxed", "relaxed_order_v2"],
+      }),
+    ).toThrow(PgvectorVersionUnsupportedError);
+  });
+
   it("PgvectorVersionUnsupportedError の形: installed/required/missingCapability/name/instanceof Error", () => {
     let caught: unknown;
     try {

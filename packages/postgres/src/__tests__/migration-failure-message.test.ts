@@ -83,18 +83,23 @@ describe("describeMigrationFailure（Issue #1212）", () => {
   });
 
   it("pg のエラーが cause を2段以上たどった先に在っても、案内を足す（先頭は外側の message のまま）", () => {
-    const pg = pgError({
-      message: 'permission denied to create extension "vector"',
-      code: "42501",
-      routine: "execute_extension_script",
-    });
-    const middle = new Error("middle wrapper", { cause: pg });
-    const outer = new Error("Failed query: CREATE EXTENSION vector", { cause: middle });
+    // 段数に上限を置く実装（2段・3段で打ち切る）を通さないよう、2段より深い連鎖も並べる。
+    for (const depth of [2, 3, 4, 8]) {
+      let current: Error = pgError({
+        message: 'permission denied to create extension "vector"',
+        code: "42501",
+        routine: "execute_extension_script",
+      });
+      for (let i = 1; i < depth; i += 1) {
+        current = new Error(`wrapper ${i}`, { cause: current });
+      }
+      const outer = new Error("Failed query: CREATE EXTENSION vector", { cause: current });
 
-    expect(describeMigrationFailure("0001_init.sql", outer)).toBe(
-      "migration 0001_init.sql failed: Failed query: CREATE EXTENSION vector" +
-        CREATE_EXTENSION_PERMISSION_HINT,
-    );
+      expect(describeMigrationFailure("0001_init.sql", outer), `${depth} 段`).toBe(
+        "migration 0001_init.sql failed: Failed query: CREATE EXTENSION vector" +
+          CREATE_EXTENSION_PERMISSION_HINT,
+      );
+    }
   });
 
   describe("cause が循環しているとき", () => {
