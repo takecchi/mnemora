@@ -534,6 +534,75 @@ async function scenario(env: Env): Promise<Result> {
     await mem.scrubPurged!(ctx, [purged.id]);
     out["scrubPurged: running it again leaves the band as it was"] = await bandOf(ctx, mine);
   }
+  {
+    // 残骸が一部の欄だけの行、大文字で渡した id、`[purged]` 以外のトゥームストーン、渡されたが未 purge の行の目次帯
+    const ctx = fresh();
+    const tomb = async (tag: string, digest: string, over: Partial<NewMemory>) => {
+      const m = await mkWith(ctx, tag, { status: "forgotten", digest, ...over });
+      await markPurgedAt(ctx, m.id);
+      return m;
+    };
+    const attrOnly = await tomb("partial-attr", "墓標A", { attributes: { owner: "alice" } });
+    const claimOnly = await tomb("partial-claim", "墓標C", {
+      claimKey: { subject: "user", predicate: "home_city" },
+    });
+    const upper = await tomb("partial-upper", "墓標U", { tags: ["upper"] });
+    const unpurged = await mkWith(ctx, "partial-unpurged", {
+      status: "forgotten",
+      digest: "未purgeの行",
+    });
+    const names = new Map([
+      [attrOnly.id, "attrOnly"],
+      [upper.id, "upper"],
+      [unpurged.id, "unpurged"],
+    ]);
+    const recall = await mem.createRecall(ctx, {
+      tenantId: ctx.tenantId,
+      subjectId: "s",
+      query: { text: "q" },
+      budget: null,
+      omitted: [],
+      usage: {
+        chars: 0,
+        estimatedTokens: 0,
+        counter: "heuristic",
+        byTier: { full: 0, digest: 0, index: 0 },
+        indexChars: 0,
+      },
+      indexBand: {
+        groups: [],
+        totalInScope: 0,
+        countKind: "exact",
+        digestBand: [
+          { memoryId: attrOnly.id, digest: "古い要旨A", truncated: true },
+          { memoryId: upper.id, digest: "古い要旨U" },
+          { memoryId: unpurged.id, digest: "古い要旨N" },
+        ],
+      },
+      explain: { stages: [] },
+      returnedMemories: [],
+    });
+    await mem.scrubPurged!(ctx, [attrOnly.id, claimOnly.id, upper.id.toUpperCase(), unpurged.id]);
+    const residue = async (m: Memory) => {
+      const g = (await mem.get(ctx, m.id))!;
+      return [g.tags, g.attributes, g.claimKey ?? null];
+    };
+    out[
+      "scrubPurged: a row whose only residue is attributes, claimKey or tags (passed in upper case) is scrubbed"
+    ] = [
+      await residue(attrOnly),
+      await residue(claimOnly),
+      await residue(upper),
+      (await mem.listLabels!(ctx)).map((l) => [l.name, l.status, l.proposedCount]),
+    ];
+    out[
+      "scrubPurged: the band takes each purged row's own digest, and a passed row that is not purged keeps its entry"
+    ] = ((await mem.getRecall(ctx, recall))?.indexBand.digestBand ?? []).map((e) => [
+      names.get(e.memoryId),
+      e.digest,
+      "truncated" in e ? e.truncated : "absent",
+    ]);
+  }
   return out;
 }
 const EXPECTED: Result = {
@@ -875,6 +944,14 @@ const EXPECTED: Result = {
     ["unpurged", "未purge", "absent"],
     ["live", "生きている", "absent"],
   ],
+  "scrubPurged: a row whose only residue is attributes, claimKey or tags (passed in upper case) is scrubbed":
+    [[[], {}, null], [[], {}, null], [[], {}, null], [["upper", "proposed", 0]]],
+  "scrubPurged: the band takes each purged row's own digest, and a passed row that is not purged keeps its entry":
+    [
+      ["attrOnly", "墓標A", "absent"],
+      ["upper", "墓標U", "absent"],
+      ["unpurged", "古い要旨N", "absent"],
+    ],
 };
 
 afterAll(async () => {
