@@ -2570,6 +2570,26 @@ describe("recall() — TokenCounter が約束を破る値を返したとき（AD
     await expect(run(counter, undefined)).rejects.toThrow(RangeError);
   });
 
+  // 部分一致では `Infinity` が `-Infinity` に、`a negative number` が値を足した message に当たるので、message 全体で比べる。
+  it.each([
+    ["NaN", { tokens: NaN, counter: "exact" }, "NaN"],
+    ["負の数（値そのものは入れない）", { tokens: -5, counter: "exact" }, "a negative number"],
+    ["負の無限大", { tokens: -Infinity, counter: "exact" }, "-Infinity"],
+    ["Infinity", { tokens: Infinity, counter: "exact" }, "Infinity"],
+    ["戻り値が undefined", undefined, "a non-number (undefined)"],
+    ["戻り値が null", null, "a non-number (undefined)"],
+    ["tokens が文字列", { tokens: "3", counter: "exact" }, "a non-number (string)"],
+    ["tokens の欄が無い", { counter: "exact" }, "a non-number (undefined)"],
+    ["tokens が null", { tokens: null, counter: "exact" }, "a non-number (null)"],
+  ])("message は壊れた値の種類だけを名乗る（%s）", async (_n, value, kind) => {
+    const counter = { count: () => value } as unknown as TokenCounter;
+    const error = await run(counter, budget).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(RangeError);
+    expect((error as RangeError).message).toBe(
+      `recall: tokenCounter.count() must return { tokens } as a finite number >= 0, got ${kind}`,
+    );
+  });
+
   it("message には値の種類が入り、入力テキスト（digest）は入らない", async () => {
     const counter: TokenCounter = { count: () => ({ tokens: NaN, counter: "exact" }) };
     const error = await run(counter, budget).catch((e: unknown) => e);
