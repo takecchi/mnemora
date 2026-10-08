@@ -65,4 +65,14 @@ describe("compareScoredCandidates（Issue #339 / ADR 0170）", () => {
     const sorted = [z, a].sort(compareScoredCandidates);
     expect(sorted.map((c) => c.memory.id)).toEqual(["aaa", "zzz"]);
   });
+
+  it("score.total の差がごく小さくても（1e-12）同点とみなさず、total の高い方を先にする", () => {
+    // 実効時刻と id は、どちらも total の低い方を先にする向きに置く（同点扱いに落ちれば順が逆になる）。
+    const higher = candidate("zzz-higher", 0.5 + 1e-12, {
+      recordedAt: new Date("2026-01-01T00:00:00Z"),
+    });
+    const lower = candidate("aaa-lower", 0.5, { recordedAt: new Date("2026-01-02T00:00:00Z") });
+    expect(compareScoredCandidates(higher, lower)).toBeLessThan(0);
+    expect(compareScoredCandidates(lower, higher)).toBeGreaterThan(0);
+  });
 });
