@@ -7,6 +7,9 @@ import {
   MALFORMED_IDENTIFIER_CASES,
 } from "./malformed-identifier-cases.js";
 
+/** UUID 形式（大文字小文字を問わない）。`get` の doc が大文字小文字を区別しないと約束するのは、この形の id だけ。 */
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 /** {@link describeEventStoreConformance} に渡す設定。 */
 export interface EventStoreConformanceOptions {
   /** 見出し（`describe` の名前）に出す adapter の名前。 */
@@ -199,6 +202,23 @@ export function describeEventStoreConformance(options: EventStoreConformanceOpti
       expect(listB).toEqual([]);
     });
 
+    // 大文字と小文字だけが違う tenantId は別のテナント（`Ctx.tenantId` は不透明な文字列で、store はこの値で行を分ける）。
+    // 上の2つの歯の2テナントは綴りがまるごと違うので、テナントの比較を大文字小文字無視にした実装でも緑になる。
+    it("get・list は、大文字小文字だけが違う tenantId のイベントを返さない（自分の綴りからは見える）", async () => {
+      const store = await createStore();
+      const upper: Ctx = { tenantId: "Tenant-Case" };
+      const lower: Ctx = { tenantId: "tenant-case" };
+
+      const upperEvent = await store.append(
+        upper,
+        buildNewMemoryEventFixture({ tenantId: upper.tenantId }),
+      );
+
+      expect(await store.get(lower, upperEvent.id)).toBeNull();
+      expect(await store.list(lower, {})).toEqual([]);
+      expect((await store.list(upper, {})).map((e) => e.id)).toEqual([upperEvent.id]);
+    });
+
     it("list は at 昇順で返す（挿入順ではない）", async () => {
       const store = await createStore();
       const ctx: Ctx = { tenantId: "tenant-1" };
@@ -258,6 +278,42 @@ export function describeEventStoreConformance(options: EventStoreConformanceOpti
 
       expect(limited.map((event) => event.id)).toEqual([e1.id]);
       expect(limited.map((event) => event.id)).not.toEqual([e3.id]);
+    });
+
+    // `EventFilter.limit` の doc: `limit: 0` は例外にならず0件を返す（「制限なし」と同じにしない）。
+    it("limit: 0 は0件を返す（制限なしとして扱わない）", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      const appended = await store.append(
+        ctx,
+        buildNewMemoryEventFixture({ tenantId: "tenant-1" }),
+      );
+
+      expect(await store.list(ctx, { limit: 0 })).toEqual([]);
+      // 「常に空を返す」実装で緑にならない対照。
+      expect((await store.list(ctx, {})).map((e) => e.id)).toEqual([appended.id]);
+    });
+
+    // `get` の doc: UUID 形式の id は大文字小文字を区別しない（`list` の `filter.memoryId` も同じ）。
+    // UUID 形式でない id の扱いは約束していないので、id が UUID 形式の adapter でだけ測る。
+    it("UUID 形式の id は大文字で渡しても、get・list(memoryId) で同じ行に当たる", async ({
+      skip,
+    }) => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      const memoryId = await prepareMemoryId(ctx);
+      const appended = await store.append(
+        ctx,
+        buildNewMemoryEventFixture({ tenantId: "tenant-1", memoryId }),
+      );
+      if (!UUID_PATTERN.test(appended.id) || !UUID_PATTERN.test(memoryId)) {
+        skip("この adapter の id は UUID 形式ではない（大文字小文字の扱いは約束の外）");
+      }
+
+      expect((await store.get(ctx, appended.id.toUpperCase()))?.id).toBe(appended.id);
+      expect(
+        (await store.list(ctx, { memoryId: memoryId.toUpperCase() })).map((e) => e.id),
+      ).toEqual([appended.id]);
     });
 
     it("since は境界を含む（at >= since）", async () => {

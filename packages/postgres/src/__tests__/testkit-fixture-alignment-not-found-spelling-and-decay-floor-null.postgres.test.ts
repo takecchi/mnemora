@@ -56,22 +56,30 @@ type Mouth = [
   (s: PostgresMemoryStore | InMemoryMemoryStore, x: Memory) => Promise<unknown>,
 ];
 
+// 全部大文字の U だけだと、「<id> を常に大文字にする」と「渡された綴りのまま」を見分けられない（Issue #1925）。
+const MIXED = "AaAaAaAa-bBbB-4cCc-8DdD-eEeEeEeEeEeE" as MemoryId;
+
+type TargetMouth = [
+  string,
+  (s: PostgresMemoryStore | InMemoryMemoryStore, id: MemoryId) => Promise<unknown>,
+];
+
 /** 操作の対象が無い口（Postgres は渡された綴りのまま載せる）。 */
-const TARGET_MOUTHS: Mouth[] = [
-  ["updateStatus", (s) => s.updateStatus(ctx, U, "forgotten")],
+const TARGET_MOUTHS: TargetMouth[] = [
+  ["updateStatus", (s, id) => s.updateStatus(ctx, id, "forgotten")],
   [
     "updateStatusWithEvent",
-    (s) => s.updateStatusWithEvent(ctx, U, "forgotten", {}, ev(U, "forgotten")),
+    (s, id) => s.updateStatusWithEvent(ctx, id, "forgotten", {}, ev(id, "forgotten")),
   ],
-  ["setEmbeddingStatus", (s) => s.setEmbeddingStatus(ctx, U, "ready")],
-  ["reinforce", (s) => s.reinforce(ctx, U, new Date())],
+  ["setEmbeddingStatus", (s, id) => s.setEmbeddingStatus(ctx, id, "ready")],
+  ["reinforce", (s, id) => s.reinforce(ctx, id, new Date())],
   [
     "supersedeWithNewMemories（置き換える側）",
-    (s) =>
+    (s, id) =>
       s.supersedeWithNewMemories!(
         ctx,
         [{ input: fixture("n"), jobKinds: [] }],
-        [{ id: U, supersededByIndex: 0, event: ev(U, "superseded") }],
+        [{ id, supersededByIndex: 0, event: ev(id, "superseded") }],
       ),
   ],
 ];
@@ -104,14 +112,17 @@ const REF_MOUTHS: Mouth[] = [
 ];
 
 describe("memory not found の id の綴りは、fixture も Postgres と同じ", () => {
-  it.each(TARGET_MOUTHS)("操作の対象が無い %s: 渡された綴りのまま", async (_n, call) => {
-    for (const impl of ["postgres", "fixture"] as const) {
-      await resetTestDatabase();
-      const store = await build(impl);
-      const x = await store.createMemory(ctx, fixture("x"));
-      expect(await notFoundId(() => call(store, x)), impl).toBe(U);
-    }
-  });
+  it.each(TARGET_MOUTHS.flatMap(([n, call]) => [U, MIXED].map((id) => [n, id, call] as const)))(
+    "操作の対象が無い %s（%s）: 渡された綴りのまま",
+    async (_n, id, call) => {
+      for (const impl of ["postgres", "fixture"] as const) {
+        await resetTestDatabase();
+        const store = await build(impl);
+        await store.createMemory(ctx, fixture("x"));
+        expect(await notFoundId(() => call(store, id)), impl).toBe(id);
+      }
+    },
+  );
 
   it.each(REF_MOUTHS)("参照先が無い %s: 小文字", async (_n, call) => {
     for (const impl of ["postgres", "fixture"] as const) {

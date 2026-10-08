@@ -2890,6 +2890,55 @@ WHERE provenance->>'kind' IS NULL;
 
 **DB マイグレーション**: 要る（`0033`・`0034`。どちらも非破壊の DDL で、列は消さない）。
 
+### 73. conformance suite に約束が増えた——綴り違いのテナントの分離・取り直しの `availableAt`（`@mnemora/testkit`）
+
+[Issue #1935](https://github.com/takecchi/mnemora/issues/1935)。ADR 0546 の作法（足した約束は 🔴 に数える）に揃えた（クローンの判断で、オーナーの判断ではない）。
+
+**何が変わったか**: 中身は [CHANGELOG.md](../CHANGELOG.md) の `[1.4.0]` 節 `### Breaking` の「conformance suite に約束を足した——大文字小文字だけが違う `tenantId`…」の箇条を見ること。**ここには複製しない。**型・シグネチャは変わらない。
+
+**なぜ破壊的と数えるか**: 自前の adapter が、増えた `it` の約束を守っていなければ、新しく落ちる（足した約束は外せない）。
+
+**誰が影響を受けるか**: 自前の `OutboxStore`・`EventStore`・`TenantSettingsStore` を書き、`@mnemora/testkit` の conformance suite に当てている人。特に次の2つ。
+
+1. テナントの列を大文字小文字無視で比べている adapter（`lower(tenant_id) = lower($1)`、大文字小文字を区別しない照合順序の列〔MySQL の `_ci` など〕、`citext` の列）。
+2. 取り直し（リースが切れた行の再 claim）で `availableAt` を書き直していない adapter。または、初めての claim でも書き直している adapter。
+
+`@mnemora/postgres` と `@mnemora/testkit` の fixture は緑。
+
+**どう直すか**: 落ちた `it` の名前が約束そのものである。
+
+1. `tenantId` は不透明な文字列として、そのままの値で比べる。
+2. `claimBatch` は、取り直す行に限って `availableAt` を `opts.now` へ書き直し、初めての claim では変えない（`@mnemora/postgres` は `available_at = CASE WHEN o.claimed_at IS NULL THEN o.available_at ELSE $now END`）。
+
+**確かめたこと**: `@mnemora/postgres` と fixture で緑。足した `it` は、テナントの比較を大文字小文字無視にする変異と、取り直しの `availableAt` を進めない・初めての claim でも進める変異で、それぞれ赤になった（Issue #1935）。**確かめていないこと**: 外部の adapter が実際に赤くなるか。
+
+**DB マイグレーション**: 要らない。
+
+### 74. conformance suite に約束が増えた——`kinds: []`・`complete`/`fail` の排他・`limit: 0`・UUID の大文字・purge 済みの CAS・`getMany` の重複・contested・`listLabels` の並び（`@mnemora/testkit`）
+
+[Issue #1935](https://github.com/takecchi/mnemora/issues/1935) の続き。どれも interface の TSDoc か採用済みの ADR に書いてあった約束で、suite がその入力を渡していなかった。ADR 0546 の作法（足した約束は 🔴 に数える）に揃えた（クローンの判断で、オーナーの判断ではない）。
+
+**何が変わったか**: 中身は [CHANGELOG.md](../CHANGELOG.md) の `[1.4.0]` 節 `### Breaking` の「conformance suite に、TSDoc・ADR に書いてあったのに suite が呼んでいなかった約束を足した…」の箇条を見ること。**ここには複製しない。**型・シグネチャは変わらない。
+
+**なぜ破壊的と数えるか**: 自前の adapter が、増えた `it` の約束を守っていなければ、新しく落ちる（足した約束は外せない）。
+
+**誰が影響を受けるか**: 自前の `OutboxStore`・`EventStore`・`MemoryStore` を書き、`@mnemora/testkit` の conformance suite に当てている人。`kinds: []`・`limit: 0`・UUID の大文字・`getMany` の重複の分はフラグ無しで走る（UUID の大文字は、id が UUID 形式の adapter だけ）。終端の排他は `peekJob` を渡している人、purge 済みの CAS は `supportsPurgeMemory: true`、contested は `supportsFindActiveByClaimKey`・`supportsListActiveClaimPredicates`、`listLabels` の並びは `supportsLabels: true` を渡している人だけ。**`packages/testkit/README.md` の「動く最小の例」の `EventStore` を写して作った adapter は、UUID の大文字の `it` で赤になる**（例はこの変更で直した）。`@mnemora/postgres` と `@mnemora/testkit` の fixture は緑。
+
+**どう直すか**: 落ちた `it` の名前が約束そのものである。
+
+1. `claimBatch` の `kinds: []` は「どの種別にも当たらない」として何も取らない（省略と同じにしない）。
+2. `complete`・`fail` は、相手側の終端が付いていれば何も書かない。
+3. `EventStore.list` の `limit: 0` は0件を返す。
+4. UUID 形式の id は、比べる前に小文字にそろえる（`get` と `list` の `filter.memoryId`）。
+5. CAS は、`status` に加えて `purgedAt` が `null` であることも条件にする。
+6. `getMany` は同じ id を1回だけ返す。
+7. `findActiveByClaimKey`・`listActiveClaimPredicates` は `status = 'active'` の行だけを見る。
+8. `listLabels` は `name` のコードポイント順に並べる（Postgres なら `COLLATE "C"`。JS の `<` は UTF-16 コード単位順でずれる）。
+
+**確かめたこと**: `@mnemora/postgres` と fixture で緑。足した `it` は、それぞれの約束を破る変異（InMemory と Postgres の両方）で赤になった（Issue #1935）。**確かめていないこと**: 外部の adapter が実際に赤くなるか。
+
+**DB マイグレーション**: 要らない。
+
 ## 🟡 後方互換だが挙動が変わりうるもの（v0.1.9 → v0.2.0）
 
 （⚠ 2026-09-27: この見出しは PR #1192 が「v1.0.1 → 次の版」の節を書き換えたときに一緒に消えており、下の3項目が「v1.0.2 → 次の版」の節の中に在るように読めていた。見出しを戻した。下の3項目は v0.1.9 → v0.2.0 の話である）

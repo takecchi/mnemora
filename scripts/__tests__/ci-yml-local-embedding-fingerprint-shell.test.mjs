@@ -66,7 +66,7 @@ const fingerprintBlock = fingerprintCandidates.length === 1 ? fingerprintCandida
  * @returns {{ status: number | null, stdout: string, stderr: string, summaryLines: string[] }}
  */
 function runFingerprintStepBody(body, fakeNodeExitCode) {
-  const scratch = mkdtempSync(join(tmpdir(), "fingerprint-shell-tooth-"));
+  const scratch = mkdtempSync(join(tmpdir(), "fingerprint-shell-"));
   const binDir = join(scratch, "bin");
   mkdirSync(binDir);
 

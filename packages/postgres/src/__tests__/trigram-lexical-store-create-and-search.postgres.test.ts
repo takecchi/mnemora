@@ -22,7 +22,7 @@ import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js"
  * SQL_ASCII のクラスタでは `create()` が拒むので、その場合は何も確かめずに戻る。
  */
 
-const ctx: Ctx = { tenantId: "trigram-teeth" };
+const ctx: Ctx = { tenantId: "trigram-lexical-store-create-and-search" };
 const filter = { tenantId: ctx.tenantId };
 
 beforeEach(async () => {
@@ -43,7 +43,7 @@ async function setup() {
         ctx,
         buildNewMemoryFixture({
           tenantId: ctx.tenantId,
-          contentHash: `trigram-teeth-${label}`,
+          contentHash: `trigram-lexical-store-create-and-search-${label}`,
           content,
           recordedAt,
         }),

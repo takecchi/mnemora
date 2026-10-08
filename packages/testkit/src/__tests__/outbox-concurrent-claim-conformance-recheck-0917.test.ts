@@ -60,6 +60,8 @@ class YieldingOutboxStore implements OutboxStore {
           if (!broken) return this.inner.claimBatch(ctx, opts);
           for (const c of claimed) {
             const real = this.jobs.find((job) => job.id === c.id)!;
+            // 取り直しで進んだ availableAt も写す（壊すのは並行の claim だけ。ADR 0357 の取り直しまで壊さない）。
+            real.availableAt = c.availableAt;
             real.claimedAt = c.claimedAt ?? null;
             real.claimedBy = c.claimedBy ?? null;
             real.attempts = c.attempts;

@@ -12,9 +12,9 @@ import { dropTempDatabase } from "./temp-database.js";
  * `pg_stat_activity`・`pg_terminate_backend`・`CREATE ROLE` を使うので直列の群に置く（`vitest.config.mts`）。advisory lock は DB ごとなので、専用の DB を作って他のファイルと分ける。
  */
 
-const DB = "mnemora_ext_lock_teeth";
-const ROLE = "mnemora_ext_lock_teeth_role";
-const ROLE_PASSWORD = "mnemora-ext-lock-teeth-role-password";
+const DB = "mnemora_migrate_ext_lock";
+const ROLE = "mnemora_migrate_ext_lock_role";
+const ROLE_PASSWORD = "mnemora-migrate-ext-lock-role-password";
 
 function connectionStringFor(credentials?: { user: string; password: string }): string {
   const url = new URL(requireDatabaseUrl());
@@ -27,7 +27,7 @@ function connectionStringFor(credentials?: { user: string; password: string }): 
 }
 
 function dirWith(name: string, sql: string): string {
-  const dir = mkdtempSync(join(tmpdir(), "mnemora-ext-lock-teeth-"));
+  const dir = mkdtempSync(join(tmpdir(), "mnemora-migrate-ext-lock-"));
   writeFileSync(join(dir, name), sql);
   return dir;
 }
@@ -327,7 +327,7 @@ describe("runMigrations: 共有の拡張ロック（EXTENSION_LOCK_KEY）", () =
 
   describe("waitForBackend の診断（Issue #1825）", () => {
     it("待っている間に runMigrations が先に失敗したら、待ちの打ち切りではなく、その元のエラー文で落ちる", async () => {
-      const run = runMigrations(pool, join(tmpdir(), "mnemora-ext-lock-teeth-does-not-exist"));
+      const run = runMigrations(pool, join(tmpdir(), "mnemora-migrate-ext-lock-does-not-exist"));
       run.catch(() => {});
       const startedAt = Date.now();
       const error = await waitForBackend("CREATE EXTENSION IF NOT EXISTS%", {
@@ -348,7 +348,7 @@ describe("runMigrations: 共有の拡張ロック（EXTENSION_LOCK_KEY）", () =
     }, 20_000);
 
     it("現れないまま打ち切ったときは、pg_stat_activity の行と、待っていた処理がまだ終わっていないことをエラー文に載せる", async () => {
-      const error = await waitForBackend("%mnemora-ext-lock-teeth-never-runs%", {
+      const error = await waitForBackend("%mnemora-migrate-ext-lock-never-runs%", {
         outcome: new Promise<never>(() => {}),
         attempts: 2,
       }).then(

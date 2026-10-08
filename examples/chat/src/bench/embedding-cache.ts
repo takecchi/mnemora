@@ -21,9 +21,18 @@ import {
 import { join } from "node:path";
 import type { Ctx, EmbeddingProvider, EmbeddingSpaceId } from "@mnemora/core";
 
+// `[A-Za-z0-9.-]` 以外（`_` を含む）を UTF-8 のバイトごとに `~XX` へ置き換える。`_` は区切りにしか現れないので、
+// 別の空間が同じファイル名にならない（Issue #1940）。記号を含まない名前は以前と同じファイル名のまま。
+function slugPart(s: string): string {
+  return Array.from(s, (ch) =>
+    /^[a-zA-Z0-9.-]$/.test(ch)
+      ? ch
+      : Array.from(Buffer.from(ch, "utf8"), (b) => `~${b.toString(16).padStart(2, "0")}`).join(""),
+  ).join("");
+}
+
 function spaceSlug(space: EmbeddingSpaceId): string {
-  const raw = `${space.provider}_${space.model}_${space.dimensions}`;
-  return raw.replace(/[^a-zA-Z0-9_.-]+/g, "_");
+  return `${slugPart(space.provider)}_${slugPart(space.model)}_${space.dimensions}`;
 }
 
 function keyFor(text: string): string {

@@ -269,6 +269,18 @@ export function describeTenantSettingsStoreConformance(
       expect(await store.getEventRetention(ctx)).toEqual({ kind: "days", days: 30 });
     });
 
+    // 大文字と小文字だけが違う tenantId は別のテナント（`Ctx.tenantId` は不透明な文字列で、store はこの値で行を分ける）。
+    // 既存の歯のテナントは綴りがまるごと違うので、テナントの比較を大文字小文字無視にした実装でも緑になる。
+    it("大文字小文字だけが違う tenantId に設定した event retention は、もう片方の綴りからは見えない", async () => {
+      const store = await createStore();
+      const suffix = Math.random();
+      const upper: Ctx = { tenantId: `Tenant-Case-Retention-${suffix}` };
+      const lower: Ctx = { tenantId: `tenant-case-retention-${suffix}` };
+      await store.setEventRetention(upper, { kind: "days", days: 30 });
+      expect(await store.getEventRetention(lower)).toEqual({ kind: "unset" });
+      expect(await store.getEventRetention(upper)).toEqual({ kind: "days", days: 30 });
+    });
+
     it("setEventRetention({ kind: 'unlimited' }) は明示的に無期限へ戻す", async () => {
       const store = await createStore();
       const ctx: Ctx = { tenantId: `tenant-retention-unlimited-${Math.random()}` };
@@ -324,6 +336,16 @@ export function describeTenantSettingsStoreConformance(
           await store.setDecayClock!(ctx, clock);
           expect(await store.getDecayClock!(ctx)).toBe(clock);
         }
+      });
+
+      it("getDecayClock: 大文字小文字だけが違う tenantId に設定した値は、もう片方の綴りからは見えない", async () => {
+        const store = await createStore();
+        const suffix = Math.random();
+        const upper: Ctx = { tenantId: `Tenant-Case-Decay-Clock-${suffix}` };
+        const lower: Ctx = { tenantId: `tenant-case-decay-clock-${suffix}` };
+        await store.setDecayClock!(upper, "activity");
+        expect(await store.getDecayClock!(lower)).toBe(DEFAULT_DECAY_CLOCK);
+        expect(await store.getDecayClock!(upper)).toBe("activity");
       });
 
       it("setDecayClock: 3値のいずれでもない値を拒む", async () => {
@@ -523,6 +545,16 @@ export function describeTenantSettingsStoreConformance(
         }
       });
 
+      it("getTaxonomyMode: 大文字小文字だけが違う tenantId に設定した値は、もう片方の綴りからは見えない", async () => {
+        const store = await createStore();
+        const suffix = Math.random();
+        const upper: Ctx = { tenantId: `Tenant-Case-Taxonomy-Mode-${suffix}` };
+        const lower: Ctx = { tenantId: `tenant-case-taxonomy-mode-${suffix}` };
+        await store.setTaxonomyMode!(upper, "strict");
+        expect(await store.getTaxonomyMode!(lower)).toBe(DEFAULT_TAXONOMY_MODE);
+        expect(await store.getTaxonomyMode!(upper)).toBe("strict");
+      });
+
       it("setTaxonomyMode: 2値のいずれでもない値を拒む", async () => {
         const store = await createStore();
         const ctx: Ctx = { tenantId: `tenant-taxonomy-mode-invalid-${Math.random()}` };
@@ -563,6 +595,20 @@ export function describeTenantSettingsStoreConformance(
 
         expect(await store.getEventRetention(ctxA)).toEqual({ kind: "unset" });
         expect(await store.getEventRetention(ctxB)).toEqual({ kind: "days", days: 60 });
+      });
+
+      it("eraseTenant は、大文字小文字だけが違う tenantId の tenant_settings 行を消さない", async () => {
+        const store = await createStore();
+        const suffix = Math.random();
+        const upper: Ctx = { tenantId: `Tenant-Case-Erase-${suffix}` };
+        const lower: Ctx = { tenantId: `tenant-case-erase-${suffix}` };
+        await store.setEventRetention(upper, { kind: "days", days: 30 });
+        await store.setEventRetention(lower, { kind: "days", days: 60 });
+
+        await store.eraseTenant!(upper, { limit: 1000 });
+
+        expect(await store.getEventRetention(upper)).toEqual({ kind: "unset" });
+        expect(await store.getEventRetention(lower)).toEqual({ kind: "days", days: 60 });
       });
 
       it("eraseTenant は tenant_settings が高々1行のため reachedLimit は常に false", async () => {

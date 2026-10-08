@@ -335,8 +335,8 @@ async function observeWhileBlocked(
 const WEAK_TABLE_LOCKS = ["AccessShareLock", "RowExclusiveLock", "RowShareLock"];
 
 const ENVS = [
-  { title: "既定の DB", database: "mnemora_label_lock_teeth_default", icu: false },
-  { title: "ICU en-US の DB", database: "mnemora_label_lock_teeth_icu", icu: true },
+  { title: "既定の DB", database: "mnemora_label_lock_order_default", icu: false },
+  { title: "ICU en-US の DB", database: "mnemora_label_lock_order_icu", icu: true },
 ] as const;
 
 describe.each(ENVS)("先取りの中身（$title）", ({ database, icu }) => {
@@ -384,7 +384,7 @@ describe.each(ENVS)("先取りの中身（$title）", ({ database, icu }) => {
 });
 
 describe("経路をまたぐ deadlock（先取りと upsert）", () => {
-  const database = "mnemora_label_lock_teeth_cross";
+  const database = "mnemora_label_lock_order_cross";
   let env: Env | { skip: string } | undefined;
 
   beforeAll(async () => {
@@ -431,7 +431,7 @@ describe("経路をまたぐ deadlock（先取りと upsert）", () => {
 });
 
 describe("FOR UPDATE の強さ（FOR SHARE への揺れ）", () => {
-  const database = "mnemora_label_lock_teeth_share";
+  const database = "mnemora_label_lock_order_share";
   let env: Env | { skip: string } | undefined;
 
   beforeAll(async () => {
@@ -478,7 +478,7 @@ describe("FOR UPDATE の強さ（FOR SHARE への揺れ）", () => {
 });
 
 describe("purge・scrub の先取りの強さ（FOR SHARE への揺れ）", () => {
-  const database = "mnemora_label_lock_teeth_share_purge";
+  const database = "mnemora_label_lock_order_share_purge";
   let env: Env | { skip: string } | undefined;
 
   beforeAll(async () => {
@@ -517,7 +517,7 @@ describe("purge・scrub の先取りの強さ（FOR SHARE への揺れ）", () =
 
 // 上の A は語彙が対象の記憶にしか付いていないので、絞りを広げても見えない。別の生きた記憶に付いたラベルを置いて確かめる。
 describe("purge・scrub の先取りは、他の記憶に付いたラベルの行を掴まない", () => {
-  const database = "mnemora_label_lock_teeth_bystander";
+  const database = "mnemora_label_lock_order_bystander";
   let env: Env | { skip: string } | undefined;
 
   beforeAll(async () => {

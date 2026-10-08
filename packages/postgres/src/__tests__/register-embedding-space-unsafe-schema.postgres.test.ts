@@ -12,7 +12,7 @@ import { closeTestClient, getTestClient } from "./test-db.js";
  */
 
 const SPACE: EmbeddingSpaceId = {
-  provider: "unsafe-schema-teeth",
+  provider: "unsafe-schema-provider",
   model: "fixture-model",
   dimensions: 3,
 };

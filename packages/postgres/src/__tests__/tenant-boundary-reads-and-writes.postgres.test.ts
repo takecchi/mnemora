@@ -21,8 +21,8 @@ import {
  * その形の入力は生 SQL で作る。
  */
 
-const A: Ctx = { tenantId: "teeth-tenant-a" };
-const B: Ctx = { tenantId: "teeth-tenant-b" };
+const A: Ctx = { tenantId: "tenant-boundary-a" };
+const B: Ctx = { tenantId: "tenant-boundary-b" };
 
 const usage = {
   chars: 0,
@@ -64,7 +64,7 @@ async function setup() {
       buildNewMemoryFixture({
         tenantId: ctx.tenantId,
         content: name,
-        contentHash: `teeth-${ctx.tenantId}-${name}`,
+        contentHash: `tenant-boundary-${ctx.tenantId}-${name}`,
         ...over,
       }),
     );
