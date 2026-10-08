@@ -28,7 +28,7 @@ const CJK_RANGE_FLOOR = 0x1100;
 
 function isCjkCodePoint(codePoint: number): boolean {
   if (codePoint < CJK_RANGE_FLOOR) return false;
-  return CJK_RANGES.some(([start, end]) => codePoint >= start && codePoint <= end);
+  return CJK_RANGES.some(([start, end]) => codePoint > start && codePoint <= end);
 }
 
 // 係数は「1コードポイントあたり何トークンか」を 20分率の整数比で表す（0.9 = 18/20、0.25 = 5/20）。
