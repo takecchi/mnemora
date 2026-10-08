@@ -66,3 +66,26 @@ describe("core の omitParamsFromError: 取りこぼしていた2つ（ADR 0592�
     expect(inner.message).not.toContain(SECRET);
   });
 });
+
+describe("core の omitParamsFromError: SQL に置換の記号（$$・$&）があっても stack は message と同じ文面になる", () => {
+  // Postgres のドル引用（`$$`）や `$&` を含む SQL を、置き換え後の文字列として `String.prototype.replace` に
+  // そのまま渡すと記号として解釈され、`$&` は元の message（params の本文を含む）に化ける。
+  it.each([
+    ["$&", "Failed query: select '$&' as x"],
+    ["$$", "Failed query: do $$ begin perform 1; end $$"],
+    ["$`", "Failed query: select '$`' as x"],
+  ])(
+    "%s を含む SQL でも、stack から本文が消え、stack の先頭は書き換えた message と一致する",
+    (_label, sql) => {
+      const error = new Error(`${sql}\nparams: ${SECRET}`);
+      expect(error.stack).toContain(SECRET);
+
+      omitParamsFromError(error);
+
+      expect(error.message).toContain(sql);
+      expect(error.message).not.toContain(SECRET);
+      expect(error.stack).not.toContain(SECRET);
+      expect(error.stack!.startsWith(`Error: ${error.message}\n`)).toBe(true);
+    },
+  );
+});
