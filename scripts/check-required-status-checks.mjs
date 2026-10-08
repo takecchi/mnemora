@@ -12,8 +12,8 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   compareRequiredStatusChecks,
-  contextsFromProtection,
   formatComparisonReport,
+  readLiveRequiredChecks,
 } from "./check-required-status-checks-lib.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -61,16 +61,19 @@ function readDeclaration() {
  * ⛔ `-q` で欄を絞らない。生 JSON を丸ごと取り、判定は lib に委ねる
  * (「`required_status_checks` が無い」と「在るが `contexts` が空」を区別するため)。
  * 例外は握り潰すが、読めなかった理由(401/403/404/ネットワーク)は捨てない。
+ * 404 の文言(`Branch not protected` か否か)は lib が見るので、stderr をそのまま渡す。
  *
- * @param {string} repo
- * @param {string} branch
- * @returns {{ protection: unknown, error: string | null }}
+ * @param {string} apiPath
+ * @param {{ paginatedArray?: boolean }} [options] 配列を返す API の全ページを1つの配列にする
+ * @returns {import("./check-required-status-checks-lib.mjs").ApiResult}
  */
-function fetchProtection(repo, branch) {
-  const apiPath = `repos/${repo}/branches/${branch}/protection`;
+function fetchJson(apiPath, options = {}) {
+  const ghArgs = options.paginatedArray
+    ? ["api", "--paginate", "--slurp", apiPath]
+    : ["api", apiPath];
   let out;
   try {
-    out = execFileSync("gh", ["api", apiPath], {
+    out = execFileSync("gh", ghArgs, {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],
     });
@@ -79,12 +82,18 @@ function fetchProtection(repo, branch) {
       error !== null && typeof error === "object" && "stderr" in error && error.stderr
         ? String(error.stderr).trim()
         : String(error);
-    return { protection: null, error: `gh api ${apiPath} が失敗した: ${detail}` };
+    return { json: null, error: `gh api が失敗した: ${detail}` };
   }
   try {
-    return { protection: JSON.parse(out), error: null };
+    const parsed = JSON.parse(out);
+    // `--slurp` はページの配列を返す。ページが配列でなければ形が違うので、平らにせずそのまま lib に判定させる。
+    const json =
+      options.paginatedArray && Array.isArray(parsed) && parsed.every(Array.isArray)
+        ? parsed.flat()
+        : parsed;
+    return { json, error: null };
   } catch (error) {
-    return { protection: null, error: `gh api ${apiPath} の応答が JSON として読めない: ${error}` };
+    return { json: null, error: `gh api の応答が JSON として読めない: ${error}` };
   }
 }
 
@@ -97,14 +106,10 @@ function main() {
     return;
   }
 
-  const { protection, error } = fetchProtection(args.repo, args.branch);
-  const live = protection === null ? null : contextsFromProtection(protection);
-  const result = compareRequiredStatusChecks(declaration.contexts, live);
+  const { live, sources, unreadable } = readLiveRequiredChecks(fetchJson, args.repo, args.branch);
+  const result = compareRequiredStatusChecks(declaration.contexts, live, { sources, unreadable });
 
   console.log(formatComparisonReport(result));
-  if (result.verdict === "undetermined" && error !== null) {
-    console.error(`  gh の出力: ${error}`);
-  }
 
   if (args.json) {
     console.log(JSON.stringify({ repo: args.repo, branch: args.branch, ...result }, null, 2));

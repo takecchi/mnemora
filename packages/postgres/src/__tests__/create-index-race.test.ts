@@ -28,14 +28,11 @@ function fakeDb(outcomes: Array<Error | "ok">) {
 }
 
 describe("createIndexIfNotExistsAbsorbingRace（ADR 0464）", () => {
-  it("自分の索引名の 23505 は、1回だけ打ち直して通す", async () => {
+  it("自分の索引名の 23505 は、同じ文で1回だけ打ち直して通す", async () => {
+    const statement = "CREATE INDEX IF NOT EXISTS idx_mine ON t (a)";
     const { db, calls } = fakeDb([collision("idx_mine"), "ok"]);
-    await createIndexIfNotExistsAbsorbingRace(
-      db,
-      "CREATE INDEX IF NOT EXISTS idx_mine ON t (a)",
-      "idx_mine",
-    );
-    expect(calls).toHaveLength(2);
+    await createIndexIfNotExistsAbsorbingRace(db, statement, "idx_mine");
+    expect(calls).toEqual([statement, statement]);
   });
 
   it("別の名前の 23505 は吸収せず、そのまま投げる（打ち直さない）", async () => {
@@ -53,6 +50,19 @@ describe("createIndexIfNotExistsAbsorbingRace（ADR 0464）", () => {
 
   it("名前が前方一致するだけの別の索引（idx_mine_2）も吸収しない", async () => {
     const error = collision("idx_mine_2");
+    const { db, calls } = fakeDb([error, "ok"]);
+    await expect(
+      createIndexIfNotExistsAbsorbingRace(
+        db,
+        "CREATE INDEX IF NOT EXISTS idx_mine ON t (a)",
+        "idx_mine",
+      ),
+    ).rejects.toBe(error);
+    expect(calls).toHaveLength(1);
+  });
+
+  it("名前の手前に何か付いただけの別の索引（x_idx_mine）も吸収しない", async () => {
+    const error = collision("x_idx_mine");
     const { db, calls } = fakeDb([error, "ok"]);
     await expect(
       createIndexIfNotExistsAbsorbingRace(
@@ -94,8 +104,9 @@ describe("createIndexIfNotExistsAbsorbingRace（ADR 0464）", () => {
     expect(calls).toHaveLength(2);
   });
 
-  it("isOwnIndexNameCollision: detail が無い・文字列でない・null は false", () => {
+  it("isOwnIndexNameCollision: detail が無い・文字列でない・null・undefined は false", () => {
     expect(isOwnIndexNameCollision(null, "x")).toBe(false);
+    expect(isOwnIndexNameCollision(undefined, "x")).toBe(false);
     expect(
       isOwnIndexNameCollision({ code: "23505", constraint: "pg_class_relname_nsp_index" }, "x"),
     ).toBe(false);

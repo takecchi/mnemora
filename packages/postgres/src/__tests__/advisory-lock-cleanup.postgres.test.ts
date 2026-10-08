@@ -68,6 +68,27 @@ describe("acquireAdvisoryLock・releaseAdvisoryLock の後始末", () => {
       for (const client of clients) client.release();
     }
   });
+
+  it("待ち時間切れで errors.timeout に渡す waitedMs は、実際に待った時間（0 ではない）", async () => {
+    const pool = newPool(2);
+    const held = await acquireAdvisoryLock(pool, 9_330_005n, 5_000, errors);
+    let reported: number | undefined;
+    const capturing: AdvisoryLockErrorFactories = {
+      ...errors,
+      timeout: (waitedMs, cause) => {
+        reported = waitedMs;
+        return errors.timeout(waitedMs, cause);
+      },
+    };
+    try {
+      await expect(acquireAdvisoryLock(pool, 9_330_005n, 300, capturing)).rejects.toThrow(
+        /^timeout after/,
+      );
+    } finally {
+      await releaseAdvisoryLock(held.client, 9_330_005n);
+    }
+    expect(reported).toBeGreaterThanOrEqual(300 / 2);
+  });
 });
 
 describe("接続側で渡した lock_timeout は、待ち時間切れで失敗しても書き換えない（ADR 0460）", () => {
