@@ -6,7 +6,8 @@ import type { ScoreBreakdown } from "../recall.js";
 /**
  * `recall-runtime.ts` の非 export な `compareDescendingNaNLast` の複製（公開 API 表面を1シンボルも増やさないため意図的に export していない）。
  * 段3.5の2つの sort（`associationHits.sort`・`rankedCandidates.sort`）は private な関数の直接 import では検査できないため、
- * ここではその形（数値2つを受けて降順・NaN 最後尾を返す）だけを単体で確かめる。本体を変更したら、この複製も合わせて直すこと。
+ * 下の「段3.5」の describe では、その形（数値2つを受けて降順・NaN 最後尾を返す）だけをこの複製で確かめる。本体を変更したら、この複製も合わせて直すこと。
+ * 本体そのものの振る舞いは、複製ではなく export されている `compareScoredCandidates` を通して確かめる（`compareDescendingNaNLast` の describe）。
  */
 function compareDescendingNaNLast(a: number, b: number): number {
   const aComparable = !Number.isNaN(a);
@@ -110,21 +111,28 @@ describe("compareScoredCandidates: NaN な total が混ざっても有限候補�
   });
 });
 
-describe("compareDescendingNaNLast（段2・段3.5で共有する比較 helper。Issue #938）", () => {
+describe("compareDescendingNaNLast（段2・段3.5で共有する比較 helper。Issue #938）: 実装を compareScoredCandidates の total の比較として確かめる", () => {
+  // 実効時刻と id を揃え、後段のタイブレークが 0 を返すようにする。こうすると compareScoredCandidates の戻り値は、
+  // total どうしに対する compareDescendingNaNLast の戻り値そのものになる。
+  const t = new Date("2026-01-01T00:00:00.000Z");
+  function compareTotals(a: number, b: number): number {
+    return compareScoredCandidates(candidate("same", a, t), candidate("same", b, t));
+  }
+
   it("有限値どうしは通常の降順", () => {
-    expect(compareDescendingNaNLast(0.9, 0.5)).toBeLessThan(0);
-    expect(compareDescendingNaNLast(0.5, 0.9)).toBeGreaterThan(0);
-    expect(compareDescendingNaNLast(0.5, 0.5)).toBe(0);
+    expect(compareTotals(0.9, 0.5)).toBeLessThan(0);
+    expect(compareTotals(0.5, 0.9)).toBeGreaterThan(0);
+    expect(compareTotals(0.5, 0.5)).toBe(0);
   });
 
   it("NaN は有限値より必ず後ろに送る（どちら側に来ても）", () => {
-    expect(compareDescendingNaNLast(NaN, 0.1)).toBeGreaterThan(0);
-    expect(compareDescendingNaNLast(0.1, NaN)).toBeLessThan(0);
-    expect(compareDescendingNaNLast(NaN, -100)).toBeGreaterThan(0);
+    expect(compareTotals(NaN, 0.1)).toBeGreaterThan(0);
+    expect(compareTotals(0.1, NaN)).toBeLessThan(0);
+    expect(compareTotals(NaN, -100)).toBeGreaterThan(0);
   });
 
   it("NaN どうしは 0（呼び出し側の次段のタイブレーク・安定ソートに委ねる）", () => {
-    expect(compareDescendingNaNLast(NaN, NaN)).toBe(0);
+    expect(compareTotals(NaN, NaN)).toBe(0);
   });
 });
 
