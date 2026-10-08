@@ -2971,6 +2971,22 @@ WHERE provenance->>'kind' IS NULL;
 
 **DB マイグレーション**: 要らない。
 
+### 77. conformance suite に約束が増えた——`getMany` と `OutboxStore.complete`・`fail` の UUID の大文字（`@mnemora/testkit`）
+
+`MemoryStore.getMany` の `ids` と、`OutboxStore.complete`・`fail` の `jobId` について、「UUID 形式の id は大文字小文字を区別しない（UUID 形式でない id については約束しない）」を TSDoc に書き、suite に足した。約束を足すのはオーナーの判断。ADR 0546 の作法（足した約束は 🔴 に数える）に揃えた。
+
+**何が変わったか**: 中身は [CHANGELOG.md](../CHANGELOG.md) の `[1.4.0]` 節 `### Breaking` の「`MemoryStore.getMany` の `ids` と `OutboxStore.complete`・`fail` の `jobId` は、UUID 形式なら…」の箇条を見ること。**ここには複製しない。**型・シグネチャは変わらない。
+
+**なぜ破壊的と数えるか**: 自前の adapter が、増えた `it` の約束を守っていなければ、新しく落ちる（足した約束は外せない）。
+
+**誰が影響を受けるか**: 自前の `MemoryStore`・`OutboxStore` を書き、`@mnemora/testkit` の conformance suite に当てている人のうち、id が UUID 形式で、その id を文字列として大文字小文字を区別して比べている人（`text` の列に UUID を入れて `=` で比べる、Map のキーにそのまま使う、など）。足した `it` はフラグ無しで走るが、id が UUID 形式でなければ skip する。`@mnemora/postgres`（`uuid` 型の列で比べる）と `@mnemora/testkit` の fixture は緑。
+
+**どう直すか**: UUID 形式の id は、小文字に揃えてから比べる（または `uuid` 型の列で比べる）。
+
+**確かめたこと**: `@mnemora/postgres` で、足した `it` が走って緑。fixture は id が UUID 形式でないので skip される。fixture と core の Fake の、大文字の UUID の扱いは専用の試験で確かめている（`in-memory-uppercase-target-id.test.ts`・`in-memory-outbox-uppercase-job-id-terminal.test.ts`・`fake-uppercase-target-id.test.ts`・`fake-outbox-uppercase-uuid-job-id.test.ts`）。**確かめていないこと**: 外部の adapter が実際に赤くなるか。suite の歯を Postgres の変異で赤にすること（Postgres は `uuid` 型の列で比べており、自然な変異が無い）。
+
+**DB マイグレーション**: 要らない。
+
 ## 🟡 後方互換だが挙動が変わりうるもの（v0.1.9 → v0.2.0）
 
 （⚠ 2026-09-27: この見出しは PR #1192 が「v1.0.1 → 次の版」の節を書き換えたときに一緒に消えており、下の3項目が「v1.0.2 → 次の版」の節の中に在るように読めていた。見出しを戻した。下の3項目は v0.1.9 → v0.2.0 の話である）

@@ -65,6 +65,9 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 - **conformance suite に約束を足した——大文字小文字だけが違う `tenantId` を別のテナントとして扱うこと（`VectorStore`・`LexicalStore`・`RelationStore`）、`filter.subjectId` を大文字小文字を区別して比べること（`VectorStore`・`LexicalStore`）**（[Issue #1940](https://github.com/takecchi/mnemora/issues/1940)。変異試験で、これらを破る実装が suite でも他のどの試験でも緑になると分かった。どちらも `Ctx` の TSDoc の「識別子は正規化せず、完全一致で比べる」に既に書いてある約束である。ADR 0546 の作法どおり、足した約束は Breaking に数える。クローンの判断で、オーナーの判断ではない）。`@mnemora/postgres` と `@mnemora/testkit` の fixture は変わっておらず、どれも緑。
   - **無条件の追加（新しく赤になりうる）**: `describeVectorStoreConformance` に、綴り違いのテナントの `search` に vector が現れないこと、大文字小文字だけが違う subject の記憶が `filter.subjectId` で返らないこと、の `it` が増えた。`describeLexicalStoreConformance` に、綴り違いのテナントと大文字小文字だけが違う subject の `it` が増えた。`describeRelationStoreConformance` に、綴り違いのテナントの ctx の `listRelated` が関係を返さないことの `it` が増えた。
   - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目76。DB マイグレーションは無い。
+- **`MemoryStore.getMany` の `ids` と `OutboxStore.complete`・`fail` の `jobId` は、UUID 形式なら大文字小文字を区別しない、と TSDoc に書き、conformance suite に足した**（それまで約束が無かった2つ。`@mnemora/postgres`・`@mnemora/testkit` の fixture・core の Fake は、UUID 形式の id については揃って区別していなかった。UUID 形式でない id では揃っておらず、そちらは約束しない。約束を足すのはオーナーの判断。ADR 0546 の作法どおり、足した約束は Breaking に数える）。`@mnemora/postgres` と `@mnemora/testkit` の fixture は変わっておらず、どれも緑。
+  - **無条件の追加（新しく赤になりうる）**: `describeMemoryStoreConformance` に `getMany` の、`describeOutboxStoreConformance` に `complete`・`fail` の、大文字の UUID でも同じ行に当たることの `it` が増えた（`complete`・`fail` は、大文字の jobId でも同じ行の attempts で CAS すること、終端が付くことを見る）。どれも、id が UUID 形式でなければ skip する——**testkit の fixture の id は UUID 形式でないので、実際に走るのは UUID 形式の id を発行する adapter（`@mnemora/postgres` など）だけ**。
+  - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目77。DB マイグレーションは無い。
 
 ### Changed（後方互換だが挙動が変わりうるもの）
 
