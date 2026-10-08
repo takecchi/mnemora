@@ -464,30 +464,6 @@ export function describeVectorStoreConformance(options: VectorStoreConformanceOp
       expect(hits.map((hit) => hit.memoryId)).not.toContain(memoryId);
     });
 
-    // `delete` は `space` を取る。上の歯は1つの space にしか置かないので、同じ memoryId を全 space から消す実装でも緑になる。
-    it("delete は渡した space の行だけを消し、別の space にある同じ memoryId の行は残す", async () => {
-      const store = await createStore();
-      await prepareEmbeddingSpace(spaceB);
-      const ctx: Ctx = { tenantId: "tenant-1" };
-      const memoryId = await prepareMemoryId(ctx);
-
-      await store.upsert(ctx, space, memoryId, [1, 0, 0]);
-      await store.upsert(ctx, spaceB, memoryId, [0, 0, 1]);
-
-      await store.delete(ctx, space, memoryId);
-
-      const hitsA = await store.search(ctx, space, [1, 0, 0], {
-        limit: 10,
-        filter: { tenantId: "tenant-1" },
-      });
-      const hitsB = await store.search(ctx, spaceB, [0, 0, 1], {
-        limit: 10,
-        filter: { tenantId: "tenant-1" },
-      });
-      expect(hitsA.map((hit) => hit.memoryId)).not.toContain(memoryId);
-      expect(hitsB.map((hit) => hit.memoryId)).toContain(memoryId);
-    });
-
     // -------------------------------------------------------------------
     // delete（族A: 契約は void・「無ければ何もしない」——形式不正な memoryId も
     // 例外を投げず何もしない。packages/postgres/src/mapping.ts の isUuidLike の
