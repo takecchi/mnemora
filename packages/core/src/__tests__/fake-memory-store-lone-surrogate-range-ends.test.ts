@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
-import type { Ctx } from "@mnemora/core";
-import { InMemoryMemoryStore } from "../fixtures.js";
-import { buildNewMemoryFixture } from "../test-data.js";
+import type { Ctx } from "../ctx.js";
+import type { NewMemory } from "../memory.js";
+import { defaultDecayStrategy } from "../strategies/decay.js";
+import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
 /** ソースにサロゲートは `\u` の表記で書く（生の文字を入れない）。 */
 
-const ctx: Ctx = { tenantId: "lone-surrogate-range-ends" };
+const ctx: Ctx = { tenantId: "fake-lone-surrogate-range-ends" };
+const NOW = new Date("2026-06-01T00:00:00.000Z");
 
 // 既存の置き換えの試験は U+D800・U+D83D・U+DC00 しか使っておらず、範囲の終わり側の端を縛っていない。
 const LONE_AT_RANGE_ENDS: ReadonlyArray<readonly [label: string, input: string, expected: string]> =
@@ -24,33 +26,53 @@ const PAIRS_AT_RANGE_ENDS: ReadonlyArray<readonly [label: string, value: string]
 ];
 
 let counter = 0;
-function newMemory(value: string) {
+function newMemory(value: string): NewMemory {
   counter += 1;
-  return buildNewMemoryFixture({
+  const strength = 1;
+  const halfLifeHours = 24 * 365 * 10;
+  return {
     tenantId: ctx.tenantId,
-    contentHash: `range-ends-${counter}`,
+    subjectId: null,
+    sourceObservationId: null,
+    extractorVersion: null,
     content: value,
+    contentHash: `range-ends-${counter}`,
+    digest: "digest",
+    digestSource: "llm",
+    provenance: { kind: "imported", batchId: "fixture" },
     tags: [value],
-  });
+    occurredAt: null,
+    recordedAt: NOW,
+    lastReinforcedAt: null,
+    strength,
+    halfLifeHours,
+    decayFloorAt: defaultDecayStrategy.floorAt({
+      recordedAt: NOW,
+      lastReinforcedAt: null,
+      strength,
+      halfLifeHours,
+    }),
+    embeddingStatus: "ready",
+  };
 }
 
-describe("InMemoryMemoryStore: サロゲートの範囲の端でも、孤立したものだけが1単位ずつ U+FFFD に置き換わる", () => {
+describe("core の Fake（FakeMemoryStore）: サロゲートの範囲の端でも、孤立したものだけが1単位ずつ U+FFFD に置き換わる", () => {
   it.each(LONE_AT_RANGE_ENDS)("孤立: %s", async (_label, input, expected) => {
-    const store = new InMemoryMemoryStore();
-    const m = await store.createMemory(ctx, newMemory(input));
+    const { memoryStore } = createFakeRuntimeStores();
+    const m = await memoryStore.createMemory(ctx, newMemory(input));
     expect(m.content).toBe(expected);
     expect(m.tags).toEqual([expected]);
-    const got = await store.get(ctx, m.id);
+    const got = await memoryStore.get(ctx, m.id);
     expect(got?.content).toBe(expected);
     expect(got?.tags).toEqual([expected]);
   });
 
   it.each(PAIRS_AT_RANGE_ENDS)("対をなす端は変わらない: %s", async (_label, value) => {
-    const store = new InMemoryMemoryStore();
-    const m = await store.createMemory(ctx, newMemory(value));
+    const { memoryStore } = createFakeRuntimeStores();
+    const m = await memoryStore.createMemory(ctx, newMemory(value));
     expect(m.content).toBe(value);
     expect(m.tags).toEqual([value]);
-    const got = await store.get(ctx, m.id);
+    const got = await memoryStore.get(ctx, m.id);
     expect(got?.content).toBe(value);
     expect(got?.tags).toEqual([value]);
   });
