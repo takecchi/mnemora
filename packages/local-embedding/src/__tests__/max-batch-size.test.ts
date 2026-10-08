@@ -203,6 +203,40 @@ describe("既定値より多い件数（分割して呼ぶ）", () => {
     expect(typed.message).toMatch(/3 番目の入力が上限を超えている/);
     expect(embeddedBatches).toHaveLength(2);
   });
+
+  it("上限超過がチャンクの先頭（バッチ内 index 0）でも、index は全体での位置になる", async () => {
+    // [a,b] [c,d] [e] の2回目の呼び出しの先頭 "c"。グローバルな位置は 2（チャンク開始位置2 + ローカル0）。
+    const { createPipeline } = createTokenLimitPipeline(1, 0);
+    const provider = new LocalEmbeddingProvider({ createPipeline, maxBatchSize: 2 });
+
+    const error = await provider.embed(ctx, ["a", "b", "c", "d", "e"]).then(
+      () => null,
+      (reason: unknown) => reason,
+    );
+
+    expect(isLocalEmbeddingProviderError(error)).toBe(true);
+    const typed = error as LocalEmbeddingProviderError;
+    expect(typed.detail?.index).toBe(2);
+    expect(typed.message).toMatch(/2 番目の入力が上限を超えている/);
+  });
+
+  it("2つ目以降のチャンクで上限超過が起きても、index 以外の detail（tokens・maxInputTokens・characters）は pipeline が数えた値のまま", async () => {
+    const { createPipeline } = createTokenLimitPipeline(1, 1);
+    const provider = new LocalEmbeddingProvider({ createPipeline, maxBatchSize: 2 });
+
+    const error = await provider.embed(ctx, ["a", "b", "c", "d", "e"]).then(
+      () => null,
+      (reason: unknown) => reason,
+    );
+
+    expect(isLocalEmbeddingProviderError(error)).toBe(true);
+    expect((error as LocalEmbeddingProviderError).detail).toEqual({
+      index: 3,
+      tokens: 1000,
+      maxInputTokens: 999,
+      characters: 10,
+    });
+  });
 });
 
 describe("分割しても、prefix・順序・上限超過以外の失敗は崩れない", () => {
