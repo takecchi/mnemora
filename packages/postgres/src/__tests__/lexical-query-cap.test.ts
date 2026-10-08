@@ -20,6 +20,12 @@ describe("capLexicalQueryWords", () => {
     expect(capLexicalQueryWords(query)).toBe(query);
   });
 
+  it("異なる語がちょうど上限なら、重複語や空白の崩れを含んでいても1バイトも変えない", () => {
+    const words = fillerWords(LEXICAL_QUERY_MAX_DISTINCT_WORDS);
+    const query = `  ${words.join("   ")}  ${words[0]!.toUpperCase()} `;
+    expect(capLexicalQueryWords(query)).toBe(query);
+  });
+
   it("異なる語が上限を1つ超えると、先頭から上限の数だけに切り詰める", () => {
     const words = fillerWords(LEXICAL_QUERY_MAX_DISTINCT_WORDS + 1);
     const query = words.join(" ");
@@ -62,6 +68,11 @@ describe("capLexicalQueryWords", () => {
 
   it("1語の文字数がちょうど上限のときは変えない", () => {
     const query = "a".repeat(LEXICAL_QUERY_MAX_WORD_CHARS);
+    expect(capLexicalQueryWords(query)).toBe(query);
+  });
+
+  it("ちょうど上限の文字数の語を含んでも、他の上限に触れなければ空白の崩れも含めて1バイトも変えない", () => {
+    const query = `  ${"a".repeat(LEXICAL_QUERY_MAX_WORD_CHARS)}   tail  `;
     expect(capLexicalQueryWords(query)).toBe(query);
   });
 

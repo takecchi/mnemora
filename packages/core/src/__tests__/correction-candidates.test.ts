@@ -132,6 +132,18 @@ describe("runtime.findCorrectionCandidates — 候補が返る", () => {
     expect(result.recalledCount).toBe(1);
     expect(result.excludedCount).toBe(0);
   });
+
+  it("digest は recall() が返した値のまま運ぶ（長くても、前後に空白があっても切り詰めない）", async () => {
+    const { runtime, stores } = buildRuntime();
+    const digest = "  来週の定例は火曜ではなく木曜の午後三時から、会議室Bで行う  ";
+    await createCandidate(stores, [8, 0], { digest });
+
+    const result = await runtime.findCorrectionCandidates(ctx, { text: QUERY_TEXT });
+    const recalled = await runtime.recall(ctx, { text: QUERY_TEXT });
+
+    expect(recalled.memories[0]?.digest).toBe(digest);
+    expect(result.candidates[0]?.digest).toBe(digest);
+  });
 });
 
 describe("runtime.findCorrectionCandidates — excludeMemoryIds が効く", () => {

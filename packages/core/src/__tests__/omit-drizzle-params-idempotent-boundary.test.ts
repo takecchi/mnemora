@@ -26,3 +26,21 @@ describe("omitDrizzleParams: 既に落とした印だけを、そのまま通す
     );
   });
 });
+
+describe("omitDrizzleParams: 印の形に似ているだけの本文は、全体を落とす", () => {
+  it("params の後ろが本文で始まり、印の形で終わっても、全体を落とす", () => {
+    const rest = "利用者の本文 (omitted by mnemora, 5 chars)";
+
+    expect(omitDrizzleParams(`${HEAD}${rest}`)).toBe(
+      `${HEAD}(omitted by mnemora, ${rest.length} chars)`,
+    );
+  });
+
+  it("文字数の数字が欠けた印の形は、印として通さず全体を落とす", () => {
+    const rest = "(omitted by mnemora,  chars)";
+
+    expect(omitDrizzleParams(`${HEAD}${rest}`)).toBe(
+      `${HEAD}(omitted by mnemora, ${rest.length} chars)`,
+    );
+  });
+});
