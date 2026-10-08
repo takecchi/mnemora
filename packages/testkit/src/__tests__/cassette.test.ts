@@ -315,4 +315,46 @@ describe("assertCassette（ADR 0051）", () => {
     const broken = { ...cassette, embedding: undefined };
     expect(() => assertCassette(broken, "テスト")).toThrow(/embedding 節が無い/);
   });
+
+  it("形式版が今より古いカセットも読まずに落ちる", async () => {
+    const cassette = await recordRoundTrip();
+    const old = { ...cassette, version: CASSETTE_FORMAT_VERSION - 1 };
+    expect(() => assertCassette(old, "テスト")).toThrow();
+  });
+
+  type LooseCassette = {
+    recordedAt: unknown;
+    embedding: { space: Record<string, unknown>; entries: unknown };
+    llm: { model: unknown; entries: unknown };
+  };
+  // 外すと黙って通る検査だけを並べる（外しても素の TypeError で落ちる形は、落ちること自体は変わらない）。
+  it.each<[string, (c: LooseCassette) => void]>([
+    ["recordedAt が文字列でない", (c) => (c.recordedAt = 0)],
+    ["embedding.space.provider が文字列でない", (c) => (c.embedding.space.provider = 1)],
+    ["embedding.space.model が文字列でない", (c) => (c.embedding.space.model = 1)],
+    ["embedding.entries がオブジェクトでない", (c) => (c.embedding.entries = 1)],
+    ["llm.model が文字列でない", (c) => (c.llm.model = 1)],
+    ["llm.entries がオブジェクトでない", (c) => (c.llm.entries = 1)],
+    [
+      "llm の entry に value が無い",
+      (c) => {
+        for (const entry of Object.values(c.llm.entries as Record<string, { value?: unknown }>)) {
+          delete entry.value;
+        }
+      },
+    ],
+  ])("%s カセットは落ちる", async (_name, breakIt) => {
+    const cassette = JSON.parse(JSON.stringify(await recordRoundTrip())) as LooseCassette;
+    breakIt(cassette);
+    expect(() => assertCassette(cassette, "テスト")).toThrow();
+  });
+
+  it("やりすぎ: embedding.space.dimensions が 1 のカセットは通る", async () => {
+    const cassette = await recordRoundTrip();
+    const oneDimension = {
+      ...cassette,
+      embedding: { ...cassette.embedding, space: { ...cassette.embedding.space, dimensions: 1 } },
+    };
+    expect(() => assertCassette(oneDimension, "テスト")).not.toThrow();
+  });
 });
