@@ -715,3 +715,44 @@ describe("行に日時を書く口: 下限（4714-11-24 BC 00:00:00 UTC）より
     60_000,
   );
 });
+
+/**
+ * 上側は分かれない: `occurredAt`・`validFrom`・`validUntil` は、下限より前だけを断り、`Date` の最大値（+275760-09-13）までは両実装とも通す
+ * （Observation.occurredAt の TSDoc「上側は Postgres のほうが広い」、docs/memory-model.md 2026-09-27 追記）。
+ * fixture の下限検査が `Date.UTC(9999, 11, 31, 23, 59, 59, 999)` より後も断る変異（ADR 0605 の「通る側」を fixture の書く口へ広げる）を捕まえる入力。
+ * `decayFloorAt` など上側を約束していない欄は、ここに足さない。
+ */
+describe("行に日時を書く口: 上側（Date の最大値）は、約束のある欄では2実装とも通る", () => {
+  const MAX = new Date(8.64e15);
+  const upperCases: Case[] = [
+    ...(["occurredAt", "validFrom", "validUntil"] as const).flatMap((k): Case[] => [
+      [
+        `createObservation ${k}`,
+        (d) => (s) =>
+          s.mem.createObservation(ctx, buildNewObservationFixture({ tenantId: T, [k]: d })),
+      ],
+      [
+        `createObservationWithOutbox ${k}`,
+        (d) => (s) =>
+          s.mem.createObservationWithOutbox(
+            ctx,
+            buildNewObservationFixture({ tenantId: T, [k]: d }),
+            [],
+          ),
+      ],
+      [`createMemory ${k}`, (d) => (s) => mk(s, { [k]: d })],
+      [
+        `createMemoryWithOutbox ${k}`,
+        (d) => (s) =>
+          s.mem.createMemoryWithOutbox(ctx, buildNewMemoryFixture({ tenantId: T, [k]: d }), []),
+      ],
+    ]),
+  ];
+  it.each(upperCases.map((c) => [c[0], c[1]] as const))(
+    "%s",
+    async (_name, make) => {
+      expect(await outcomes(make(MAX))).toEqual({ postgres: "ok", fixture: "ok" });
+    },
+    60_000,
+  );
+});
