@@ -4,8 +4,8 @@ import { createPostgresClient, closePostgresClient, type PostgresClient } from "
 import { runMigrations } from "../migrate.js";
 
 /**
- * `schema-namespace.ts` の TSDoc は、「同梱の呼び出し（`runMigrations`・`registerEmbeddingSpace`・
- * `createPostgresClient` など）は、どれも先に検査（`assertSafeSchemaName`）を通してから呼んでいる」と約束している。
+ * 同梱の呼び出し（`runMigrations`・`registerEmbeddingSpace`・`createPostgresClient`）は、受け取ったスキーマ名を
+ * SQL や接続オプションへ入れる前に、`assertSafeSchemaName` で検査する（ADR 0623）。
  * `registerEmbeddingSpace` の門は `register-embedding-space-unsafe-schema.postgres.test.ts` が縛っている。
  * ここは残りの2つ、`runMigrations` と `createPostgresClient` の門を、DB に繋がずに縛る。
  *
