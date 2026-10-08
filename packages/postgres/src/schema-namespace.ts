@@ -24,7 +24,6 @@ export const DEFAULT_EXTENSION_SCHEMA = "public";
  * どちらも省略すれば、接続の `search_path` 任せ（今日どおり）。
  */
 export interface SchemaNamespaceOptions {
-  /**
   /** mnemora のテーブル・索引・マイグレーション台帳を置くスキーマ。省略時は接続の `search_path` 任せ（`SET search_path` も `CREATE SCHEMA` も発行しない）。 */
   schema?: string | undefined;
   /**
