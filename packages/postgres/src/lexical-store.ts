@@ -197,7 +197,7 @@ export class PostgresLexicalStore implements LexicalStore {
     const result = await omittingParams(() => this.db.execute(select));
     return result.rows.map((row) => {
       const r = row as unknown as { memory_id: string; coverage: number; rank: number };
-      return { memoryId: r.memory_id, coverage: r.coverage, rank: r.rank };
+      return { memoryId: r.memory_id, coverage: Math.round(r.coverage * 100) / 100, rank: r.rank };
     });
   }
 }
