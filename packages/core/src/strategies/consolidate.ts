@@ -166,7 +166,7 @@ export function buildConsolidatedMemory(params: BuildConsolidatedMemoryParams): 
   return {
     tenantId: params.ctx.tenantId,
     subjectId,
-    sourceObservationId: null,
+    sourceObservationId: eligible[0]?.sourceObservationId ?? null,
     extractorVersion: null,
     content: llmResult.content,
     contentHash: params.hashContent(llmResult.content),
