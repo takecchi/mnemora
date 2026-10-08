@@ -91,7 +91,7 @@ import type { IdempotentCreateResult } from "../idempotent-create.js";
  * 孤立サロゲートを U+FFFD に置き換える（`@mnemora/postgres` が `text` 列へ書くときと同じ。対象は `text` 列に入る欄だけで、
  * 識別子は別に断り、`jsonb` 列の欄は触らない）。
  */
-const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g;
+const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFE])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g;
 function wf(value: string): string;
 function wf(value: string | null): string | null;
 function wf(value: string | undefined): string | undefined;
