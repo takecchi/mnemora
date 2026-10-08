@@ -94,7 +94,7 @@ describe(`${CONFORMANCE_FN} の呼び出し側が ${REQUIRED_HOOK} を渡して�
     const [target, untouched] = callerFiles;
     const strippedSource = readFileSync(join(repoRoot, target), "utf8").replace(
       new RegExp(`(^\\s*)${REQUIRED_HOOK}(\\s*:)`, "m"),
-      "$1__hook_removed_by_this_tooth__$2",
+      "$1__hook_removed_by_this_check__$2",
     );
 
     const flagged = new Set([

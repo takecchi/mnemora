@@ -48,7 +48,7 @@ describe("語彙を先に作らない: 書かれなかった候補の語彙は l
   it("createMemoriesWithOutboxAndEvents: SAVEPOINT で落ちた候補・冪等衝突の候補の語彙は作られない", async () => {
     const { db } = await getTestClient();
     const store = new PostgresMemoryStore(db);
-    const ctx: Ctx = { tenantId: "labels-teeth-create-many" };
+    const ctx: Ctx = { tenantId: "labels-vocabulary-create-many" };
     const { observation } = await seedObservationAndExisting(store, ctx);
     const build = (overrides: Parameters<typeof buildNewMemoryFixture>[0]) =>
       buildNewMemoryFixture({
@@ -85,7 +85,7 @@ describe("語彙を先に作らない: 書かれなかった候補の語彙は l
   it("supersedeWithNewMemories: 冪等衝突で書かれなかった候補の語彙は作られない", async () => {
     const { db } = await getTestClient();
     const store = new PostgresMemoryStore(db);
-    const ctx: Ctx = { tenantId: "labels-teeth-supersede" };
+    const ctx: Ctx = { tenantId: "labels-vocabulary-supersede" };
     const { observation } = await seedObservationAndExisting(store, ctx);
     const old = await store.createMemory(
       ctx,
@@ -130,7 +130,7 @@ describe("件数が 0 になってもラベルを消さない", () => {
   it("purgeMemory: proposedCount が 0 になったラベルの行は、count 0 の proposed のまま残る", async () => {
     const { db } = await getTestClient();
     const store = new PostgresMemoryStore(db);
-    const ctx: Ctx = { tenantId: "labels-teeth-purge-keeps-label" };
+    const ctx: Ctx = { tenantId: "labels-vocabulary-purge-keeps-label" };
     const memory = await store.createMemory(
       ctx,
       buildNewMemoryFixture({
@@ -223,7 +223,7 @@ describe("upsertProposedLabels はコードポイント順に処理する", () =
       const { db } = await getTestClient();
       const log: string[] = [];
       const store = new PostgresMemoryStore(spyOnLabelInserts(db, log));
-      const ctx: Ctx = { tenantId: "labels-teeth-code-point-order" };
+      const ctx: Ctx = { tenantId: "labels-vocabulary-code-point-order" };
       const memory = await store.createMemory(
         ctx,
         buildNewMemoryFixture({
