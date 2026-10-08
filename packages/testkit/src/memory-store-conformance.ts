@@ -803,6 +803,89 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
       expect(events).toEqual([]);
     });
 
+    // 大文字と小文字だけが違う tenantId は別のテナント（`Ctx.tenantId` は不透明な文字列で、store はこの値で行を分ける）。
+    // 上の歯の2テナントは綴りがまるごと違うので、テナントの比較を大文字小文字無視にした実装でも緑になる。
+    // 各歯は、自分の綴りからは見えることも確かめる（「常に隠す」実装で緑にならない対照）。
+    const UPPER_CASE_TENANT: Ctx = { tenantId: "Tenant-Case" };
+    const LOWER_CASE_TENANT: Ctx = { tenantId: "tenant-case" };
+
+    it("get・getMany は、大文字小文字だけが違う tenantId の記憶を返さない（自分の綴りからは見える）", async () => {
+      const store = await createStore();
+      const upperMemory = await store.createMemory(
+        UPPER_CASE_TENANT,
+        buildNewMemoryFixture({
+          tenantId: UPPER_CASE_TENANT.tenantId,
+          contentHash: "tenant-case-get-upper",
+        }),
+      );
+      const lowerMemory = await store.createMemory(
+        LOWER_CASE_TENANT,
+        buildNewMemoryFixture({
+          tenantId: LOWER_CASE_TENANT.tenantId,
+          contentHash: "tenant-case-get-lower",
+        }),
+      );
+
+      expect(await store.get(LOWER_CASE_TENANT, upperMemory.id)).toBeNull();
+      expect(await store.get(UPPER_CASE_TENANT, lowerMemory.id)).toBeNull();
+      expect((await store.get(UPPER_CASE_TENANT, upperMemory.id))?.id).toBe(upperMemory.id);
+
+      expect(await store.getMany(LOWER_CASE_TENANT, [upperMemory.id])).toEqual([]);
+      expect(
+        (await store.getMany(UPPER_CASE_TENANT, [upperMemory.id, lowerMemory.id])).map((m) => m.id),
+      ).toEqual([upperMemory.id]);
+    });
+
+    it("updateStatus は、大文字小文字だけが違う tenantId の ctx からは対象が無いものとして失敗し、行を変えない", async () => {
+      const store = await createStore();
+      const upperMemory = await store.createMemory(
+        UPPER_CASE_TENANT,
+        buildNewMemoryFixture({
+          tenantId: UPPER_CASE_TENANT.tenantId,
+          contentHash: "tenant-case-update-status",
+        }),
+      );
+
+      await expect(
+        store.updateStatus(LOWER_CASE_TENANT, upperMemory.id, "archived"),
+      ).rejects.toThrow(NOT_FOUND_ERROR_MESSAGE);
+      expect((await store.get(UPPER_CASE_TENANT, upperMemory.id))?.status).toBe("active");
+    });
+
+    it("aggregateScope は、大文字小文字だけが違う tenantId の記憶を数えない（それぞれ1件）", async () => {
+      const store = await createStore();
+      await store.createMemory(
+        UPPER_CASE_TENANT,
+        buildNewMemoryFixture({
+          tenantId: UPPER_CASE_TENANT.tenantId,
+          contentHash: "tenant-case-aggregate-upper",
+        }),
+      );
+      await store.createMemory(
+        LOWER_CASE_TENANT,
+        buildNewMemoryFixture({
+          tenantId: LOWER_CASE_TENANT.tenantId,
+          contentHash: "tenant-case-aggregate-lower",
+        }),
+      );
+
+      expect((await store.aggregateScope(UPPER_CASE_TENANT, {})).totalInScope).toBe(1);
+      expect((await store.aggregateScope(LOWER_CASE_TENANT, {})).totalInScope).toBe(1);
+    });
+
+    it("getObservation は、大文字小文字だけが違う tenantId の Observation を返さない（自分の綴りからは見える）", async () => {
+      const store = await createStore();
+      const upperObservation = await store.createObservation(
+        UPPER_CASE_TENANT,
+        buildNewObservationFixture({ tenantId: UPPER_CASE_TENANT.tenantId }),
+      );
+
+      expect(await store.getObservation(LOWER_CASE_TENANT, upperObservation.id)).toBeNull();
+      expect((await store.getObservation(UPPER_CASE_TENANT, upperObservation.id))?.id).toBe(
+        upperObservation.id,
+      );
+    });
+
     // -------------------------------------------------------------------
     // createObservation の冪等性（docs/memory-model.md §10、observe() の再送）
     // -------------------------------------------------------------------
@@ -14799,6 +14882,19 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
         const labels = await store.listLabels!(ctx);
         expect(labels.map((label) => label.name)).toEqual(["B", "Foo", "_a", "foo", "！", "😀"]);
       });
+
+      it("listLabels は、大文字小文字だけが違う tenantId に登録したラベルを返さない（自分の綴りからは見える）", async () => {
+        const store = await createStore();
+        const suffix = Math.random();
+        const upper: Ctx = { tenantId: `Tenant-Case-Labels-${suffix}` };
+        const lower: Ctx = { tenantId: `tenant-case-labels-${suffix}` };
+        await store.registerLabel!(upper, "label-only-upper");
+
+        expect(await store.listLabels!(lower)).toEqual([]);
+        expect((await store.listLabels!(upper)).map((label) => label.name)).toEqual([
+          "label-only-upper",
+        ]);
+      });
     } else if (supportsLabels === false) {
       it("listLabels/registerLabel は任意メソッドであり、この adapter は実装していない", async () => {
         const store = await createStore();
@@ -14818,6 +14914,31 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
     // -------------------------------------------------------------------
 
     if (supportsEraseTenant) {
+      it("eraseTenant は、大文字小文字だけが違う tenantId の行を消さない", async () => {
+        const store = await createStore();
+        const upper: Ctx = { tenantId: "Erase-Tenant-Case" };
+        const lower: Ctx = { tenantId: "erase-tenant-case" };
+        const upperMemory = await store.createMemory(
+          upper,
+          buildNewMemoryFixture({
+            tenantId: upper.tenantId,
+            contentHash: "erase-tenant-case-upper",
+          }),
+        );
+        const lowerMemory = await store.createMemory(
+          lower,
+          buildNewMemoryFixture({
+            tenantId: lower.tenantId,
+            contentHash: "erase-tenant-case-lower",
+          }),
+        );
+
+        await store.eraseTenant!(upper, { limit: 1000 });
+
+        expect(await store.get(upper, upperMemory.id)).toBeNull();
+        expect((await store.get(lower, lowerMemory.id))?.id).toBe(lowerMemory.id);
+      });
+
       it("eraseTenant はテナントの行（memories/observations/recalls）を跡形なく消し、他テナントは無傷のまま残す", async () => {
         const store = await createStore();
         const ctxA: Ctx = { tenantId: "erase-tenant-a" };
