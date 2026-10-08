@@ -21,6 +21,11 @@ describe("normalizeWorkflowExpressions(照合専用の網そのもの)", () => {
     "lexical-regime",
     "lexical-regime-${{ format('{0}-{1}', matrix.serverEncoding, matrix.initdbArgs) }}",
     "lexical-regime-${{ format('x{0}', matrix.serverEncoding) }}",
+    // 置換対象が `{0}` だけでも、余分な引数があれば恒等とはみなさない。
+    "lexical-regime-${{ format('{0}', matrix.serverEncoding, matrix.initdbArgs) }}",
+    // 大文字小文字は正規化しない(Actions にとっては同値でも、安全側に赤くする)。
+    "lexical-regime-${{ FORMAT('{0}', matrix.serverEncoding) }}",
+    "lexical-regime-${{ Format('{0}', matrix.serverEncoding) }}",
   ];
 
   it.each(EQUIVALENT)("⭐ 同値な書き換えは正規形へ揃う: %s", (variant) => {
@@ -37,6 +42,15 @@ describe("normalizeWorkflowExpressions(照合専用の網そのもの)", () => {
   it("⛔ `${{ … }}` の外側は1バイトも変えない(インデント・改行・引用符)", () => {
     const source = '        with:\n          name: "a  b"   # 空白2つ\n          x: 1\n';
     expect(normalizeWorkflowExpressions(source).text).toBe(source);
+  });
+
+  it("⛔ 式と同じ行に在っても、`${{ … }}` の外側の行末の空白・タブは残す", () => {
+    const source = "  path: ${{github.workspace}}/a   \n  name: x-${{ matrix.y }} \t\n  tail: z  ";
+    const { text, unhandled } = normalizeWorkflowExpressions(source);
+    expect(unhandled).toEqual([]);
+    expect(text).toBe(
+      "  path: ${{ github.workspace }}/a   \n  name: x-${{ matrix.y }} \t\n  tail: z  ",
+    );
   });
 
   it("⛔ 単一引用符の文字列の中の空白は詰めない(値が変わるため)", () => {
