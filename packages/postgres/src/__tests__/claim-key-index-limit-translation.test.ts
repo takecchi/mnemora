@@ -4,7 +4,7 @@ import type { Ctx, NewMemory } from "@mnemora/core";
 import { buildNewMemoryFixture } from "@mnemora/testkit";
 import { translateClaimKeyIndexLimit } from "../claim-key-index-limit.js";
 
-const TENANT = "claim-key-index-limit-translation-gaps";
+const TENANT = "claim-key-index-limit-translation";
 const ctx: Ctx = { tenantId: TENANT };
 
 function named54000(indexName: string, extra: Record<string, unknown> = {}): Error {
