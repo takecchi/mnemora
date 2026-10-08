@@ -215,6 +215,91 @@ const OPS: Record<string, Op> = {
     ]);
     return { statuses: async () => [(await kit.store.get(A, g1.id))!.status] };
   },
+  // 2つ目のイベント・先頭でないメンバーだけが指し先を変える形（Issue #1922 の続き）。
+  // 上の4つは1つ目・先頭だけを変えるので、「1つ目しか検査しない」実装を2実装の照合で見分けられなかった。
+  async "markContestedPair(second.event)"(kit, pick) {
+    const [p1, p2, other] = [
+      await memory(kit.store, A),
+      await memory(kit.store, A),
+      await memory(kit.store, A),
+    ];
+    await kit.store.markContestedPair!(
+      A,
+      { id: p1.id, event: event(p1.id) },
+      { id: p2.id, event: event(pick(p1.id, other.id)) },
+    );
+    return {
+      statuses: async () => [
+        (await kit.store.get(A, p1.id))!.status,
+        (await kit.store.get(A, p2.id))!.status,
+      ],
+    };
+  },
+  async "resolveContestedPair(second.event)"(kit, pick) {
+    const [p1, p2, other] = [
+      await memory(kit.store, A),
+      await memory(kit.store, A),
+      await memory(kit.store, A),
+    ];
+    await kit.store.markContestedPair!(
+      A,
+      { id: p1.id, event: event(p1.id) },
+      { id: p2.id, event: event(p2.id) },
+    );
+    await kit.store.resolveContestedPair!(
+      A,
+      { id: p1.id, status: "active", event: event(p1.id) },
+      {
+        id: p2.id,
+        status: "superseded",
+        supersededById: p1.id,
+        event: event(pick(p2.id, other.id)),
+      },
+    );
+    return {
+      statuses: async () => [
+        (await kit.store.get(A, p1.id))!.status,
+        (await kit.store.get(A, p2.id))!.status,
+      ],
+    };
+  },
+  async "markContestedGroup(later member)"(kit, pick) {
+    const [g1, g2, g3, other] = [
+      await memory(kit.store, A),
+      await memory(kit.store, A),
+      await memory(kit.store, A),
+      await memory(kit.store, A),
+    ];
+    await kit.store.markContestedGroup!(A, [
+      { id: g1.id, event: event(g1.id) },
+      { id: g2.id, event: event(g2.id) },
+      { id: g3.id, event: event(pick(g3.id, other.id)) },
+    ]);
+    return { statuses: async () => [(await kit.store.get(A, g3.id))!.status] };
+  },
+  async "resolveContestedGroup(later member)"(kit, pick) {
+    const [g1, g2, g3, other] = [
+      await memory(kit.store, A),
+      await memory(kit.store, A),
+      await memory(kit.store, A),
+      await memory(kit.store, A),
+    ];
+    await kit.store.markContestedGroup!(
+      A,
+      [g1, g2, g3].map((m) => ({ id: m.id, event: event(m.id) })),
+    );
+    await kit.store.resolveContestedGroup!(A, [
+      { id: g1.id, status: "active", event: event(g1.id) },
+      { id: g2.id, status: "superseded", supersededById: g1.id, event: event(g2.id) },
+      {
+        id: g3.id,
+        status: "superseded",
+        supersededById: g1.id,
+        event: event(pick(g3.id, other.id)),
+      },
+    ]);
+    return { statuses: async () => [(await kit.store.get(A, g3.id))!.status] };
+  },
   async "supersedeWithNewMemories(supersede.event)"(kit, pick) {
     const old = await memory(kit.store, A);
     const other = await memory(kit.store, A);
