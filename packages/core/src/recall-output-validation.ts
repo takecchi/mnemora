@@ -35,7 +35,7 @@ export class RecallOutputValidationError extends Error {
   constructor(issues: readonly RecallOutputValidationIssue[], recallId: string) {
     super(
       `recall: output failed validation (recallId: ${recallId}): ` +
-        issues.map((issue) => `${issue.path}: ${issue.message}`).join("; "),
+        issues.map((issue) => issue.message).join("; "),
     );
     this.name = "RecallOutputValidationError";
     this.issues = issues;
