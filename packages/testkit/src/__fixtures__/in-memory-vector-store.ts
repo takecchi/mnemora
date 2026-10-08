@@ -278,7 +278,7 @@ export class InMemoryVectorStore implements VectorStore {
         if (memory.validFrom != null && memory.validFrom > opts.filter.validAt) {
           continue;
         }
-        if (memory.validUntil != null && memory.validUntil <= opts.filter.validAt) {
+        if (memory.validUntil != null && memory.validUntil < opts.filter.validAt) {
           continue;
         }
       }

@@ -135,6 +135,7 @@ interface MemoryMeta {
   effectiveTime: number;
   validFrom: number | null;
   validUntil: number | null;
+  vector: number[];
 }
 
 async function seedMemories(kit: Kit, s: number): Promise<{ ids: string[]; meta: MemoryMeta[] }> {
@@ -191,6 +192,7 @@ async function seedMemories(kit: Kit, s: number): Promise<{ ids: string[]; meta:
       }),
     );
     ids.push(memory.id);
+    const vector = [r() * 2 - 1, r() * 2 - 1, r() * 2 - 1];
     meta.push({
       subjectId,
       tags,
@@ -198,12 +200,9 @@ async function seedMemories(kit: Kit, s: number): Promise<{ ids: string[]; meta:
       effectiveTime: (occurredAt ?? recordedAt).getTime(),
       validFrom: validFrom?.getTime() ?? null,
       validUntil: validUntil?.getTime() ?? null,
+      vector,
     });
-    await kit.vectorStore.upsert(ctx, TEST_EMBEDDING_SPACE, memory.id, [
-      r() * 2 - 1,
-      r() * 2 - 1,
-      r() * 2 - 1,
-    ]);
+    await kit.vectorStore.upsert(ctx, TEST_EMBEDDING_SPACE, memory.id, vector);
   }
   return { ids, meta };
 }
@@ -296,14 +295,67 @@ function violatedFilters(probe: Probe, m: MemoryMeta): string[] {
   return bad;
 }
 
-async function runAll(kit: Kit, s: number, probes: Probe[]) {
+/**
+ * 端ちょうどの問い（Issue #1922 の続き）。乱数の問いは日単位の値を記憶と独立に引くので、絞り込みの端
+ * （`>=` と `>`、`<=` と `<`）にちょうど乗る記憶がめったに出ず、端を取り違えた実装を既定の8種で見分けられなかった。
+ * 種の記憶の値そのものを端に置く。
+ */
+function boundaryProbes(meta: MemoryMeta[]): Probe[] {
+  const base = { text: "mem", limit: N, association: null };
+  const queries: Array<Record<string, unknown>> = [];
+  for (const m of meta.filter((x) => x.validFrom === null && x.validUntil === null).slice(0, 3)) {
+    queries.push({ ...base, occurredAfter: new Date(m.effectiveTime) });
+    queries.push({ ...base, occurredBefore: new Date(m.effectiveTime) });
+  }
+  const validFrom = meta.find((x) => x.validFrom !== null)?.validFrom;
+  if (validFrom != null) queries.push({ ...base, validAt: new Date(validFrom) });
+  const validUntil = meta.find((x) => x.validUntil !== null)?.validUntil;
+  if (validUntil != null) queries.push({ ...base, validAt: new Date(validUntil) });
+  const probes: Probe[] = [];
+  for (const q of queries) {
+    for (const channels of [["ann"], ["lexical"]]) {
+      probes.push({
+        ctx: { tenantId: TENANT },
+        query: { ...q, channels } as RecallQuery,
+        vector: [1, 0, 0],
+      });
+    }
+  }
+  // 段1で取りすぎた記憶は core が後段で絞り直すので、席に余裕があると store の絞り漏れは結果に出ない。
+  // 席を1つにし（`limit: 1`・`overFetchFactor: 1`）、締め出されるべき記憶そのもののベクトルで引いて、漏れた1件に席を取らせる。
+  const narrow = { ...base, limit: 1, overFetchFactor: 1, channels: ["ann"] };
+  for (const m of meta.filter((x) => x.validUntil !== null).slice(0, 2)) {
+    probes.push({
+      ctx: { tenantId: TENANT },
+      query: { ...narrow, validAt: new Date(m.validUntil!) } as RecallQuery,
+      vector: m.vector,
+    });
+  }
+  const alwaysValid = meta.filter((x) => x.validFrom === null && x.validUntil === null);
+  for (const [subjectId, outsider] of [
+    ["s1", alwaysValid.find((x) => x.subjectId === "s2")],
+    ["s2", alwaysValid.find((x) => x.subjectId === "s1")],
+    ["s1", alwaysValid.find((x) => x.subjectId === null)],
+  ] as const) {
+    if (outsider === undefined) continue;
+    probes.push({
+      ctx: { tenantId: TENANT, subjectId },
+      query: { ...narrow, includeSubjectless: false } as RecallQuery,
+      vector: outsider.vector,
+    });
+  }
+  return probes;
+}
+
+async function runAll(kit: Kit, s: number, randomProbes: Probe[]) {
   const { ids, meta } = await seedMemories(kit, s);
+  const probes = [...randomProbes, ...boundaryProbes(meta)];
   const results: RecallResult[] = [];
   for (const probe of probes) {
     queryVector = probe.vector;
     results.push(await kit.runtime.recall(probe.ctx, probe.query));
   }
-  return { ids, meta, results };
+  return { ids, meta, results, probes };
 }
 
 afterAll(async () => {
@@ -316,12 +368,15 @@ describe("recall の絞り込みの組み合わせ: testkit と Postgres が同�
   it.each(seeds)(
     "種 %i",
     async (s) => {
-      const probes = buildProbes(s);
-      const tk = await runAll(await testkitKit(), s, probes);
-      const exact = await runAll(await postgresKit("exact"), s, probes);
-      const planner = await runAll(await postgresKit("planner"), s, probes);
+      const randomProbes = buildProbes(s);
+      const tk = await runAll(await testkitKit(), s, randomProbes);
+      const exact = await runAll(await postgresKit("exact"), s, randomProbes);
+      const planner = await runAll(await postgresKit("planner"), s, randomProbes);
+      // 端の問いは種の記憶から作るので、3つの脚で同じ問いになっていることを先に確かめる。
+      expect(exact.probes).toEqual(tk.probes);
+      expect(planner.probes).toEqual(tk.probes);
 
-      probes.forEach((probe, i) => {
+      tk.probes.forEach((probe, i) => {
         const where = `種 ${s} 問 ${i}: ${JSON.stringify({ subjectId: probe.ctx.subjectId ?? null, ...probe.query })}`;
         for (const [name, run] of [
           ["testkit", tk],
