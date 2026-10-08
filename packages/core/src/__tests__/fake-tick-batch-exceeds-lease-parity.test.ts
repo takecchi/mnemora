@@ -5,6 +5,7 @@ import type { Ctx } from "../ctx.js";
 import type { EventStore } from "../interfaces/event-store.js";
 import type { StructuredRequest } from "../interfaces/llm-provider.js";
 import type { MemoryStore } from "../interfaces/memory-store.js";
+import type { OutboxStore } from "../interfaces/outbox-store.js";
 import type { NewMemory } from "../memory.js";
 import type { OutboxJobRecord } from "../outbox.js";
 import { createRuntime, type Runtime, type TickResult } from "../runtime.js";
@@ -15,6 +16,7 @@ interface Env {
   runtime: Runtime;
   mem: MemoryStore;
   ev: EventStore;
+  ob: OutboxStore;
   rows: (ctx: Ctx) => Promise<Array<Record<string, unknown>>>;
   fresh: () => Ctx;
   /** `kind` のジョブを2本（と、consolidate・reflect には各ジョブの近傍の記憶2件ずつ）積む。extract は observation を2件作る。 */
@@ -41,6 +43,7 @@ async function scenario(env: Env): Promise<Result> {
     runtime,
     mem,
     ev,
+    ob,
     rows,
     fresh,
     seedJobs,
@@ -177,6 +180,60 @@ async function scenario(env: Env): Promise<Result> {
     out["reflect doubled: reflected memories and the seeds' status"] = [
       reflected.sort(),
       seeds.map((m) => m?.status),
+    ];
+  }
+  {
+    // limit が行数より小さいときの取り分と、リースの切れ目（ちょうど `leaseMs`・1ms 前）での取り直し
+    const ctx = fresh();
+    await seedJobs(ctx, "embed");
+    const at = Date.now() + 60_000;
+    const claimAt = async (offset: number, limit: number) =>
+      (
+        await ob.claimBatch(ctx, {
+          limit,
+          now: new Date(at + offset),
+          claimedBy: "w",
+          leaseMs: 1000,
+          kinds: ["embed"],
+        })
+      )
+        .map((j) => j.attempts)
+        .sort();
+    out["claim: limit below the row count, then the lease edge (+999ms, +1000ms)"] = [
+      await claimAt(0, 1),
+      await claimAt(999, 5),
+      await claimAt(1000, 5),
+      await claimAt(1999, 5),
+      await claimAt(2000, 5),
+    ];
+  }
+  {
+    // リースが切れた行の取り直しは `availableAt` を claim の時刻へ進め、待ち行列の後ろへ回す（ADR 0357）
+    const ctx = fresh();
+    await seedJobs(ctx, "embed");
+    const at = Date.now() + 60_000;
+    const labels = new Map<string, string>();
+    const claimAt = async (offset: number, limit: number) =>
+      (
+        await ob.claimBatch(ctx, {
+          limit,
+          now: new Date(at + offset),
+          claimedBy: "w",
+          leaseMs: 1000,
+          kinds: ["embed"],
+        })
+      )
+        .map((j) => {
+          if (!labels.has(j.id)) labels.set(j.id, `job ${labels.size + 1}`);
+          const moved = j.availableAt.getTime() - at;
+          return [labels.get(j.id), j.attempts, moved >= 0 ? moved : "as seeded"];
+        })
+        .sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
+    out["claim: a re-claim after the lease moves availableAt to now and the row to the tail"] = [
+      await claimAt(0, 1),
+      await claimAt(5000, 2),
+      await claimAt(10000, 1),
+      await claimAt(15000, 1),
     ];
   }
   return out;
@@ -458,6 +515,22 @@ const EXPECTED: Result = {
     [3, 3, 3],
     ["active", "active"],
   ],
+  "claim: limit below the row count, then the lease edge (+999ms, +1000ms)": [
+    [1],
+    [1],
+    [2],
+    [2],
+    [3],
+  ],
+  "claim: a re-claim after the lease moves availableAt to now and the row to the tail": [
+    [["job 1", 1, "as seeded"]],
+    [
+      ["job 1", 2, 5000],
+      ["job 2", 1, "as seeded"],
+    ],
+    [["job 2", 2, 10000]],
+    [["job 1", 3, 15000]],
+  ],
 };
 
 let hashCounter = 0;
@@ -519,6 +592,7 @@ describe("1回の tick の2件目の処理中にリースが切れたとき、�
       runtime,
       mem: stores.memoryStore as MemoryStore,
       ev: stores.eventStore as EventStore,
+      ob: stores.outboxStore as OutboxStore,
       rows: async (ctx) => stores.outboxStore.listJobs(ctx).map(toRow),
       fresh: () => ({ tenantId: `batch-lease-fake-${(n += 1)}` }),
       seedJobs: (ctx, kind) =>

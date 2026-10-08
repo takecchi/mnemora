@@ -239,6 +239,109 @@ async function scenario(env: Env): Promise<Result> {
   out[
     "8 boundary: sunk exactly when floor <= now (sweep) and gone from the gate when floor <= now"
   ] = boundary;
+
+  // 9〜12: 大文字を含む subject、床の無い記憶の目次、tenant だけの時計の境界と contested、掃引の limit ちょうど
+  const evOf = (c: Ctx, id: string) => ({
+    tenantId: c.tenantId,
+    memoryId: id,
+    kind: "updated" as const,
+    actor: { type: "system" as const },
+    digestSnapshot: null,
+    sizeBeforeBytes: null,
+    meta: {},
+  });
+  {
+    const ctx9 = fresh();
+    const ctx9Z: Ctx = { ...ctx9, subjectId: "Zed-Mixed" };
+    await ts.setDecayClock!(ctx9, "activity");
+    await ts.setDefaultHalfLifeRecalls!(ctx9, 1);
+    const ids9: Record<string, string> = {};
+    ids9["z0"] = await observeOne(ctx9Z, "fact zed");
+    await settle(ctx9);
+    for (let i = 0; i < 2; i += 1) await recallAliases(ctx9Z, ids9, "subject");
+    out["9 a subject id with upper-case letters keeps its case in the counters"] = [
+      await seqOf(ctx9, ids9),
+      await counters(ctx9, ["Zed-Mixed", "zed-mixed"]),
+    ];
+  }
+  {
+    const ctx10 = fresh();
+    const ids10: Record<string, string> = {};
+    ids10["w0"] = await observeOne(ctx10, "fact written under the wall clock");
+    await settle(ctx10);
+    await ts.setDecayClock!(ctx10, "activity");
+    await ts.setDefaultHalfLifeRecalls!(ctx10, 3);
+    ids10["a0"] = await observeOne(ctx10, "fact written under the activity clock");
+    await settle(ctx10);
+    const r = await recallAliases(ctx10, ids10);
+    out["10 a memory with no activity floor is not counted as decayed"] = [
+      r.ids,
+      r.omitted,
+      r.totalInScope,
+      r.band,
+      await seqOf(ctx10, ids10),
+    ];
+  }
+  {
+    const ctx11 = fresh();
+    await ts.setDecayClock!(ctx11, "activity");
+    await ts.setDefaultHalfLifeRecalls!(ctx11, 1);
+    const ids11: Record<string, string> = {};
+    ids11["d0"] = await observeOne(ctx11, "fact plain");
+    ids11["c1"] = await observeOne(ctx11, "fact contested one");
+    ids11["c2"] = await observeOne(ctx11, "fact contested two");
+    await settle(ctx11);
+    await mem.markContestedPair!(
+      ctx11,
+      { id: ids11["c1"]!, event: evOf(ctx11, ids11["c1"]!) },
+      { id: ids11["c2"]!, event: evOf(ctx11, ids11["c2"]!) },
+    );
+    const alias11 = aliasOf(ids11);
+    const steps11: unknown[] = [await seqOf(ctx11, ids11)];
+    for (let i = 0; i < 7; i += 1) {
+      await recallAliases(ctx11, ids11);
+      const sw11 = await runtime.sweepArchive(ctx11, {
+        now: new Date(),
+        limit: 10,
+        clock: "activity",
+      });
+      steps11.push([
+        sw11.archived.map((x) => alias11(x.memoryId)).sort(),
+        (await counters(ctx11, [])).T,
+      ]);
+    }
+    steps11.push(await seqOf(ctx11, ids11));
+    out["11 tenant counters only: sweep at the exact floor, contested rows stay"] = steps11;
+  }
+  {
+    const ctx12 = fresh();
+    await ts.setDecayClock!(ctx12, "activity");
+    await ts.setDefaultHalfLifeRecalls!(ctx12, 1);
+    const ids12: Record<string, string> = {};
+    ids12["e1"] = await observeOne(ctx12, "fact first");
+    await settle(ctx12);
+    await recallAliases(ctx12, ids12);
+    ids12["e2"] = await observeOne(ctx12, "fact second");
+    await settle(ctx12);
+    await recallAliases(ctx12, ids12);
+    ids12["e3"] = await observeOne(ctx12, "fact third");
+    await settle(ctx12);
+    for (let i = 0; i < 10; i += 1) await recallAliases(ctx12, ids12);
+    const alias12 = aliasOf(ids12);
+    const sweeps12: unknown[] = [];
+    for (let i = 0; i < 3; i += 1) {
+      const sw12 = await runtime.sweepArchive(ctx12, {
+        now: new Date(),
+        limit: 2,
+        clock: "activity",
+      });
+      sweeps12.push([sw12.archived.map((x) => alias12(x.memoryId)).sort(), sw12.reachedLimit]);
+    }
+    out["12 sweep stops at the limit and the rest goes next time"] = [
+      sweeps12,
+      await seqOf(ctx12, ids12),
+    ];
+  }
   return out;
 }
 
@@ -719,6 +822,36 @@ const EXPECTED: Result = {
     [["b0", "bA"], "[]", 2, [], 4],
     [[], '[["below_threshold",null,null,2]]', 2, ["b0", "bA"], 5],
     [[], '[["filtered","archived","outside_scope",2]]', 0, [], 6],
+  ],
+  "9 a subject id with upper-case letters keeps its case in the counters": [
+    { z0: ["active", 0, 5, 1] },
+    { T: 0, hasS: true, S: { "Zed-Mixed": 2 } },
+  ],
+  "10 a memory with no activity floor is not counted as decayed": [
+    ["a0", "w0"],
+    "[]",
+    2,
+    [],
+    { w0: ["active", null, null, null], a0: ["active", 0, 13, 3] },
+  ],
+  "11 tenant counters only: sweep at the exact floor, contested rows stay": [
+    { d0: ["active", 0, 5, 1], c1: ["contested", 0, 5, 1], c2: ["contested", 0, 5, 1] },
+    [[], 1],
+    [[], 2],
+    [[], 3],
+    [[], 4],
+    [["d0"], 5],
+    [[], 6],
+    [[], 7],
+    { d0: ["archived", 0, 5, 1], c1: ["contested", 0, 5, 1], c2: ["contested", 0, 5, 1] },
+  ],
+  "12 sweep stops at the limit and the rest goes next time": [
+    [
+      [["e1", "e2"], true],
+      [["e3"], false],
+      [[], false],
+    ],
+    { e1: ["archived", 0, 5, 1], e2: ["archived", 1, 6, 1], e3: ["archived", 2, 7, 1] },
   ],
 };
 

@@ -53,6 +53,8 @@ interface Env {
   seedExtract: (ctx: Ctx, externalId: string) => Promise<void>;
   /** 時計を壁時計から `ms` だけ進める（`RuntimeDeps.clock`）。 */
   setClockOffset: (ms: number) => void;
+  /** そのテナントの、その種類のジョブの `available_at` を直に書き換える（挿入順と食い違う状態を作る）。実装ごとの内部の口で作る。 */
+  setAvailableAt: (ctx: Ctx, kind: string, at: Date) => Promise<void>;
   /** embed の呼び出しの前に走る門。`null` で外す。 */
   setEmbedGate: (gate: ((n: number) => Promise<void>) | null) => void;
   /** これまでの embed の呼び出し回数を返して、0 に戻す。 */
@@ -78,6 +80,7 @@ async function scenario(env: Env): Promise<Result> {
     seed,
     seedExtract,
     setClockOffset,
+    setAvailableAt,
     setEmbedGate,
     takeEmbedCalls,
     fresh,
@@ -293,6 +296,55 @@ async function scenario(env: Env): Promise<Result> {
       ).length,
     ];
   }
+  {
+    // 挿入順と `available_at` 順が食い違うジョブ、大文字小文字だけ違う kind
+    setClockOffset(0);
+    const ctx = fresh();
+    await seed(ctx, "order a", ["embed"], false);
+    await sleep(5);
+    await seed(ctx, "order b", ["consolidate"], false);
+    await sleep(5);
+    await seed(ctx, "order c", ["reflect"], false);
+    await sleep(5);
+    const base = Date.now();
+    await setAvailableAt(ctx, "consolidate", new Date(base - 1000));
+    const claimOne = async () =>
+      (
+        await ob.claimBatch(ctx, {
+          limit: 1,
+          now: new Date(base + 1000),
+          claimedBy: "w",
+          leaseMs: 60_000,
+        })
+      ).map((j) => [j.kind, j.attempts]);
+    out["claim order: the oldest available_at goes first, not the first inserted"] = [
+      await claimOne(),
+      await claimOne(),
+      await claimOne(),
+      await claimOne(),
+    ];
+    const upperCtx = fresh();
+    await seed(upperCtx, "upper a", ["Custom-Kind"], false);
+    await seed(upperCtx, "upper b", ["custom-kind"], false);
+    const claimKinds = async (kinds: string[]) =>
+      (
+        await ob.claimBatch(upperCtx, {
+          limit: 5,
+          now: new Date(base + 10_000),
+          claimedBy: "w",
+          leaseMs: 1000,
+          kinds,
+        })
+      )
+        .map((j) => [j.kind, j.attempts])
+        .sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
+    out["claim kinds: a kind that differs only in case is a different kind"] = [
+      await claimKinds(["CUSTOM-KIND"]),
+      await claimKinds(["custom-kind"]),
+      await claimKinds(["Custom-Kind"]),
+      await claimKinds(["custom-kind", "Custom-Kind"]),
+    ];
+  }
   return out;
 }
 
@@ -455,6 +507,18 @@ const EXPECTED: Result = {
     rows: [["embed", 2, true, false, null]],
   },
   "lease expiry: reclaimable exactly at claimedAt + leaseMs, not 1ms before": [0, 1],
+  "claim order: the oldest available_at goes first, not the first inserted": [
+    [["consolidate", 1]],
+    [["embed", 1]],
+    [["reflect", 1]],
+    [],
+  ],
+  "claim kinds: a kind that differs only in case is a different kind": [
+    [],
+    [["custom-kind", 1]],
+    [["Custom-Kind", 1]],
+    [],
+  ],
 };
 const space = TEST_EMBEDDING_SPACE;
 
@@ -486,7 +550,12 @@ type Stores = {
   rel: PostgresRelationStore | InMemoryRelationStore;
 };
 
-function build(base: string, stores: Stores, rows: Env["rows"]): Env {
+function build(
+  base: string,
+  stores: Stores,
+  rows: Env["rows"],
+  setAvailableAt: Env["setAvailableAt"],
+): Env {
   clockOffsetMs = 0;
   embedCalls = 0;
   embedGate = null;
@@ -511,6 +580,7 @@ function build(base: string, stores: Stores, rows: Env["rows"]): Env {
     ev: stores.ev,
     ob: stores.ob,
     rows,
+    setAvailableAt,
     fresh: () => ({ tenantId: `${base}-${(n += 1)}` }),
     seed: async (ctx, content, kinds, ready): Promise<Memory> => {
       const { memory } = await stores.mem.createMemoryWithOutbox(
@@ -578,6 +648,12 @@ describe("tick の種類の混在・並行・リースの期限切れ（InMemory
             last_error: j.lastError,
             claimed: j.claimedBy != null,
           })),
+      // InMemory は内部の行を直に書き換える。
+      async (ctx, kind, at) => {
+        for (const j of m.outboxJobs) {
+          if (j.tenantId === ctx.tenantId && j.kind === kind) j.availableAt = new Date(at);
+        }
+      },
     );
     expect(await scenario(env)).toEqual(EXPECTED);
   });
@@ -603,6 +679,13 @@ describe("tick の種類の混在・並行・リースの期限切れ（InMemory
           FROM outbox WHERE tenant_id = ${ctx.tenantId} ORDER BY created_at, kind
         `);
         return r.rows as Array<Record<string, unknown>>;
+      },
+      // Postgres は SQL で書き換える。
+      async (ctx, kind, at) => {
+        await db.execute(sql`
+          UPDATE outbox SET available_at = ${at.toISOString()}::timestamptz
+          WHERE tenant_id = ${ctx.tenantId} AND kind = ${kind}
+        `);
       },
     );
     expect(await scenario(env)).toEqual(EXPECTED);

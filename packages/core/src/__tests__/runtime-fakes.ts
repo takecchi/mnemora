@@ -3239,6 +3239,8 @@ export class FakeOutboxStore implements OutboxStore {
     eligible.sort((a, b) => a.availableAt.getTime() - b.availableAt.getTime());
     const claimed = eligible.slice(0, opts.limit);
     for (const job of claimed) {
+      // 取り直し（書き換える前の `claimedAt` が非 null）なら `availableAt` を `opts.now` へ進め、待ち行列の後ろへ回す（ADR 0357）。
+      if ((job.claimedAt ?? null) !== null) job.availableAt = fakeCopyDate(opts.now);
       job.claimedAt = fakeCopyDate(opts.now); // ADR 0562: 呼び手の Date を行に入れない
       job.claimedBy = wf(opts.claimedBy);
       job.attempts += 1;

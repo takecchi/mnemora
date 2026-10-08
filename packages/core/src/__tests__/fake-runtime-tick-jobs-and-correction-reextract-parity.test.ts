@@ -209,6 +209,81 @@ async function scenario(env: Env): Promise<Result> {
       await snap(ctx, [corrected, correcting]),
     ];
   }
+  {
+    // 訂正の解決のあとの contestedWithId・supersededById の読み戻し
+    for (const [vn, resolution] of VARIANTS) {
+      const ctx = fresh();
+      const o = await obs(ctx, "ext-readback");
+      setExtracted("extracted fact");
+      const first = await runtime.reextract(ctx, o.id);
+      const corrected = (await mem.get(ctx, first.memoryIds[0]!))!;
+      await env.embed(ctx, corrected);
+      const correcting = await mk(ctx, "extracted fact corrected");
+      const discovery = await runtime.findCorrectionCandidates(ctx, {
+        text: "extracted fact",
+        excludeMemoryIds: [correcting.id],
+        limit: 100,
+      });
+      const res = resolution(correcting, corrected);
+      const ac = await runtime.applyCorrection(ctx, {
+        discovery,
+        correctedId: corrected.id,
+        correctingId: correcting.id,
+        ...(res ? { resolution: res } : {}),
+      });
+      const name = (id: string | null | undefined) =>
+        id == null
+          ? null
+          : id === corrected.id
+            ? "corrected"
+            : id === correcting.id
+              ? "correcting"
+              : "other";
+      const read = async (m: Memory) => {
+        const g = (await mem.get(ctx, m.id))!;
+        return [g.status, name(g.contestedWithId), name(g.supersededById)];
+      };
+      out[`correction readback [${vn}]: status, contestedWithId, supersededById`] = [
+        ac.kind,
+        await read(corrected),
+        await read(correcting),
+      ];
+    }
+  }
+  {
+    // 終端 failed の行は取り直されない・別テナントの未処理の行は取らない・リースはちょうど `leaseMs` で切れる
+    const ctx = fresh();
+    const other = fresh();
+    const mine = await enqueue(ctx, "consolidate");
+    await enqueue(other, "consolidate");
+    const at = Date.now() + 60_000;
+    const claimAt = (offset: number) =>
+      ob.claimBatch(ctx, {
+        limit: 5,
+        now: new Date(at + offset),
+        claimedBy: "w",
+        leaseMs: 1000,
+        kinds: ["consolidate"],
+      });
+    const view = (jobs: Awaited<ReturnType<typeof claimAt>>) =>
+      jobs.map((j) => [
+        j.kind,
+        j.attempts,
+        (j.payload as { memoryId?: string }).memoryId === mine.id,
+      ]);
+    const first = await claimAt(0);
+    const early = await claimAt(999);
+    const exact = await claimAt(1000);
+    await ob.fail(ctx, exact[0]!.id, "boom", exact[0]!.attempts, { at: new Date(at + 1000) });
+    const afterFail = await claimAt(5000);
+    out["claim: only this tenant's row, reclaimed exactly at leaseMs, never again once failed"] = [
+      view(first),
+      view(early),
+      view(exact),
+      view(afterFail),
+      await outbox(ctx),
+    ];
+  }
   return out;
 }
 
@@ -799,6 +874,33 @@ const EXPECTED: Result = {
       status: ["superseded", "active"],
       events: ["created", "events_purged"],
     },
+  ],
+  "correction readback [resolution supersede, winner=correcting]: status, contestedWithId, supersededById":
+    ["resolved", ["superseded", null, "correcting"], ["active", null, null]],
+  "correction readback [resolution supersede, winner=corrected]: status, contestedWithId, supersededById":
+    ["resolved", ["active", null, null], ["superseded", null, "corrected"]],
+  "correction readback [resolution both_active]: status, contestedWithId, supersededById": [
+    "resolved",
+    ["active", null, null],
+    ["active", null, null],
+  ],
+  "correction readback [no resolution (contested pending)]: status, contestedWithId, supersededById":
+    ["contested", ["contested", "correcting", null], ["contested", "corrected", null]],
+  "claim: only this tenant's row, reclaimed exactly at leaseMs, never again once failed": [
+    [["consolidate", 1, true]],
+    [],
+    [["consolidate", 2, true]],
+    [],
+    [
+      {
+        attempts: 2,
+        claimed: true,
+        done: false,
+        failed: true,
+        kind: "consolidate",
+        last_error: "boom",
+      },
+    ],
   ],
 };
 
