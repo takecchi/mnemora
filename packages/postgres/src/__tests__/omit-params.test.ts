@@ -143,3 +143,43 @@ describe("omitParamsFromError: 取りこぼしていた3つ（ADR 0592）", () =
     expect(twice.stack ?? "").toContain(once.message);
   });
 });
+
+/**
+ * 落とす範囲は「最初の `params:` より後ろの全部」で、印の数字はその文字数。params の値が `\nparams: ` や印と同じ文字列を
+ * 含んでいても、値は残らない（印に見えるのは、params の全部が印そのものであるときだけ）。
+ */
+describe("omitParamsFromError: params の値の形に関わらず、最初の params: より後ろを全部落とす", () => {
+  const omit = (message: string): string => {
+    const error = new Error(message);
+    omitParamsFromError(error);
+    return error.message;
+  };
+
+  it("params の値が改行と params: を含んでいても、最初の params: より後ろを全部落とす", () => {
+    const params = `${SECRET}-head\nparams: tail`;
+    expect(omit(`${SQL}\nparams: ${params}`)).toBe(
+      `${SQL}\nparams: (omitted by mnemora, ${params.length} chars)`,
+    );
+  });
+
+  it("params の値が印で始まっていても、印の後ろの値ごと落とす", () => {
+    const params = `(omitted by mnemora, 3 chars),${SECRET}`;
+    expect(omit(`${SQL}\nparams: ${params}`)).toBe(
+      `${SQL}\nparams: (omitted by mnemora, ${params.length} chars)`,
+    );
+  });
+
+  it("params の値が印で終わっていても、印の前の値ごと落とす", () => {
+    const params = `${SECRET},(omitted by mnemora, 3 chars)`;
+    expect(omit(`${SQL}\nparams: ${params}`)).toBe(
+      `${SQL}\nparams: (omitted by mnemora, ${params.length} chars)`,
+    );
+  });
+
+  it("印の数字は、落とした文字数そのもの（1文字・10文字）", () => {
+    expect(omit(`${SQL}\nparams: x`)).toBe(`${SQL}\nparams: (omitted by mnemora, 1 chars)`);
+    expect(omit(`${SQL}\nparams: 0123456789`)).toBe(
+      `${SQL}\nparams: (omitted by mnemora, 10 chars)`,
+    );
+  });
+});

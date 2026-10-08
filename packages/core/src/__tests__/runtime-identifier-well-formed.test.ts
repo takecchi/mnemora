@@ -35,11 +35,13 @@ const CASES: ReadonlyArray<readonly [string, string]> = [
   ["NUL", "id-\u0000"],
 ];
 
-async function rejection(promise: Promise<unknown>): Promise<{ kind?: unknown; message: string }> {
+async function rejection(
+  promise: Promise<unknown>,
+): Promise<{ kind?: unknown; field?: unknown; message: string }> {
   try {
     await promise;
   } catch (error) {
-    return error as { kind?: unknown; message: string };
+    return error as { kind?: unknown; field?: unknown; message: string };
   }
   return { kind: "(reject しなかった)", message: "" };
 }
@@ -54,6 +56,7 @@ describe("runtime の入口は、保存の形で区別できない識別子を�
         expect(reason.kind, `${name}: ${reason.message.slice(0, 100)}`).toBe(
           "malformed_identifier",
         );
+        expect(reason.field, name).toBe("ctx.tenantId");
         expect(reason.message).not.toContain(value);
       }
     });
@@ -66,6 +69,7 @@ describe("runtime の入口は、保存の形で区別できない識別子を�
         expect(reason.kind, `${name}: ${reason.message.slice(0, 100)}`).toBe(
           "malformed_identifier",
         );
+        expect(reason.field, name).toBe("ctx.subjectId");
       }
     });
 

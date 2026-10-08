@@ -74,6 +74,10 @@ describe("コード片の印（決定3の3）は、1つずつ単独で陰性に�
       expect(detectLanguageMismatch(JA_OBSERVATION, `${PROSE} ${mark}`)).toBeNull();
     },
   );
+
+  it.each([["&&"], ["--verbose"], ["`"]])("%s だけを印に持つ本文は陰性", (mark) => {
+    expect(detectLanguageMismatch(JA_OBSERVATION, `${PROSE} ${mark}`)).toBeNull();
+  });
 });
 
 describe("検査の対象は content で、digest ではない（決定4）", () => {
