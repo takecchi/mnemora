@@ -174,6 +174,20 @@ describe.each(KITS)("イベントの入力（今の振る舞い）: %s", (kitNam
     await expect(kit.es.append(ctx, event(memoryId, { sizeBeforeBytes: 1.5 }))).rejects.toThrow();
   });
 
+  // `NewMemoryEvent` の doc: `at` は省略すると store が今の時刻を入れる。記憶を指す経路と `memoryId: null` の経路は別の SQL。
+  it.each([
+    ["記憶を指す", true],
+    ["memoryId が null の", false],
+  ])("append: at を省略すると、呼んだ時刻が入る（%s経路）", async (_label, pointsToMemory) => {
+    const { kit, memoryId } = await withMemory();
+    const before = Date.now();
+    const written = await kit.es.append(ctx, event(pointsToMemory ? memoryId : null, {}));
+    const after = Date.now();
+    expect(written.at.getTime()).toBeGreaterThanOrEqual(before);
+    expect(written.at.getTime()).toBeLessThanOrEqual(after);
+    expect((await kit.es.get(ctx, written.id))?.at.getTime()).toBe(written.at.getTime());
+  });
+
   it("append: tenantId が ctx と違っても、ctx のテナントとして書く", async () => {
     const { kit, memoryId } = await withMemory();
     const written = await kit.es.append(ctx, event(memoryId, { tenantId: other.tenantId }));

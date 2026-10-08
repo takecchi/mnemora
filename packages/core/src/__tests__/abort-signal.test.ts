@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { Ctx } from "../ctx.js";
-import { abortReason } from "../abort.js";
+import { abortReason, runAbortable } from "../abort.js";
 import type { AbortOptions } from "../abort.js";
 import type { EmbeddingProvider } from "../interfaces/embedding-provider.js";
 import type { LLMProvider, StructuredRequest } from "../interfaces/llm-provider.js";
@@ -745,5 +745,41 @@ describe("abortReason — signal.reason が undefined のときだけ AbortError
     const controller = new AbortController();
     controller.abort();
     expect(abortReason(controller.signal)).toBe(controller.signal.reason);
+  });
+});
+
+describe("runAbortable — abort と run の決着の順序", () => {
+  it("run の同期部分の中で abort されたら、run が値で解決しても結果を捨て、signal.reason で reject する", async () => {
+    const controller = new AbortController();
+    const reason = new Error("aborted inside run");
+    const promise = runAbortable(controller.signal, () => {
+      controller.abort(reason);
+      return Promise.resolve("value");
+    });
+    await expect(promise).rejects.toBe(reason);
+  });
+
+  it("対照: run が abort より前に解決していれば、その値が返る", async () => {
+    const controller = new AbortController();
+    const value = await runAbortable(controller.signal, () => Promise.resolve("value"));
+    controller.abort();
+    expect(value).toBe("value");
+  });
+
+  it("待っている間の abort でも、reason が undefined の signal（自前の signal 実装）なら AbortError の DOMException で reject する", async () => {
+    const target = new EventTarget();
+    const signal = Object.assign(target, {
+      aborted: false,
+      reason: undefined,
+    }) as unknown as AbortSignal;
+    const promise = runAbortable(signal, () => new Promise<never>(() => undefined));
+    Object.assign(signal, { aborted: true });
+    signal.dispatchEvent(new Event("abort"));
+    const error = await promise.then(
+      () => undefined,
+      (e: unknown) => e,
+    );
+    expect(error).toBeInstanceOf(DOMException);
+    expect((error as DOMException).name).toBe("AbortError");
   });
 });

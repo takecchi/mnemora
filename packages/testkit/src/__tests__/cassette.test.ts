@@ -5,6 +5,7 @@ import type { Cassette } from "../__fixtures__/cassette.js";
 import {
   CASSETTE_FORMAT_VERSION,
   assertCassette,
+  embeddingCassetteKey,
   llmCassetteKey,
 } from "../__fixtures__/cassette.js";
 import {
@@ -234,6 +235,69 @@ describe("鍵の導出（ADR 0051）", () => {
   });
 });
 
+// 鍵が変わると、利用者が録ったカセットが1件も引けなくなる。期待値は今の実装が返す値を写したもの。
+describe("鍵の値は今の値から動かない", () => {
+  const hello = { role: "user", content: "こんにちは" } as const;
+
+  it("埋め込みの鍵は入力テキストの UTF-8 の SHA-256 のまま", () => {
+    // "abc" と "" は SHA-256 の既知の値と一致する。
+    expect(embeddingCassetteKey("abc")).toBe(
+      "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+    );
+    expect(embeddingCassetteKey("")).toBe(
+      "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    );
+    expect(embeddingCassetteKey("私の好きな色は青です。")).toBe(
+      "ab709b41562aae6ccba20a6e17b297c528f363345e825beb24c989eeb619c53e",
+    );
+  });
+
+  it("system の鍵が無いプロンプトと、system が undefined のプロンプトの鍵は今の値のまま", () => {
+    const expected = "114ebd7a8ebde81d1135190b5fc273605247ff3e685a9ab4a784250ef0d0ed12";
+    expect(llmCassetteKey({ messages: [hello] })).toBe(expected);
+    expect(llmCassetteKey({ system: undefined, messages: [hello] })).toBe(expected);
+  });
+
+  it("system が空文字のプロンプトの鍵は今の値のまま", () => {
+    // ADR 0452 で未着手の A-7。直すと決めたら期待値と形式版を見直す。
+    expect(llmCassetteKey({ system: "", messages: [hello] })).toBe(
+      "46cc192b296c46e6f40298a308f9398aa2f07fcfabef084b2027ce57e8bbb2b9",
+    );
+  });
+
+  it("system を持つプロンプトの鍵は今の値のまま", () => {
+    expect(llmCassetteKey({ system: "抽出せよ", messages: [hello] })).toBe(
+      "9b668903c6d1376638beecd11395309a41ddf1eb163bfaaa014c7ac941070beb",
+    );
+  });
+
+  it("複数のメッセージの鍵は、順ごとに今の値のまま", () => {
+    const a = { role: "user", content: "a" } as const;
+    const b = { role: "assistant", content: "b" } as const;
+    expect(llmCassetteKey({ system: "抽出せよ", messages: [a, b] })).toBe(
+      "c66df844a9063cdfd3efda940e1eb4045988fd39b71d14cd579920f6e390ac59",
+    );
+    expect(llmCassetteKey({ system: "抽出せよ", messages: [b, a] })).toBe(
+      "a2ec41b86f601e8b52b7c5ad002d97caeeea26c6c72b3148fd85f410e84b4ed6",
+    );
+  });
+
+  it("本文が同じで role だけ違うメッセージの鍵は今の値のまま", () => {
+    expect(
+      llmCassetteKey({
+        system: "抽出せよ",
+        messages: [{ role: "assistant", content: "こんにちは" }],
+      }),
+    ).toBe("0bbedf0bf9346a25da2d1600a6fd3dd8f1c87bff43770dbe2858244d182fdd88");
+  });
+
+  it("role が system のメッセージを含むプロンプトの鍵は今の値のまま", () => {
+    expect(llmCassetteKey({ messages: [{ role: "system", content: "抽出せよ" }, hello] })).toBe(
+      "56e49668c05a834c6fe379f47a00d1c60eb4b419baca6bb339ff06cf34b7e7e3",
+    );
+  });
+});
+
 describe("assertCassette（ADR 0051）", () => {
   it("形式版が違うカセットは読まずに落ちる", async () => {
     const cassette = (await recordRoundTrip()) as Cassette;
@@ -250,5 +314,47 @@ describe("assertCassette（ADR 0051）", () => {
     const cassette = await recordRoundTrip();
     const broken = { ...cassette, embedding: undefined };
     expect(() => assertCassette(broken, "テスト")).toThrow(/embedding 節が無い/);
+  });
+
+  it("形式版が今より古いカセットも読まずに落ちる", async () => {
+    const cassette = await recordRoundTrip();
+    const old = { ...cassette, version: CASSETTE_FORMAT_VERSION - 1 };
+    expect(() => assertCassette(old, "テスト")).toThrow();
+  });
+
+  type LooseCassette = {
+    recordedAt: unknown;
+    embedding: { space: Record<string, unknown>; entries: unknown };
+    llm: { model: unknown; entries: unknown };
+  };
+  // 外すと黙って通る検査だけを並べる（外しても素の TypeError で落ちる形は、落ちること自体は変わらない）。
+  it.each<[string, (c: LooseCassette) => void]>([
+    ["recordedAt が文字列でない", (c) => (c.recordedAt = 0)],
+    ["embedding.space.provider が文字列でない", (c) => (c.embedding.space.provider = 1)],
+    ["embedding.space.model が文字列でない", (c) => (c.embedding.space.model = 1)],
+    ["embedding.entries がオブジェクトでない", (c) => (c.embedding.entries = 1)],
+    ["llm.model が文字列でない", (c) => (c.llm.model = 1)],
+    ["llm.entries がオブジェクトでない", (c) => (c.llm.entries = 1)],
+    [
+      "llm の entry に value が無い",
+      (c) => {
+        for (const entry of Object.values(c.llm.entries as Record<string, { value?: unknown }>)) {
+          delete entry.value;
+        }
+      },
+    ],
+  ])("%s カセットは落ちる", async (_name, breakIt) => {
+    const cassette = JSON.parse(JSON.stringify(await recordRoundTrip())) as LooseCassette;
+    breakIt(cassette);
+    expect(() => assertCassette(cassette, "テスト")).toThrow();
+  });
+
+  it("やりすぎ: embedding.space.dimensions が 1 のカセットは通る", async () => {
+    const cassette = await recordRoundTrip();
+    const oneDimension = {
+      ...cassette,
+      embedding: { ...cassette.embedding, space: { ...cassette.embedding.space, dimensions: 1 } },
+    };
+    expect(() => assertCassette(oneDimension, "テスト")).not.toThrow();
   });
 });
