@@ -32,6 +32,16 @@ const EXPECTED_MARK = {
   contentLatinLetters: 62,
   contentLatinShare: 1,
 };
+/**
+ * 割合が小数になる本文（キリル文字4字の語を足す）。ラテン文字 62 字 / 文字 66 字 = 0.9393… で、小数第2位に丸めると 0.94（切り捨てなら 0.93）。
+ * 数の丸め・整数化・文字列化が jsonb の往復や core の丸めで変わると赤になる。
+ */
+const EN_MIXED_CONTENT = `${EN_CONTENT} Борщ`;
+const EXPECTED_MIXED_MARK = {
+  rule: "cjk_observation_latin_content",
+  contentLatinLetters: 62,
+  contentLatinShare: 0.94,
+};
 
 /** extract の LLM が順に返す本文。`null` は LLM の失敗。 */
 let outputs: Array<string | null> = [];
@@ -131,6 +141,26 @@ describe.each(KITS)(
       const metas = await createdMetas(kit);
       expect(metas).toHaveLength(1);
       expect(metas[0]!.languageMismatch).toEqual(EXPECTED_MARK);
+    });
+
+    it("sync: 割合が小数（0.94）になる本文でも、小数のまま戻る", async () => {
+      const kit = await make();
+      outputs = [EN_MIXED_CONTENT];
+      await kit.runtime.observe(ctx, { kind: "utterance", text: JA_TEXT });
+      const metas = await createdMetas(kit);
+      expect(metas).toHaveLength(1);
+      expect(metas[0]!.languageMismatch).toEqual(EXPECTED_MIXED_MARK);
+    });
+
+    it("deferred: 割合が小数（0.94）になる本文でも、小数のまま戻る", async () => {
+      const kit = await make();
+      outputs = [EN_MIXED_CONTENT];
+      await kit.runtime.observe(ctx, { kind: "utterance", text: JA_TEXT, extract: "deferred" });
+      const tick = await kit.runtime.tick(ctx, { kinds: ["extract"], leaseMs: 60_000 });
+      expect(tick.processed).toBe(1);
+      const metas = await createdMetas(kit);
+      expect(metas).toHaveLength(1);
+      expect(metas[0]!.languageMismatch).toEqual(EXPECTED_MIXED_MARK);
     });
 
     it("reextract: 作り直した記憶の created に印が付き、reextracted の印と同居する", async () => {
