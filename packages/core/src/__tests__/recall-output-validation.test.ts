@@ -4,6 +4,7 @@ import {
   DEFAULT_RECALL_OUTPUT_VALIDATION,
   validateRecallOutput,
 } from "../recall-output-validation.js";
+import { RecallResultSchema } from "../recall.js";
 import type { RecallResult } from "../recall.js";
 
 /** 検証を通るべき最小の `RecallResult`（`outputValidation` は載せる前の draft）。 */
@@ -35,6 +36,31 @@ describe('validateRecallOutput — "off" / "report" / "throw" の3状態', () =>
   it('"off" は undefined を返す（「検証していない」——「通った」ではない）', () => {
     expect(validateRecallOutput(validDraft(), "off", "rcl-1")).toBeUndefined();
     expect(validateRecallOutput({ ...validDraft(), recallId: "" }, "off", "rcl-1")).toBeUndefined();
+  });
+
+  it("issues は落ちた箇所を全て並べ、各項目の code は zod の issue の code そのもの", () => {
+    const draft = validDraft({
+      recallId: "", // min(1) 違反
+      usage: {
+        chars: 0,
+        estimatedTokens: 2.5, // int() 違反
+        counter: "heuristic",
+        byTier: { full: 0, digest: 0, index: 0 },
+        indexChars: 0,
+      },
+    });
+    const zodIssues = RecallResultSchema.safeParse(draft).error?.issues ?? [];
+    // 前提: zod が2箇所以上を報告している（1箇所では「全て並べる」を縛れない）。
+    expect(zodIssues.length).toBeGreaterThanOrEqual(2);
+
+    const report = validateRecallOutput(draft, "report", "rcl-1");
+
+    expect(report?.issues.map(({ path, code }) => ({ path, code }))).toEqual(
+      zodIssues.map((issue) => ({ path: issue.path.join("."), code: issue.code })),
+    );
+    expect(report?.issues.map((issue) => issue.path)).toEqual(
+      expect.arrayContaining(["recallId", "usage.estimatedTokens"]),
+    );
   });
 
   it('"report" は正しい draft に対して { ok: true, issues: [] } を返す', () => {
