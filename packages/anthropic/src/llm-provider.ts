@@ -132,6 +132,7 @@ export class AnthropicLLMProvider implements LLMProvider {
   constructor(options: AnthropicLLMProviderOptions) {
     if (options.maxTokens !== undefined) {
       assertPositiveSafeInteger("AnthropicLLMProvider", "maxTokens", options.maxTokens);
+      if (options.maxTokens > 21333) throw new RangeError("AnthropicLLMProvider: maxTokens must be <= 21333");
     }
     if (options.client !== undefined) {
       this.client = options.client;
