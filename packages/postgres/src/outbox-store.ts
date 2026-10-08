@@ -114,7 +114,7 @@ export class PostgresOutboxStore implements OutboxStore {
       this.db.execute(sql`
       UPDATE outbox
       SET completed_at = ${toPgTimestamp(completedAt)}
-      WHERE tenant_id = ${ctx.tenantId} AND id = ${jobId} AND attempts = ${expectedAttempts}
+      WHERE tenant_id = ${ctx.tenantId} AND id = ${jobId} AND attempts <= ${expectedAttempts}
         AND failed_at IS NULL AND completed_at IS NULL
       RETURNING id
     `),
