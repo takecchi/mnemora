@@ -82,6 +82,35 @@ describe("名前が入らない 54000: claim key が原因と言える入力だ�
     expect(isClaimKeyIndexLimitError(overInBytes)).toBe(false);
     expect(isClaimKeyIndexLimitError(withinInBytes)).toBe(true);
   });
+
+  it("境界: tags の要素がちょうど 2704 バイトなら包み、2705 バイトなら包まない", async () => {
+    const atLimit = await translate(unnamed54000(), { tags: ["g".repeat(2704)] });
+    const overLimit = await translate(unnamed54000(), { tags: ["g".repeat(2705)] });
+
+    expect(isClaimKeyIndexLimitError(atLimit)).toBe(true);
+    expect(isClaimKeyIndexLimitError(overLimit)).toBe(false);
+  });
+
+  it("境界: tenantId と subjectId の合計がちょうど 2704 バイトなら包み、2705 バイトなら包まない", async () => {
+    const tenantBytes = Buffer.byteLength(TENANT);
+    const atLimit = await translate(unnamed54000(), { subjectId: "u".repeat(2704 - tenantBytes) });
+    const overLimit = await translate(unnamed54000(), {
+      subjectId: "u".repeat(2705 - tenantBytes),
+    });
+
+    expect(isClaimKeyIndexLimitError(atLimit)).toBe(true);
+    expect(isClaimKeyIndexLimitError(overLimit)).toBe(false);
+  });
+
+  it("文面の前後に別の文字が付いた名前の無い形の 54000 は包まず、同じ例外がそのまま出る", async () => {
+    const prefixed = Object.assign(new Error(`Failed: ${unnamed54000().message}`), {
+      code: "54000",
+    });
+    const suffixed = Object.assign(new Error(`${unnamed54000().message}!`), { code: "54000" });
+
+    expect(await translate(prefixed)).toBe(prefixed);
+    expect(await translate(suffixed)).toBe(suffixed);
+  });
 });
 
 describe("包んだ例外の cause は、pg のエラーから決まった欄だけを写す", () => {
