@@ -43,6 +43,7 @@ interface Env {
   runtime: Runtime;
   mem: MemoryStore;
   ev: EventStore;
+  ob: OutboxStore;
   rows: (ctx: Ctx) => Promise<Array<Record<string, unknown>>>;
   fresh: () => Ctx;
   /** `kind` のジョブを2本（と、consolidate・reflect には各ジョブの近傍の記憶2件ずつ）積む。extract は observation を2件作る。 */
@@ -70,6 +71,7 @@ async function scenario(env: Env): Promise<Result> {
     runtime,
     mem,
     ev,
+    ob,
     rows,
     fresh,
     seedJobs,
@@ -209,6 +211,31 @@ async function scenario(env: Env): Promise<Result> {
     out["reflect doubled: reflected memories and the seeds' status"] = [
       reflected.sort(),
       seeds.map((m) => m?.status),
+    ];
+  }
+  {
+    // limit が行数より小さいときの取り分と、リースの切れ目（ちょうど `leaseMs`・1ms 前）での取り直し
+    const ctx = fresh();
+    await seedJobs(ctx, "embed");
+    const at = Date.now() + 60_000;
+    const claimAt = async (offset: number, limit: number) =>
+      (
+        await ob.claimBatch(ctx, {
+          limit,
+          now: new Date(at + offset),
+          claimedBy: "w",
+          leaseMs: 1000,
+          kinds: ["embed"],
+        })
+      )
+        .map((j) => j.attempts)
+        .sort();
+    out["claim: limit below the row count, then the lease edge (+999ms, +1000ms)"] = [
+      await claimAt(0, 1),
+      await claimAt(999, 5),
+      await claimAt(1000, 5),
+      await claimAt(1999, 5),
+      await claimAt(2000, 5),
     ];
   }
   return out;
@@ -491,6 +518,13 @@ const EXPECTED: Result = {
     [3, 3, 3],
     ["active", "active"],
   ],
+  "claim: limit below the row count, then the lease edge (+999ms, +1000ms)": [
+    [1],
+    [1],
+    [2],
+    [2],
+    [3],
+  ],
 };
 const space = TEST_EMBEDDING_SPACE;
 
@@ -549,6 +583,7 @@ function build(base: string, stores: Stores, rows: Env["rows"]): Env {
     runtime,
     mem: stores.mem,
     ev: stores.ev,
+    ob: stores.ob,
     rows,
     fresh: () => ({ tenantId: `${base}-${(n += 1)}` }),
     seedJobs: (ctx, kind) =>
