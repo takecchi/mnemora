@@ -127,6 +127,9 @@ async function mkEnv(be: string): Promise<Env> {
 }
 
 const up = (s: string | undefined) => s!.toUpperCase();
+/** 偶数番目の文字だけを大文字にする（全部大文字・全部小文字のどちらでもない綴り）。 */
+const mix = (s: string) =>
+  [...s].map((ch, i) => (i % 2 === 0 ? ch.toUpperCase() : ch.toLowerCase())).join("");
 function canon(v: unknown): unknown {
   if (Array.isArray(v))
     return v.map(canon).sort((a, b) => (JSON.stringify(a) < JSON.stringify(b) ? -1 : 1));
@@ -155,7 +158,13 @@ function alias(env: Env, v: unknown): unknown {
   if (typeof v === "string") {
     let out = v;
     env.ids.forEach((id, i) => {
-      out = out.split(id).join(`<c${i}>`).split(up(id)).join(`<c${i}>`);
+      out = out
+        .split(id)
+        .join(`<c${i}>`)
+        .split(up(id))
+        .join(`<c${i}>`)
+        .split(mix(id))
+        .join(`<c${i}>`);
     });
     return out;
   }
@@ -183,11 +192,14 @@ function render(env: Env, v: unknown): string {
 
 async function states(env: Env): Promise<string> {
   const out: string[] = [];
+  // 対の相互参照・置き換えた側の id は、渡した綴りに依らず小文字で残る（render は綴りを潰すので、ここで生で見る）。
+  const spelled = (mark: string, ref: string | null | undefined) =>
+    ref ? (ref === ref.toLowerCase() ? mark : `${mark}NOT-LOWER`) : "";
   for (const id of env.ids) {
     const m = await env.st.memoryStore.get(ctx, id);
     out.push(
       m
-        ? `${m.status}${m.purgedAt ? "+purged" : ""}${m.contestedWithId ? "~" : ""}${m.supersededById ? ">" : ""}`
+        ? `${m.status}${m.purgedAt ? "+purged" : ""}${spelled("~", m.contestedWithId)}${spelled(">", m.supersededById)}`
         : "missing",
     );
   }
@@ -440,6 +452,21 @@ const cases: Case[] = [
     run: (e, f) =>
       e.st.memoryStore
         .aggregateScope(ctx, {}, { digestBand: { limit: 10, excludeMemoryIds: [f(0)] } })
+        .then((r: any) => ({
+          digests: (r.digests ?? r.digestBand?.digests ?? []).map((d: any) => d.memoryId),
+          eligible: r.digestEligible,
+        })),
+  },
+  {
+    // 形式の壊れた id が混ざっても、断らずに残りの id で除外する。
+    name: "m5.aggregateScope(digestBand.excludeMemoryIds, a malformed id mixed in)",
+    run: (e, f) =>
+      e.st.memoryStore
+        .aggregateScope(
+          ctx,
+          {},
+          { digestBand: { limit: 10, excludeMemoryIds: [f(0), "not-a-uuid", f(1)] } },
+        )
         .then((r: any) => ({
           digests: (r.digests ?? r.digestBand?.digests ?? []).map((d: any) => d.memoryId),
           eligible: r.digestEligible,
@@ -814,13 +841,14 @@ const cases: Case[] = [
   },
 ];
 
-async function observe(be: string, c: Case, variant: "lo" | "UP"): Promise<string> {
+async function observe(be: string, c: Case, variant: "lo" | "UP" | "MIX"): Promise<string> {
   const e = await mkEnv(be);
   (e as any).variantUP = variant === "UP";
   let res: string;
   try {
     if (c.pre) await c.pre(e);
-    const f = (i: number) => (variant === "UP" ? up(e.ids[i]!) : e.ids[i]!);
+    const f = (i: number) =>
+      variant === "UP" ? up(e.ids[i]!) : variant === "MIX" ? mix(e.ids[i]!) : e.ids[i]!;
     const v = await c.run(e, f);
     res = "ok " + render(e, v);
   } catch (err) {
@@ -845,12 +873,15 @@ describe("操作の対象の id を大文字で渡したとき、3 実装が同�
       async () => {
         const pgLo = await observe("pg", c, "lo");
         const pgUp = await observe("pg", c, "UP");
-        // 基準: Postgres は大文字を小文字と同じ記憶・同じ行として扱う。
+        const pgMix = await observe("pg", c, "MIX");
+        // 基準: Postgres は大文字・大文字小文字の混ざった綴りを、小文字と同じ記憶・同じ行として扱う。
         expect(pgUp).toBe(pgLo);
+        expect(pgMix).toBe(pgLo);
         for (const be of ["testkit", "fake"]) {
           if (be === "fake" && SKIP_FAKE.has(c.name)) continue;
           expect(await observe(be, c, "lo")).toBe(pgLo);
           expect(await observe(be, c, "UP")).toBe(pgUp);
+          expect(await observe(be, c, "MIX")).toBe(pgMix);
         }
       },
       120_000,

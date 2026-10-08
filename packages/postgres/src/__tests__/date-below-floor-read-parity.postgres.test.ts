@@ -42,6 +42,7 @@ import {
  * 下限に寄せてからいつもどおり比べる。3実装に同じデータ・同じ入力を流し、(1) 3者が一致すること、(2) 答えが「全件」か「0件」か
  * （`since` 系は全件、`until` 系は0件）という意味どおりであることを縛る。Fake は検査をせず意味どおりに答える（参照実装）。
  * この歯のデータは下限に行を置かない（下限ちょうどに行がある場合の食い違いは既知の限界）。
+ * 下限から遠い日時の境界（validUntil == validAt・実効時刻 == 境界・from == until）も、下限に行を置かずに縛る。
  */
 
 const FLOOR_MS = Date.UTC(-4713, 10, 24);
@@ -822,6 +823,125 @@ describe("下限より後の日時は寄せない（下限の直後の行を、�
       expect(answers).toEqual({ postgres: expected, "in-memory": expected, fake: expected });
     });
   }
+});
+
+describe("下限から遠い日時の境界（下限ちょうどに行を置かずに、比較の向きと実効時刻を縛る）", () => {
+  const V = new Date("2026-06-01T00:00:00.000Z");
+  const B = new Date("2022-05-05T00:00:00.000Z");
+
+  /** validUntil が validAt の1ms 前・ちょうど・1ms 後の行と、occurredAt が B より前・ちょうど B・無い行（recordedAt は 2026-01-01）。 */
+  async function seedEdges(kit: Kit): Promise<Seeded> {
+    const ctx = nextCtx();
+    const idToName = new Map<string, string>();
+    const make = async (
+      name: string,
+      over: Parameters<typeof buildNewMemoryFixture>[0],
+    ): Promise<void> => {
+      const m = await kit.mem.createMemory(
+        ctx,
+        buildNewMemoryFixture({
+          tenantId: ctx.tenantId,
+          content: `${name} hello`,
+          contentHash: `h-${name}`,
+          claimKey: { subject: "s", predicate: "p" },
+          embeddingStatus: "ready",
+          halfLifeHours: 1e6,
+          decayFloorAt: new Date("2100-01-01T00:00:00.000Z"),
+          ...over,
+        }),
+      );
+      idToName.set(m.id, name);
+      await kit.vec.upsert(ctx, TEST_EMBEDDING_SPACE, m.id, [1, 0, 0]);
+    };
+    await make("until-before", { validUntil: new Date(V.getTime() - 1) });
+    await make("until-exact", { validUntil: V });
+    await make("until-after", { validUntil: new Date(V.getTime() + 1) });
+    await make("occ-before", { occurredAt: new Date(B.getTime() - 365 * 86_400_000) });
+    await make("occ-exact", { occurredAt: B });
+    await make("occ-none", {});
+    return { ctx, idToName };
+  }
+
+  const VALID_AT_V = ["occ-before", "occ-exact", "occ-none", "until-after"];
+  const AFTER_B = ["occ-exact", "occ-none", "until-after", "until-before", "until-exact"];
+  const BEFORE_B = ["occ-before", "occ-exact"];
+
+  const edgeCases: Array<[string, object, string[]]> = [
+    ["validAt が validUntil ちょうど（終了は含まない）", { validAt: V }, VALID_AT_V],
+    [
+      "occurredAfter が実効時刻ちょうど（含む。occurredAt が無い行は recordedAt）",
+      { occurredAfter: B },
+      AFTER_B,
+    ],
+    ["occurredBefore が実効時刻ちょうど（含む）", { occurredBefore: B }, BEFORE_B],
+  ];
+
+  for (const [label, extra, expected] of edgeCases) {
+    it(`${label}: VectorStore・LexicalStore・aggregateScope は3実装で同じ`, async () => {
+      const answers: Record<string, unknown> = {};
+      for (const kit of await kits()) {
+        const s = await seedEdges(kit);
+        answers[kit.name] = {
+          vec: await vecSearch(kit, s, extra),
+          vecMany: await vecSearchMany(kit, s, extra),
+          lex: await lexSearch(kit.lex, s, extra),
+          trigram: await lexSearch(kit.trigram ?? kit.lex, s, extra),
+          total: (await kit.mem.aggregateScope(s.ctx, extra as never)).totalInScope,
+        };
+      }
+      const want = {
+        vec: expected,
+        vecMany: expected,
+        lex: expected,
+        trigram: expected,
+        total: expected.length,
+      };
+      expect(answers).toEqual({ postgres: want, "in-memory": want, fake: want });
+    });
+  }
+
+  it("aggregateScope の読み戻し（validAt が validUntil ちょうど）", async () => {
+    const answers: Record<string, unknown> = {};
+    for (const kit of await kits()) {
+      const s = await seedEdges(kit);
+      answers[kit.name] = await kit.mem.aggregateScope(s.ctx, { validAt: V } as never);
+    }
+    // 3実装とも、終了が validAt ちょうど・1ms 前の2行を filteredExpired に数える。
+    const pick = (a: unknown) => {
+      const r = a as {
+        totalInScope: number;
+        filteredExpired: { count: number };
+        filteredNotYetValid: { count: number };
+      };
+      return [r.totalInScope, r.filteredExpired.count, r.filteredNotYetValid.count];
+    };
+    expect(Object.fromEntries(Object.entries(answers).map(([k, v]) => [k, pick(v)]))).toEqual({
+      postgres: [4, 2, 0],
+      "in-memory": [4, 2, 0],
+      fake: [4, 2, 0],
+    });
+  });
+
+  it("findActiveByClaimKey は from == until の区間を空として扱い、何も返さない（from < until なら重なる行を返す）", async () => {
+    const answers: Record<string, unknown> = {};
+    for (const kit of await kits()) {
+      const s = await seedEdges(kit);
+      const find = async (from: Date, until: Date) =>
+        names(
+          s,
+          (await kit.mem.findActiveByClaimKey!(s.ctx, CLAIM(from, until))).map((m) => m.id),
+        );
+      answers[kit.name] = {
+        same: await find(V, V),
+        wider: await find(V, new Date(V.getTime() + 1)),
+      };
+    }
+    const expected = {
+      same: [],
+      wider: ["occ-before", "occ-exact", "occ-none", "until-after"],
+    };
+    expect(answers).toEqual({ postgres: expected, "in-memory": expected, fake: expected });
+  });
 });
 
 describe("purgeCompletedJobs: 下限以後の olderThan は、早い return をせず問い合わせる（Postgres）", () => {

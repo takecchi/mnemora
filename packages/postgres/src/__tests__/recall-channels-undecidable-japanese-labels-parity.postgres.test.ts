@@ -416,3 +416,32 @@ describe("labels と channels: 語彙チャンネルだけが当てる記憶も 
     expectSame(table, "omittedOnly");
   });
 });
+
+describe("labels は大文字小文字を区別する: 名前の綴りが違う記憶は、どのチャンネルの窓も占めない", () => {
+  // 窓（kPrime = 1）を埋める最有力は tags: ['X']（labels: ['x'] とは別の名前）。store が大文字小文字を無視して返すと、
+  // core の後置フィルタが落とした後に窓が空になり、tags: ['x'] の記憶が消える（store 単独の変異を捕まえる入力）。
+  // 名前は文字列の完全一致で比べる（RecallScope.labels の TSDoc「['project'] は tags: ['Project'] に当たらない」。packages/core/src/recall.ts）。
+  const SEEDS: Seed[] = [
+    { content: "alphaproject report", vector: [1, 0, 0], tags: ["X"] },
+    { content: "alphaproject report notes extra words here", vector: [0.9, 0.1, 0], tags: ["x"] },
+  ];
+  const base = {
+    text: "alphaproject report",
+    association: null,
+    limit: 1,
+    overFetchFactor: 1,
+  } as const;
+
+  it.each([["ann"], ["lexical"]] as const)(
+    "channels: ['%s']、labels: ['x']: tags: ['x'] の記憶が返り、tags: ['X'] の記憶は返らない。3実装が同じ",
+    async (channel) => {
+      const table = await runOnAll(SEEDS, { ...base, channels: [channel], labels: ["x"] });
+      for (const [name, v] of table) {
+        expect(v.shape.returned, name).toEqual([
+          `alphaproject report notes extra words here|${channel === "ann" ? "ann" : "lexical"}`,
+        ]);
+      }
+      expectSame(table);
+    },
+  );
+});
