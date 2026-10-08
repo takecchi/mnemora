@@ -93,7 +93,11 @@ describe("matchMarkdownLinkAt", () => {
 
 describe("⛔ 定義を1つに保つ —— リンクを外す正規表現を、ほかのファイルに書き戻さない", () => {
   it("3つの呼び手のファイルに、リンクを外す形の正規表現が無い", () => {
-    for (const file of ["adr-citation-lib.mjs", "agents-md-quote-attribution-lib.mjs"]) {
+    for (const file of [
+      "adr-citation-lib.mjs",
+      "agents-md-quote-attribution-lib.mjs",
+      "doc-reference-lib.mjs",
+    ]) {
       const text = readFileSync(path.join(SCRIPTS, file), "utf8");
       expect(text.includes(String.raw`\[([^\]`), file).toBe(false);
     }
