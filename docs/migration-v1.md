@@ -2939,7 +2939,23 @@ WHERE provenance->>'kind' IS NULL;
 
 **DB マイグレーション**: 要らない。
 
-### 75. conformance suite に約束が増えた——vector・lexical・relation の綴り違いのテナント、`filter.subjectId` の大文字小文字（`@mnemora/testkit`）
+### 75. conformance suite に約束が増えた——`MemoryStore` の綴り違いのテナントの分離（`@mnemora/testkit`）
+
+[Issue #1935](https://github.com/takecchi/mnemora/issues/1935) の続き。項目73で `OutboxStore`・`EventStore`・`TenantSettingsStore` に足した約束（大文字小文字だけが違う `tenantId` は別のテナント）を、`MemoryStore` にも広げた。ADR 0546 の作法（足した約束は 🔴 に数える）に揃えた（クローンの判断で、オーナーの判断ではない）。
+
+**何が変わったか**: 中身は [CHANGELOG.md](../CHANGELOG.md) の `[1.4.0]` 節 `### Breaking` の「conformance suite に約束を足した——`MemoryStore` も、大文字小文字だけが違う `tenantId`…」の箇条を見ること。**ここには複製しない。**型・シグネチャは変わらない。
+
+**なぜ破壊的と数えるか**: 自前の adapter が、増えた `it` の約束を守っていなければ、新しく落ちる（足した約束は外せない）。
+
+**誰が影響を受けるか**: 自前の `MemoryStore` を書き、`@mnemora/testkit` の conformance suite に当てている人のうち、テナントの列を大文字小文字無視で比べている人（`lower(tenant_id) = lower($1)`、大文字小文字を区別しない照合順序の列〔MySQL の `_ci` など〕、`citext` の列）。`get`・`getMany`・`getObservation`・`updateStatus`・`aggregateScope` の分はフラグ無しで走る。`listLabels` の分は `supportsLabels: true`、`eraseTenant` の分は `supportsEraseTenant: true` を渡している人だけ。`@mnemora/postgres` と `@mnemora/testkit` の fixture は緑。
+
+**どう直すか**: `tenantId` は不透明な文字列として、そのままの値で比べる（項目73と同じ）。
+
+**確かめたこと**: `@mnemora/postgres` と fixture で緑。足した `it` は、それぞれの口のテナントの比較を大文字小文字無視にする変異（InMemory と Postgres の両方）で赤になった（Issue #1935）。**確かめていないこと**: 外部の adapter が実際に赤くなるか。
+
+**DB マイグレーション**: 要らない。
+
+### 76. conformance suite に約束が増えた——vector・lexical・relation の綴り違いのテナント、`filter.subjectId` の大文字小文字（`@mnemora/testkit`）
 
 [Issue #1940](https://github.com/takecchi/mnemora/issues/1940)。`Ctx` の TSDoc に既に書いてある約束（識別子は正規化せず、完全一致で比べる）を suite に足した。ADR 0546 の作法（足した約束は 🔴 に数える）に揃えた（クローンの判断で、オーナーの判断ではない）。
 

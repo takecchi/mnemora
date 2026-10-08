@@ -31,6 +31,22 @@ describe("findMalformedIdentifierPart", () => {
       reason: "lone_surrogate",
       index: 0,
     });
+    // 下位サロゲートが2つ続いても対にはならない（先頭の下位を上位と読み違えない）。
+    expect(findMalformedIdentifierPart("\uDC00\uDC00")).toEqual({
+      reason: "lone_surrogate",
+      index: 0,
+    });
+  });
+
+  it("境界: 上位サロゲートの直後が下位の範囲のすぐ外（DBFF・E000）なら、対にならず孤立", () => {
+    expect(findMalformedIdentifierPart("\uD800\uDBFF")).toEqual({
+      reason: "lone_surrogate",
+      index: 0,
+    });
+    expect(findMalformedIdentifierPart("\uD800")).toEqual({
+      reason: "lone_surrogate",
+      index: 0,
+    });
   });
 
   it("境界: 上位サロゲートの範囲 D800〜DBFF・下位の範囲 DC00〜DFFF の両端", () => {
@@ -104,6 +120,16 @@ describe("assertWellFormedFilter", () => {
     expect(error).toBeInstanceOf(MalformedIdentifierError);
     expect((error as Error).message).not.toContain(secret);
     expect(JSON.stringify(error)).not.toContain(secret);
+  });
+
+  it("例外の message には、欄の名前と位置が載り、理由（NUL か孤立サロゲートか）で文面が分かれる", () => {
+    const nul = thrownBy(() => assertWellFormedFilter({ tenantId: "abc\u0000" }, "opts.filter"));
+    const lone = thrownBy(() => assertWellFormedFilter({ tenantId: "abc\uD800" }, "opts.filter"));
+    for (const error of [nul, lone]) {
+      expect((error as Error).message).toContain("opts.filter.tenantId");
+      expect((error as Error).message).toContain("index 3");
+    }
+    expect((nul as Error).message).not.toBe((lone as Error).message);
   });
 
   it("文字列でない値と、検索条件が無い（null・undefined・オブジェクトでない）場合は検査しない", () => {

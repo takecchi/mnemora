@@ -140,6 +140,7 @@ describe("heuristicTokenCounter の境界（ADR 0483、今の振る舞い）", (
     expect(tokens("一")).toBe(1);
     expect(tokens("一".repeat(10))).toBe(9);
     expect(tokens("퟿".repeat(10))).toBe(9);
+    expect(tokens("\ud800".repeat(10))).toBe(3);
     expect(tokens("a".repeat(10))).toBe(3);
   });
 
@@ -150,5 +151,90 @@ describe("heuristicTokenCounter の境界（ADR 0483、今の振る舞い）", (
   it("ごく長い文字列も整数で数える（整数比なので丸め差が出ない）", () => {
     expect(tokens("a".repeat(1_000_000))).toBe(250_000);
     expect(Number.isInteger(tokens("あ".repeat(1_000_001)))).toBe(true);
+  });
+});
+
+describe("heuristicTokenCounter の CJK 範囲表の端", () => {
+  // 1文字を10回並べると、CJK なら ceil(10*18/20) = 9、非CJK なら ceil(10*5/20) = 3。端が1つ動けばこの差で赤くなる。
+  const tokensOfTen = (codePoint: string) =>
+    heuristicTokenCounter.count(String.fromCodePoint(Number.parseInt(codePoint, 16)).repeat(10))
+      .tokens;
+
+  // 範囲表の19区間の始点と終点。表の値を変えるなら、ここも同じ変更で直すことになる。
+  const cjkEdges = [
+    { cp: "1100", block: "ハングル字母の始点" },
+    { cp: "11FF", block: "ハングル字母の終点" },
+    { cp: "2E80", block: "CJK部首補助の始点" },
+    { cp: "2EFF", block: "CJK部首補助の終点" },
+    { cp: "2F00", block: "康熙部首の始点" },
+    { cp: "2FDF", block: "康熙部首の終点" },
+    { cp: "3000", block: "CJK記号・句読点の始点" },
+    { cp: "303F", block: "CJK記号・句読点の終点" },
+    { cp: "3040", block: "ひらがなの始点" },
+    { cp: "309F", block: "ひらがなの終点" },
+    { cp: "30A0", block: "カタカナの始点" },
+    { cp: "30FF", block: "カタカナの終点" },
+    { cp: "3100", block: "注音の始点" },
+    { cp: "312F", block: "注音の終点" },
+    { cp: "3130", block: "ハングル互換字母の始点" },
+    { cp: "318F", block: "ハングル互換字母の終点" },
+    { cp: "31A0", block: "注音拡張の始点" },
+    { cp: "31BF", block: "注音拡張の終点" },
+    { cp: "31F0", block: "カタカナ音声拡張の始点" },
+    { cp: "31FF", block: "カタカナ音声拡張の終点" },
+    { cp: "3200", block: "囲みCJKの始点" },
+    { cp: "33FF", block: "CJK互換の終点" },
+    { cp: "3400", block: "CJK統合漢字拡張Aの始点" },
+    { cp: "4DBF", block: "CJK統合漢字拡張Aの終点" },
+    { cp: "4E00", block: "CJK統合漢字の始点" },
+    { cp: "9FFF", block: "CJK統合漢字の終点" },
+    { cp: "A960", block: "ハングル字母拡張Aの始点" },
+    { cp: "A97F", block: "ハングル字母拡張Aの終点" },
+    { cp: "AC00", block: "ハングル音節の始点" },
+    { cp: "D7FF", block: "ハングル字母拡張Bの終点" },
+    { cp: "F900", block: "CJK互換漢字の始点" },
+    { cp: "FAFF", block: "CJK互換漢字の終点" },
+    { cp: "FE30", block: "CJK互換形の始点" },
+    { cp: "FE4F", block: "CJK互換形の終点" },
+    { cp: "FF00", block: "半角・全角形の始点" },
+    { cp: "FFDF", block: "半角・全角形のうち表に入れた終点" },
+    { cp: "20000", block: "CJK統合漢字拡張Bの始点" },
+    { cp: "3FFFF", block: "第3面の終点" },
+  ];
+
+  // 区間の1つ外。隣の区間と接している端（3000〜318F の連なり、2EFF/2F00、33FF/3400）には外が無いので載せない。
+  const nonCjkJustOutside = [
+    { cp: "10FF", block: "グルジア文字" },
+    { cp: "1200", block: "エチオピア文字" },
+    { cp: "2E7F", block: "補助句読点" },
+    { cp: "2FE0", block: "康熙部首の後ろの未割当" },
+    { cp: "2FFF", block: "漢字構成記述文字" },
+    { cp: "3190", block: "漢文" },
+    { cp: "319F", block: "漢文" },
+    { cp: "31C0", block: "CJK筆画" },
+    { cp: "31EF", block: "CJK筆画" },
+    { cp: "4DC0", block: "易経六十四卦" },
+    { cp: "4DFF", block: "易経六十四卦" },
+    { cp: "A000", block: "彝文字音節" },
+    { cp: "A95F", block: "レジャン文字" },
+    { cp: "A980", block: "ジャワ文字" },
+    { cp: "ABFF", block: "メイテイ文字" },
+    { cp: "D800", block: "上位サロゲート（孤立）" },
+    { cp: "F8FF", block: "私用領域" },
+    { cp: "FB00", block: "アルファベット表示形" },
+    { cp: "FE2F", block: "結合半記号" },
+    { cp: "FE50", block: "小字形" },
+    { cp: "FEFF", block: "アラビア表示形B" },
+    { cp: "FFE0", block: "半角・全角形のうち表に入れていない後半" },
+    { cp: "1FFFF", block: "第1面の末尾" },
+    { cp: "40000", block: "第4面の先頭" },
+  ];
+
+  it.each(cjkEdges)("U+$cp（$block）は CJK として数える", ({ cp }) => {
+    expect(tokensOfTen(cp)).toBe(9);
+  });
+
+  it.each(nonCjkJustOutside)("U+$cp（$block）は区間の1つ外なので非CJK として数える", ({ cp }) => {
+    expect(tokensOfTen(cp)).toBe(3);
   });
 });

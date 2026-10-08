@@ -56,6 +56,8 @@ describe("claim key の検出: 正規化は NFC + trim だけで、両側に同�
     ["大文字小文字だけが違う", "Address is Tokyo", "address is tokyo"],
     ["全角と半角だけが違う", "Tokyo 1", "Ｔｏｋｙｏ １"],
     ["文中の空白の数だけが違う", "address  is tokyo", "address is tokyo"],
+    ["文中のゼロ幅空白（U+200B）だけが違う", "住所は東京", "住所は\u200b東京"],
+    ["末尾のゼロ幅空白（U+200B）だけが違う", "住所は東京", "住所は東京\u200b"],
   ])("%s文は、同じ文として扱わず contested になる", async (_label, first, second) => {
     const [, b] = await observeAll([first, second]);
     expect(b!.contestedDetection).toEqual([

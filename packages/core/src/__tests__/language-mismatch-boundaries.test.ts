@@ -64,3 +64,47 @@ describe("条件6 の LOWERCASE_WORD: 直引用符の語の扱い", () => {
     ).not.toBeNull();
   });
 });
+
+describe("条件1b: 観測の（かな・漢字 + ラテン文字）のうち、かな・漢字は 0.3 から", () => {
+  // かな・漢字は 6 字（東京駅で会議）。ラテン文字が 14 字なら 6/20 = 0.3、15 字なら 6/21 ≒ 0.29。
+  it("0.3 ちょうどなら印が付き、それを割れば付かない", () => {
+    expect(detectLanguageMismatch("東京駅で会議 meetings at noon", EN_CONTENT)).not.toBeNull();
+    expect(detectLanguageMismatch("東京駅で会議 meetings at noons", EN_CONTENT)).toBeNull();
+  });
+});
+
+describe("条件4: URL は数える前に除く", () => {
+  // URL の外のラテン文字は 10 字（see・the・docs）。URL を数えれば 20 字を超え、小文字の語も 3 語ある。
+  it("URL を除くと 20 字に届かない本文は陰性（http も HTTPS も大文字小文字によらず除く）", () => {
+    expect(
+      detectLanguageMismatch(JA_OBSERVATION, "see the docs https://example.com/getting-started"),
+    ).toBeNull();
+    expect(
+      detectLanguageMismatch(JA_OBSERVATION, "see the docs HTTPS://example.com/getting-started"),
+    ).toBeNull();
+    expect(
+      detectLanguageMismatch(JA_OBSERVATION, "see the docs Http://example.com/getting-started"),
+    ).toBeNull();
+  });
+
+  it("対照: 同じ文字を URL にしなければ印が付く", () => {
+    expect(
+      detectLanguageMismatch(JA_OBSERVATION, "see the docs example com getting started"),
+    ).not.toBeNull();
+  });
+});
+
+describe("条件6 の LOWERCASE_WORD: 語末の記号", () => {
+  // 小文字の語はどれも語末に記号が付いている。記号付きの語を数えなければ 0 語になる。
+  it("語末の , . は1語に数える（visited・enjoyed・loved の 3 語で印が付く）", () => {
+    expect(
+      detectLanguageMismatch(JA_OBSERVATION, "Tokyo Disneyland Resort: visited, enjoyed, loved."),
+    ).not.toBeNull();
+  });
+
+  it("語末の ! ? ; : も1語に数える", () => {
+    expect(
+      detectLanguageMismatch(JA_OBSERVATION, "Tokyo Disneyland Resort loved! really? yes; wow:"),
+    ).not.toBeNull();
+  });
+});

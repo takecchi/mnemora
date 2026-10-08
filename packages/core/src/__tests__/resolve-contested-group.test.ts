@@ -1,6 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { Ctx } from "../ctx.js";
 import type { LLMProvider } from "../interfaces/llm-provider.js";
+import { MemoryStatusConflictError } from "../interfaces/memory-store.js";
 import { defaultDecayStrategy } from "../strategies/decay.js";
 import type { NewMemory } from "../memory.js";
 import { createRuntime } from "../runtime.js";
@@ -261,6 +262,111 @@ describe("runtime.resolveContestedGroup — memberIds の検査（呼び手の�
     await expect(
       runtime.resolveContestedGroup!(ctx, [a.id, b.id], { kind: "both_active" }),
     ).rejects.toThrow(RangeError);
+  });
+
+  it("同じ id を重ねて渡すと、書き込み前に RangeError で、群は contested のまま", async () => {
+    const { runtime, stores } = buildRuntime();
+    const { a, b, c } = await createContestedTrio(stores);
+    await runtime.markContestedGroup!(ctx, [a.id, b.id, c.id]);
+    const port = vi.spyOn(stores.memoryStore, "resolveContestedGroup");
+
+    await expect(
+      runtime.resolveContestedGroup!(ctx, [a.id, b.id, c.id, a.id], { kind: "both_active" }),
+    ).rejects.toThrow("Runtime.resolveContestedGroup: memberIds must be unique");
+
+    expect(port).not.toHaveBeenCalled();
+    for (const id of [a.id, b.id, c.id]) {
+      expect((await stores.memoryStore.get(ctx, id))?.status).toBe("contested");
+    }
+  });
+});
+
+// relationStore を配線しないのは、missingMembers の側で先に弾かれず、各メンバーの分類だけで決まる形にするため。
+describe("runtime.resolveContestedGroup — 1件でも contested でないメンバーが居れば、書き込まず ineligible", () => {
+  it("forget で群を離れたメンバーを含めると、そのメンバーは status_not_contested で、store の解決口は呼ばれない", async () => {
+    const { runtime, stores } = buildRuntime({ withRelationStore: false });
+    const { a, b, c } = await createContestedTrio(stores);
+    await runtime.markContestedGroup!(ctx, [a.id, b.id, c.id]);
+    await runtime.forget(ctx, { memoryIds: [c.id] });
+    const port = vi.spyOn(stores.memoryStore, "resolveContestedGroup");
+
+    const result = await runtime.resolveContestedGroup!(ctx, [a.id, b.id, c.id], {
+      kind: "both_active",
+    });
+
+    expect(result).toEqual({
+      supported: true,
+      outcome: {
+        kind: "ineligible",
+        sides: [
+          { memoryId: a.id, kind: "eligible" },
+          { memoryId: b.id, kind: "eligible" },
+          { memoryId: c.id, kind: "status_not_contested", status: "forgotten" },
+        ],
+        missingMembers: [],
+      },
+    });
+    expect(port).not.toHaveBeenCalled();
+    expect((await stores.memoryStore.get(ctx, a.id))?.status).toBe("contested");
+    expect((await stores.memoryStore.get(ctx, b.id))?.status).toBe("contested");
+  });
+
+  it("見つからない id を含めると、その id は not_found で、store の解決口は呼ばれない", async () => {
+    const { runtime, stores } = buildRuntime({ withRelationStore: false });
+    const { a, b, c } = await createContestedTrio(stores);
+    await runtime.markContestedGroup!(ctx, [a.id, b.id, c.id]);
+    const port = vi.spyOn(stores.memoryStore, "resolveContestedGroup");
+
+    const result = await runtime.resolveContestedGroup!(ctx, [a.id, b.id, "no-such-memory"], {
+      kind: "both_active",
+    });
+
+    expect(result).toEqual({
+      supported: true,
+      outcome: {
+        kind: "ineligible",
+        sides: [
+          { memoryId: a.id, kind: "eligible" },
+          { memoryId: b.id, kind: "eligible" },
+          { memoryId: "no-such-memory", kind: "not_found" },
+        ],
+        missingMembers: [],
+      },
+    });
+    expect(port).not.toHaveBeenCalled();
+  });
+});
+
+describe("runtime.resolveContestedGroup — 書き込みが競合したら、1回だけ読み直して conflict を返し、再試行しない", () => {
+  it("読んだ後に1件が forget されると、conflicts には読み直した今の status が並び、store の解決口は1回しか呼ばれない", async () => {
+    const { runtime, stores } = buildRuntime();
+    const { a, b, c } = await createContestedTrio(stores);
+    await runtime.markContestedGroup!(ctx, [a.id, b.id, c.id]);
+    const port = vi
+      .spyOn(stores.memoryStore, "resolveContestedGroup")
+      .mockImplementationOnce(async () => {
+        await runtime.forget(ctx, { memoryIds: [b.id] });
+        throw new MemoryStatusConflictError(b.id, "contested", "forgotten");
+      });
+
+    const result = await runtime.resolveContestedGroup!(ctx, [a.id, b.id, c.id], {
+      kind: "both_active",
+    });
+
+    expect(result).toEqual({
+      supported: true,
+      outcome: {
+        kind: "conflict",
+        conflicts: [
+          { id: a.id, observedStatus: "contested" },
+          { id: b.id, observedStatus: "forgotten" },
+          { id: c.id, observedStatus: "contested" },
+        ],
+      },
+    });
+    expect(port).toHaveBeenCalledTimes(1);
+    expect((await stores.memoryStore.get(ctx, a.id))?.status).toBe("contested");
+    expect((await stores.memoryStore.get(ctx, c.id))?.status).toBe("contested");
   });
 });
 

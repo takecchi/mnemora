@@ -331,6 +331,33 @@ function boundaryProbes(meta: MemoryMeta[]): Probe[] {
       vector: m.vector,
     });
   }
+  // 端の1ms外。記憶の実効時刻のちょうど1ms 先を `occurredAfter` に、1ms 手前を `occurredBefore` に置く。その記憶は外れるのが正しい
+  // （境界は包含だが、1ms 外は含まない）。端を1ms 広げた実装（ann の vector・lexical・`aggregateScope`）は、その記憶を通してしまう。
+  // 段1で取りすぎた記憶は core が後段で絞り直すので、ここでも席を1つにし、締め出されるべき記憶そのものを最上位にする問いで引く
+  // （ann はその記憶のベクトル、lexical はその記憶の本文の通し番号 `mem <i>`）。漏れた1件が席を取る。
+  // 乱数を引く順を変えないよう、末尾に足す。
+  for (const m of meta.filter((x) => x.validFrom === null && x.validUntil === null).slice(0, 3)) {
+    for (const outside of [
+      { occurredAfter: new Date(m.effectiveTime + 1) },
+      { occurredBefore: new Date(m.effectiveTime - 1) },
+    ]) {
+      probes.push({
+        ctx: { tenantId: TENANT },
+        query: { ...narrow, ...outside, channels: ["ann"] } as RecallQuery,
+        vector: m.vector,
+      });
+      probes.push({
+        ctx: { tenantId: TENANT },
+        query: {
+          ...narrow,
+          ...outside,
+          text: `mem ${meta.indexOf(m)}`,
+          channels: ["lexical"],
+        } as RecallQuery,
+        vector: [1, 0, 0],
+      });
+    }
+  }
   return probes;
 }
 
@@ -378,6 +405,19 @@ describe("recall の絞り込みの組み合わせ: testkit と Postgres が同�
               violatedFilters(probe, meta),
               `${name} ${where} m${run.ids.indexOf(m.memoryId)}`,
             ).toEqual([]);
+          }
+          // 2b. 端の1ms外の語彙の問い（席は1つ）。条件に合う記憶が在るなら、席はその記憶が取る。store が端の外の記憶を通すと、
+          // その記憶が席を取り、core が後段で落として0件になる（語彙チャンネルは `lexical_truncated` で上の 1. が比べないので、ここで見る）。
+          // ann は、席を取る次点の記憶の類似度が閾値を下回って0件になりうる（3つの脚とも同じ）ので、0件かどうかでは見ない。
+          const q = probe.query as { limit?: number; overFetchFactor?: number };
+          const outsideProbe =
+            q.limit === 1 &&
+            q.overFetchFactor === 1 &&
+            probe.query.channels?.length === 1 &&
+            probe.query.channels[0] === "lexical" &&
+            (probe.query.occurredAfter !== undefined || probe.query.occurredBefore !== undefined);
+          if (outsideProbe && run.meta.some((m) => violatedFilters(probe, m).length === 0)) {
+            expect(result.memories.length, `${name} ${where}: 条件に合う記憶が在るのに0件`).toBe(1);
           }
           // 3. 黙って0件にしない
           if (result.memories.length === 0) {

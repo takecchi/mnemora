@@ -12,7 +12,7 @@ import {
   resetTestDatabase,
 } from "./test-db.js";
 
-/** 断る入力は、InMemory・Fake の歯が同じ入力で断ることを確かめているもの。断る側の例外の文面は Postgres のものであり、揃えていない。ここでは「断る」ことだけを見る。 */
+/** 断る入力は、InMemory・Fake の歯が同じ入力で断ることを確かめているもの。断る側の例外の文面は Postgres のものであり、揃えていない。断る入力では、「断る」ことだけを見る。 */
 
 const ctx: Ctx = { tenantId: "input-checks-0493" };
 const bad = new Date("invalid");
@@ -32,7 +32,7 @@ async function stores() {
   };
 }
 
-describe("Postgres が断る入力（InMemory・Fake が揃えた側の根拠）", () => {
+describe("InMemory・Fake が揃えた入力への Postgres の振る舞い（断る・limit 0・float4 の丸め）", () => {
   it("D1: createMemory の decayFloorAt・lastReinforcedAt が Invalid Date", async () => {
     const { memory } = await stores();
     await expect(
