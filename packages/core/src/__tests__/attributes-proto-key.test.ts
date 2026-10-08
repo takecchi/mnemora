@@ -113,6 +113,8 @@ describe("陽性対照（やりすぎを弾く）: __proto__ 以外のキーは�
     "__proto",
     "proto__",
     "__PROTO__",
+    "__proto__x",
+    "x__proto__",
   ])("%s は observe で属性として残り、recall の絞り込みにも使える", async (key) => {
     const { runtime, stores } = build();
     const attrs = parse(JSON.stringify({ [key]: "x" }));
