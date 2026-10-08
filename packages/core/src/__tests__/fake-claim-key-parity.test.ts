@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { Ctx } from "../ctx.js";
 import type { StructuredRequest } from "../interfaces/llm-provider.js";
 import type { MemoryStore } from "../interfaces/memory-store.js";
@@ -12,6 +12,8 @@ interface Env {
   fresh: () => Ctx;
   /** 記憶を1件作る（`over` で `claimKey`・`subjectId`・有効期間・`contentHash` を渡す）。 */
   mk: (ctx: Ctx, tag: string, over: Partial<NewMemory>) => Promise<Memory>;
+  /** `mk` が書く入力そのもの（まとめて書くときに使う）。 */
+  input: (ctx: Ctx, tag: string, over: Partial<NewMemory>) => NewMemory;
   /** 抽出の LLM と claim key の導出の LLM が次の `observe` で返す値。 */
   setNext: (content: string, claim: { subject: string; predicate: string }) => void;
 }
@@ -21,7 +23,7 @@ type Result = Record<string, unknown>;
 /** 同じ `EXPECTED` を実 Postgres と InMemory の側も縛る。
  * store の口（`findActiveByClaimKey`・`findContestedByClaimKey`・`listActiveClaimPredicates`）と、claim key を有効にした `observe` の経路を縛る。 */
 async function scenario(env: Env): Promise<Result> {
-  const { runtime, mem, fresh, mk, setNext } = env;
+  const { runtime, mem, fresh, mk, input, setNext } = env;
   const out: Result = {};
   const D = (s: string) => new Date(s);
   const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -426,6 +428,127 @@ async function scenario(env: Env): Promise<Result> {
       : null;
   }
   out["observe: resulting status, normalized key, contested partner"] = statuses;
+
+  // ---- (3) 大文字を混ぜた id・hash・predicate、別テナントの contested、active 以外の predicate、同時刻の行 ----
+  {
+    const cx = fresh();
+    const cxOther = fresh();
+    const xids: Record<string, string> = {};
+    const KX = key("Dev", "Home_City");
+    const addX = async (name: string, c: Ctx, over: Partial<NewMemory>) => {
+      xids[name] = (
+        await mk(c, name, {
+          claimKey: KX,
+          subjectId: "S-Mix",
+          contentHash: `Hash-${name}`,
+          ...over,
+        })
+      ).id;
+    };
+    await addX("x1 active", cx, {});
+    await addX("x2 active, hash differs only by case", cx, { contentHash: "HASH-QUERY" });
+    await addX("x3 contested", cx, {});
+    await addX("x4 contested, hash differs only by case", cx, { contentHash: "HASH-QUERY" });
+    await addX("y1 other tenant contested p", cxOther, {});
+    await addX("y2 other tenant contested q", cxOther, {});
+    const markPair = (c: Ctx, a: string, b: string) =>
+      mem.markContestedPair!(
+        c,
+        { id: xids[a]!, event: event(xids[a]!) },
+        { id: xids[b]!, event: event(xids[b]!) },
+      );
+    await markPair(cx, "x3 contested", "x4 contested, hash differs only by case");
+    await markPair(cxOther, "y1 other tenant contested p", "y2 other tenant contested q");
+    const xalias = (id: string) => Object.entries(xids).find(([, v]) => v === id)?.[0] ?? "?";
+    const xnames = (ms: Memory[]) => ms.map((m) => xalias(m.id)).sort();
+    const xq: Q = {
+      subjectId: "S-Mix",
+      claimKey: KX,
+      excludeMemoryId: NONE,
+      contentHash: "hash-query",
+      validFrom: null,
+      validUntil: null,
+    };
+    const xqueries: Array<[string, Partial<Q>]> = [
+      ["mixed-case key, lower-case contentHash", {}],
+      ["excludeMemoryId in upper case (x1)", { excludeMemoryId: xids["x1 active"]!.toUpperCase() }],
+      [
+        "excludeMemoryId in upper case (x3)",
+        { excludeMemoryId: xids["x3 contested"]!.toUpperCase() },
+      ],
+      ["contentHash exactly equal to x2's and x4's", { contentHash: "HASH-QUERY" }],
+    ];
+    for (const [label, over] of xqueries) {
+      const q = { ...xq, ...over };
+      out[`mixed: active: ${label}`] = xnames(await mem.findActiveByClaimKey!(cx, q));
+      out[`mixed: contested: ${label}`] = xnames(await mem.findContestedByClaimKey!(cx, q));
+    }
+    out["mixed: contested: another tenant's pair is not seen"] = xnames(
+      await mem.findContestedByClaimKey!(cx, xq),
+    ).filter((n) => n.startsWith("y"));
+
+    // 同じ subject に、状態の違う行と、大文字小文字だけが違う predicate を置く。
+    const lq = fresh();
+    let qn = 0;
+    const addQ = async (predicate: string) => {
+      const m = await mk(lq, `q-${predicate}`, {
+        claimKey: key("user", predicate),
+        subjectId: "S-Pred",
+        contentHash: `hash-q-${(qn += 1)}`,
+      });
+      await sleep(4);
+      return m;
+    };
+    const qGamma = await addQ("Gamma");
+    await addQ("gamma");
+    const qArch = await addQ("Eps");
+    const qSup = await addQ("Zeta");
+    const qC1 = await addQ("Delta");
+    const qC2 = await addQ("Delta");
+    await mem.updateStatus(lq, qArch.id, "archived");
+    await mem.updateStatus(lq, qSup.id, "superseded", { supersededById: qGamma.id });
+    await mem.markContestedPair!(
+      lq,
+      { id: qC1.id, event: event(qC1.id) },
+      { id: qC2.id, event: event(qC2.id) },
+    );
+    out["predicates: mixed case kept apart, only active ones"] =
+      await mem.listActiveClaimPredicates!(lq, { subjectId: "S-Pred", limit: 10 });
+
+    // 同時刻に書いた行（同着）は、predicate のコードポイント順に並ぶ。
+    const lt = fresh();
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-03-01T00:00:00Z"));
+    try {
+      const tied = ["zz", "Zy", "aa"].map((p) => ({
+        input: input(lt, `tie-${p}`, {
+          claimKey: key("user", p),
+          subjectId: "S-Tie",
+          contentHash: `hash-tie-${p}`,
+        }),
+        jobKinds: [],
+      }));
+      if (mem.createMemoriesWithOutboxAndEvents) {
+        await mem.createMemoriesWithOutboxAndEvents(lt, tied, (memory) => ({
+          tenantId: lt.tenantId,
+          memoryId: memory.id,
+          kind: "created" as const,
+          actor: { type: "system" as const },
+          digestSnapshot: null,
+          sizeBeforeBytes: null,
+          meta: {},
+        }));
+      } else {
+        for (const t of tied) await mem.createMemory(lt, t.input);
+      }
+    } finally {
+      vi.useRealTimers();
+    }
+    out["predicates: rows written at the same instant, by code point"] =
+      await mem.listActiveClaimPredicates!(lt, { subjectId: "S-Tie", limit: 10 });
+    out["predicates: rows written at the same instant, limit 2"] =
+      await mem.listActiveClaimPredicates!(lt, { subjectId: "S-Tie", limit: 2 });
+  }
   return out;
 }
 
@@ -675,6 +798,32 @@ const EXPECTED: Result = {
       "r9 bob tokyo",
     ],
   },
+  "mixed: active: mixed-case key, lower-case contentHash": [
+    "x1 active",
+    "x2 active, hash differs only by case",
+  ],
+  "mixed: contested: mixed-case key, lower-case contentHash": [
+    "x3 contested",
+    "x4 contested, hash differs only by case",
+  ],
+  "mixed: active: excludeMemoryId in upper case (x1)": ["x2 active, hash differs only by case"],
+  "mixed: contested: excludeMemoryId in upper case (x1)": [
+    "x3 contested",
+    "x4 contested, hash differs only by case",
+  ],
+  "mixed: active: excludeMemoryId in upper case (x3)": [
+    "x1 active",
+    "x2 active, hash differs only by case",
+  ],
+  "mixed: contested: excludeMemoryId in upper case (x3)": [
+    "x4 contested, hash differs only by case",
+  ],
+  "mixed: active: contentHash exactly equal to x2's and x4's": ["x1 active"],
+  "mixed: contested: contentHash exactly equal to x2's and x4's": ["x3 contested"],
+  "mixed: contested: another tenant's pair is not seen": [],
+  "predicates: mixed case kept apart, only active ones": ["gamma", "Gamma"],
+  "predicates: rows written at the same instant, by code point": ["Zy", "aa", "zz"],
+  "predicates: rows written at the same instant, limit 2": ["Zy", "aa"],
 };
 
 let hashCounter = 0;
@@ -725,6 +874,7 @@ describe("claim key と矛盾の検出の読み口（Fake）", () => {
       fresh: () => ({ tenantId: `claim-key-fake-${(n += 1)}` }),
       mk: async (ctx, tag, over): Promise<Memory> =>
         stores.memoryStore.createMemory(ctx, newMemory(ctx, tag, over)),
+      input: (ctx, tag, over) => newMemory(ctx, tag, over),
       setNext: setNextImpl,
     });
     expect(out).toEqual(EXPECTED);
