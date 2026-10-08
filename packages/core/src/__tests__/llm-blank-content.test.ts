@@ -76,6 +76,22 @@ describe("extractCandidates — 空白だけの本文", () => {
     },
   );
 
+  it.each([
+    ["先頭", ["　", "歯医者の予約は月曜", "受付は9時から"]],
+    ["真ん中", ["歯医者の予約は月曜", "　", "受付は9時から"]],
+    ["末尾", ["歯医者の予約は月曜", "受付は9時から", "　"]],
+  ])("空白だけの本文が%sにあっても、全体が倒れる", async (_, contents) => {
+    const result = await extractCandidates(
+      llmReturning({
+        memories: contents.map((content) => ({ content, provenanceKind: "stated" })),
+      }),
+      ctx,
+      observation,
+    );
+    expect(result.usedWholeObservationFallback).toBe(true);
+    expect(result.candidates.map((c) => c.content)).toEqual(["来週の月曜に歯医者の予約がある"]);
+  });
+
   it("前後に空白があっても中身のある本文は、そのまま受ける（trim しない）", async () => {
     const result = await extractCandidates(
       llmReturning({ memories: [{ content: " 歯医者の予約は月曜 ", provenanceKind: "stated" }] }),
