@@ -69,6 +69,12 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - **無条件の追加（新しく赤になりうる）**: `describeMemoryStoreConformance` に `getMany` の、`describeOutboxStoreConformance` に `complete`・`fail` の、大文字の UUID でも同じ行に当たることの `it` が増えた（`complete`・`fail` は、大文字の jobId でも同じ行の attempts で CAS すること、終端が付くことを見る）。どれも、id が UUID 形式でなければ skip する——**testkit の fixture の id は UUID 形式でないので、実際に走るのは UUID 形式の id を発行する adapter（`@mnemora/postgres` など）だけ**。
   - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目77。DB マイグレーションは無い。
 
+### Added
+
+- **`MemoryStore.purgeMemory` の TSDoc に、purge の後も残るものの約束を足した——`recalls.query`（問いの本文）は purge の約束に含めず、残る。claim key の検出が積んだ監査イベント（`memory_events.meta.note`）の `claimKey`（主語と述語）も残る**（[ADR 0698](./docs/decisions/0698-owner-decisions-purge-scope-retention-tick-limit-rule-name.md)。オーナーへのまとめ問い c9335e43 の問2・問3〈全部推奨〉）。どちらも今の振る舞いを約束にしたもので、実行時の振る舞いは変わらない。conformance suite には足していない。
+- **`Runtime.purge`・`MemoryStore.purgeMemory` の TSDoc に、purge と同時に走る `recall()` の窓は約束の外だと書いた**（同 ADR。問4）。recall の途中で forget → purge が終わると、後から記録されるその recall の目次帯に、purge 前の digest が残りうる。
+- **`TickOptions.limit` の TSDoc に、既定が 50 であることと、リースの注意（`TickOptions.leaseMs`）への参照を書いた**（同 ADR。問7）。既定値・`leaseMs`・リースを延ばす口が無いことは変わらない。
+
 ### Changed（後方互換だが挙動が変わりうるもの）
 
 - **`@mnemora/testkit` の `InMemoryMemoryStore.supersedeWithNewMemories` が、CAS に弾かれた対象のイベントを確かめなくなった**（[ADR 0689](./docs/decisions/0689-recheck-0928-followups-cas-skipped-event-and-fake-provenance.md)。[Issue #1827](https://github.com/takecchi/mnemora/issues/1827)。クローンの判断で、オーナーの判断ではない）。
