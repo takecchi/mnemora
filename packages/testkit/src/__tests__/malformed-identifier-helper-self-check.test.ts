@@ -36,6 +36,22 @@ describe("expectMalformedIdentifierRejection: 道具そのものが約束どお�
     ).rejects.toThrow();
   });
 
+  // 名指しの値と完全に等しいことを見る: 前方一致や大文字小文字無視で比べる道具だと、似た kind を返す adapter が通ってしまうため
+  it.each([
+    ["後ろに文字が続く", "malformed_identifierX"],
+    ["前の部分だけ", "malformed"],
+    ["大文字", "MALFORMED_IDENTIFIER"],
+    ["前後に空白", " malformed_identifier "],
+  ])(
+    "kind が malformed_identifier に似ているだけ（%s）なら、道具が落ちる",
+    async (_label, kind) => {
+      const nearMiss = Promise.reject({ kind, message: "壊れた識別子" });
+      await expect(
+        expectMalformedIdentifierRejection(nearMiss, `似た kind（${kind}）`, value),
+      ).rejects.toThrow();
+    },
+  );
+
   it('kind の値そのものは、文字列 "malformed_identifier" である（定数の値が変わっても、この値で縛る）', async () => {
     const literal = Promise.reject({ kind: "malformed_identifier", message: "壊れた識別子" });
     await expect(
