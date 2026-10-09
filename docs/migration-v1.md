@@ -3131,6 +3131,25 @@ Issue #1939 の「すり抜けのまとめ」。約束は `Ctx` の TSDoc（識�
 
 **DB マイグレーション**: 要らない。
 
+### 85. conformance suite に約束が増えた——大文字小文字だけが違うテナントの `getVectors`・`eraseTenant`・`unlink`（`@mnemora/testkit`）
+
+[Issue #1940](https://github.com/takecchi/mnemora/issues/1940) の残り（項目76の続き）。約束は `Ctx` の TSDoc「識別子は正規化せず、完全一致で比べる。`tenantId`…は、大文字小文字…が違えば別の値として扱う」に既にある。ADR 0546 の作法（足した約束は 🔴 に数える）に揃えた（クローンの判断で、オーナーの判断ではない）。
+
+**何が変わったか**: 中身は [CHANGELOG.md](../CHANGELOG.md) の `[1.4.0]` 節 `### Breaking` の「conformance suite に約束を足した——`VectorStore.getVectors`・`eraseTenant`、`RelationStore.unlink` が、大文字小文字だけが違う tenantId…」の箇条を見ること。**ここには複製しない。**型・シグネチャは変わらない。
+
+**なぜ破壊的と数えるか**: 自前の adapter が、増えた `it` の約束を守っていなければ、新しく落ちる（足した約束は外せない）。
+
+**誰が影響を受けるか**:
+
+- 自前の `VectorStore` で、`getVectors` を実装している人、`supportsEraseTenant` を立てている人のうち、そのメソッドがテナントの列を大文字小文字無視で比べる人（`lower(tenant_id) = lower($1)`、大文字小文字を区別しない照合順序の列〔MySQL の `_ci` など〕、`citext` の列）。
+- 自前の `RelationStore` で、`unlink` が同じようにテナントを大文字小文字無視で比べる人（こちらはフラグ無しで走る）。
+
+**どう直すか**: `tenantId` は不透明な文字列として、そのままの値で比べる。
+
+**確かめたこと**: `@mnemora/testkit` の InMemory の fixture と、`@mnemora/postgres` の `conformance.postgres.test.ts`・`trigram-lexical-store.conformance.postgres.test.ts` で緑（手元の PostgreSQL 17、UTF8・C.UTF-8、trust）。足した `it` は、InMemory の fixture と Postgres の実装のそれぞれで、`getVectors`・`eraseTenant`・`unlink` のテナントの比較を大文字小文字無視にする変異（Postgres は `lower(tenant_id) = lower(…)`）を1つずつ当てると、それぞれ狙った1本だけが赤になった。**確かめていないこと**: 外部の adapter が実際に赤くなるか。CI の scram-sha-256 認証・SQL_ASCII の脚（手元は trust・UTF8）。
+
+**DB マイグレーション**: 要らない。
+
 ## 🟡 後方互換だが挙動が変わりうるもの（v0.1.9 → v0.2.0）
 
 （⚠ 2026-09-27: この見出しは PR #1192 が「v1.0.1 → 次の版」の節を書き換えたときに一緒に消えており、下の3項目が「v1.0.2 → 次の版」の節の中に在るように読めていた。見出しを戻した。下の3項目は v0.1.9 → v0.2.0 の話である）

@@ -93,6 +93,10 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 - **conformance suite に約束を足した——`MemoryStore.createObservation`・`createObservationWithOutbox` の再送が、同じテナントの中で綴りだけが違う `externalId`（前後の空白・前方一致・大文字小文字・NFC と NFD・全角半角）の `Observation` を返さないこと**（項目83の確かめ直しの続き。InMemory の fixture に、冪等の判定で `externalId` を NFKC 正規化して比べる変異・`trim().toLowerCase()` で比べる変異を当てると、suite が緑のままだった。約束は `Ctx` の TSDoc「識別子は正規化せず、完全一致で比べる。`tenantId`・`subjectId`・`observe` の `externalId`…は、大文字小文字、Unicode の正規化形（NFC と NFD）、全角半角、前後の空白が違えば別の値として扱う」と ADR 0423 に既にある。suite の綴り違いの組はテナントの側だけで、`externalId` の側を持っていなかった）。`@mnemora/postgres` と `@mnemora/testkit` の fixture は変わっておらず、どれも緑。
   - **無条件の追加（新しく赤になりうる）**: `describeMemoryStoreConformance` に、`createObservation`・`createObservationWithOutbox` それぞれについて、同じテナントで、綴りだけが違う `externalId`（前後の空白・前方一致・大文字小文字・NFC と NFD・全角半角。正規化の組は両向き）を続けて書くと別の `Observation` になり、それぞれの綴りの再送はそれぞれの `Observation` を返すこと、の `it` が増えた。クローンの判断で、オーナーの判断ではない。
   - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目84。DB マイグレーションは無い。
+- **conformance suite に約束を足した——`VectorStore.getVectors`・`eraseTenant`、`RelationStore.unlink` が、大文字小文字だけが違う tenantId を別のテナントとして扱うこと**（Issue #1940 の残り。#1941 で `search`・`listRelated` には足したが、この3つのメソッドの綴り違いのテナントの歯は無く、InMemory の fixture と `@mnemora/postgres` の実装のそれぞれで、この3つのテナントの比較を大文字小文字無視にする変異（Postgres は `lower(tenant_id) = lower(…)`）を当てても suite が緑のままだった。約束は `Ctx` の TSDoc「識別子は正規化せず、完全一致で比べる。… 大文字小文字…が違えば別の値として扱う」に既にある）。`@mnemora/postgres` と `@mnemora/testkit` の fixture は変わっておらず、どれも緑。
+  - **フラグに応じた追加（新しく赤になりうる）**: `describeVectorStoreConformance` の `getVectors` を持つ store の枝に、綴り違いのテナントの ctx の `getVectors` がもう片方の綴りの vector を返さないこと、`supportsEraseTenant` の枝に、`eraseTenant` が大文字小文字だけが違うテナントの embedding を消さないこと、の `it` が増えた。
+  - **無条件の追加（新しく赤になりうる）**: `describeRelationStoreConformance` に、大文字小文字だけが違う tenantId の ctx からの `unlink` は、同じ組を指定してもその行を消さないこと、の `it` が増えた。クローンの判断で、オーナーの判断ではない。
+  - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目85。DB マイグレーションは無い。
 
 ### Added
 

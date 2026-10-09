@@ -197,6 +197,21 @@ export function describeRelationStoreConformance(options: RelationStoreConforman
       expect((await store.listRelated(ctxA, a1)).map((r) => r.memoryId)).toEqual([a2]);
     });
 
+    // 大文字と小文字だけが違う tenantId は別のテナント（`Ctx.tenantId` は不透明な文字列）。上の歯のテナントは綴りがまるごと違うので、テナントの比較を大文字小文字無視にした実装でも緑になる。
+    it("unlink は大文字小文字だけが違う tenantId の ctx からは、同じ組を指定してもその行を消さない", async () => {
+      const store = await createStore();
+      const upper: Ctx = { tenantId: "Tenant-Case-Unlink" };
+      const lower: Ctx = { tenantId: "tenant-case-unlink" };
+      const a1 = await prepareMemoryId(upper);
+      const a2 = await prepareMemoryId(upper);
+
+      await store.link(upper, "contradicts", a1, a2);
+      await store.unlink(lower, "contradicts", a1, a2);
+      expect((await store.listRelated(upper, a1)).map((r) => r.memoryId)).toEqual([a2]);
+      await store.unlink(upper, "contradicts", a1, a2);
+      expect(await store.listRelated(upper, a1)).toEqual([]);
+    });
+
     it("ctx のテナントに属さない記憶を from に取る link は拒まれ、行は書かれない", async () => {
       const store = await createStore();
       const ctxA: Ctx = { tenantId: "tenant-a" };
