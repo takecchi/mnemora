@@ -343,6 +343,7 @@ export interface ClaimKeyOptions {
    * 回答プロンプトの `[矛盾候補:]` まで届く。**この誤検出（語彙の吸い寄せ、別 observation どうし）は塞いでいない**。
    * 語彙ヒントの文言を変えて塞ぐ試みは、どれも訂正の取りこぼしか別の誤検出を招き、語彙ヒントに下限を置く案も、訂正を
    * 助けている場面と誤検出の場面を語彙の数で分けられず見送った（ADR 0377「効かないもの」）。
+   * 今の振る舞いは `__tests__/claim-key-known-predicates-cross-observation-contested.test.ts` が縛っている。
    *
    * ⚠ **既知の限界**: 語彙ヒントに吸い寄せられて、無関係な発話どうしが同じ predicate になり、
    * contested になることがある。その対にも `RecalledMemory.contestedWith` が付き、訂正と区別されずに
