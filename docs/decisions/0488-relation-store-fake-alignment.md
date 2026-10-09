@@ -31,6 +31,6 @@
   - 観点4で、関係が残ること、forgotten などの記憶への `link` を断らないことは、新しく断る・遡って行を消す直し（消した記憶の関係を消す migration、`link` で status を見る）に当たるので触っていない。
   - Fake は `assertWellFormedCtx` を呼ばず、`listRelatedMany?` も実装しない（任意メソッド）。Fake 全体の方針なので触っていない。
 
-- **追記（Issue #2008、2026-10-09）: 「変異 3 本」の控え `.mgr-notes/mutations-0488.txt` は、repo に無い**。クローン miku の判断で、オーナーの判断ではない（[ADR 0220](./0220-issue-comment-author-does-not-distinguish-owner-from-agent.md)）。本文は書き換えていない。
+- **追記（Issue #1963、2026-10-09）: 「変異 3 本」の控え `.mgr-notes/mutations-0488.txt` は、repo に無い**。クローン miku の判断で、オーナーの判断ではない（[ADR 0220](./0220-issue-comment-author-does-not-distinguish-owner-from-agent.md)）。本文は書き換えていない。
   - **何が分かったか**【実測。2026-10-09、main `8dad21bc`】: 上の「歯の確かめ」が指す `.mgr-notes/mutations-0488.txt` は、作業ツリーに無い。`git log --all --name-only` に `.mgr-notes` を含むパスは1件も出ず、`mutations-0488` の名前も出ない。`git log --all -S"mutations-0488"` が返すのは、この ADR を足した 5c040573（#1599）だけである。つまり、その控えは一度も commit されていない（担い手の作業場の控えで、repo には入らなかった）。
   - **読み手へ**: 変異の数と結果（kind 検査の削除は 7 件、複製の削除は 1 件、検査を常に真にするやりすぎは 18 件落ちた）は、上の「歯の確かめ」の本文に残っている。それが記録の全てである。控えのファイルで確かめ直すことはできない。確かめ直すなら、同じ変異を実装へ当てて試験を走らせること。
