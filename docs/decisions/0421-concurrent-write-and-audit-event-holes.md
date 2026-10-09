@@ -150,3 +150,9 @@ InMemory（testkit）と Postgres の両方で再現した。歯は
 - R4: 歯の実測は上。InMemory・Postgres の両方で、purge 後に記録された recall の digestBand に purge 前の digest が残る。
 - R5: 上の表。6本を5回続けて走らせ、5回とも同じ結果。歯の期待値を1か所変えると赤になる。
 - **測っていないこと**: 上の「R5 で測っていないこと」。
+
+## 追記（2026-10-09）: R4 は約束の外のままと決まった。窓は文書に書いた（[ADR 0698](./0698-owner-decisions-purge-scope-retention-tick-limit-rule-name.md)）
+
+**決めたのはオーナーである**（まとめ問い c9335e43、2026-10-08）。この追記はクローンのマネージャーが書いた。上の本文は書き換えていない。
+
+R4（purge と同時に走る recall の目次帯に purge 前の digest が残りうる窓）は、**purge の約束に含めない**に決まった。「これが覆るとしたら」の R4 の条件（法的な射程を広げる）は起きていない。窓があることを、`Runtime.purge`・`MemoryStore.purgeMemory` の doc と `docs/memory-model.md` §9 に書いた。それまで窓が書かれていたのは ADR の中だけだった。歯（`recall-purge-race.postgres.test.ts`）は変えていない。

@@ -201,3 +201,12 @@
   （recall の INSERT 1回あたり約 2.7 µs、`complete` の UPDATE 約 4 µs）。**上乗せを受け入れた理由は ADR 0412。**
 - `recalls-purge-index.test.ts` は「Sort が入る」を縛る向きだった。ADR 0412 で「索引があるとき Index Scan で
   Sort も Seq Scan も無い」向きに書き換えた。
+
+## 追記（2026-10-09）: 「オーナーに聞く事柄」の4つとも決まった（[ADR 0698](./0698-owner-decisions-purge-scope-retention-tick-limit-rule-name.md)）
+
+**決めたのはオーナーである**（まとめ問い c9335e43、2026-10-08）。この追記はクローンのマネージャーが書いた。上の本文は書き換えていない。
+
+- **1（既定の保持期間）**: **既定は持たない。**呼び出し側が `olderThan` を渡す（今の振る舞いのまま）。運用の手順を `docs/memory-model.md` §9「保持方針」に1節足した。
+- **3（`recalls.query` を purge の約束の範囲に入れるか）**: **入れない。残る。**決定5の「決めていない」は、この意味で決まった。この口が行ごと消すことは変わらない。
+- **2（`failed` の `outbox` 行の扱い）**: **消す口は作らない（今のまま。c9335e43 問6）。**決定3のとおり、`purgeCompletedJobs` は `failed_at` の付いた行を消さない。
+- **4（監査行を積むか）**: **積まない（今のまま。c9335e43 問6）。**決定6のとおり、`purgeExpiredRecalls`・`purgeCompletedJobs` は消したことを DB に残さない。

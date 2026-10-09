@@ -906,7 +906,9 @@ export interface TickOptions {
    */
   leaseMs: number;
   /**
-   * 1回の `tick` で claim する上限。省略時の値は `@mnemora/core` の内部定数（`DEFAULT_TICK_LIMIT`）。`0` なら何も claim しない。
+   * 1回の `tick` で claim する上限。省略時の値は `@mnemora/core` の内部定数（`DEFAULT_TICK_LIMIT`、既定 50）。`0` なら何も claim しない。
+   * ⚠ **`limit` 件はまとめて claim され、リースはその時点から数える。**`limit` 件を処理し終える前に `leaseMs` が切れると、後ろのジョブは
+   * 別の `tick` に取り直されて二重に処理されうる。`leaseMs` と `limit` の関係・二重に走ったときの結末・リースを延ばす口が無いことは {@link TickOptions.leaseMs}。
    * ⚠ 0 以上 2^63 未満の整数でなければ、claim する前に `RangeError`（`Runtime.tick: opts.limit must be an integer from 0 up to (not including) 2^63`。
    * 文字列・`null`・`NaN`・`±Infinity`・負数・小数を含む。`undefined` は省略と同じ。ADR 0514）。`0` は断らない。
    */
@@ -1950,6 +1952,11 @@ export interface Runtime {
    * イベントの `kind` は `"purged"`。`digestSnapshot` は上書き**前**の digest で、`content` は運ばない。`opts.reason` は `meta.reason` に入り、省略すると `meta` に `reason` キー自体を持たない。
    * `tick()`/`observe()` からは呼ばれない（`TICK_SUPPORTED_JOB_KINDS` に `purge` 相当は無く、`observe()` の入力分岐にも混ぜていない）。`status` を動かさないので、purge された Memory は常に `forgotten` のままで、
    * 一度も「スコープ内」に入らず（`docs/recall.md` §2 段0・§5）、`ScopeAggregate` の群カウントに触れない（ADR 0124）。
+   *
+   * 🔴 **purge の後も残るもの**（`recalls.query`、claim key の検出が積んだ監査イベントの claimKey など）の一覧は `MemoryStore.purgeMemory` の doc。
+   * ⚠ **purge と同時に走る `recall()` は、purge の約束の外である。**recall の途中で forget → purge が終わると、後から記録される
+   * その recall の目次帯（`recalls.index_band` の digest 帯）に、purge 前の digest が残りうる。約束が伏せるのは、purge より前に記録された recall の分だけ
+   * （[ADR 0698](../../../docs/decisions/0698-owner-decisions-purge-scope-retention-tick-limit-rule-name.md)）。
    */
   purge(ctx: Ctx, target: PurgeTarget, opts?: PurgeOptions): Promise<PurgeResult>;
   /**
