@@ -67,3 +67,8 @@
   - **引き受けた負債 #5 との関係**: 「丸める流儀が断る流儀と混在する」は残る。ただし `Infinity` はその外に出た。
   - **範囲外として残したこと**: `maxBatchSize` の `Infinity`（「分割しない」を表す有効な値。これまでどおり通す）。`retry.delayMs` の戻り値（`NaN`・負・`Infinity` を検証せず `sleep` に渡す。既定の `sleep` では約1msで発火する）と、`delayMs` に関数でない値を渡したときの扱い（構築は通り、失敗後に reject する）。
   - **測っていないこと**: 本物のモデル・実ネットワークでの挙動（注入した `createPipeline` だけで測った）。外部の利用者が `Infinity` を使っているかどうか。
+
+- **追記（Issue #1963、2026-10-09）: 「生き残った変異」の bullmq の `typeof everyMs !== "number"` は、いまは生き残らない**。クローン miku の判断で、オーナーの判断ではない（[ADR 0220](./0220-issue-comment-author-does-not-distinguish-owner-from-agent.md)）。本文は書き換えていない。
+  - **何が変わったか**: 上の「生き残った変異」は、この ADR を書いた時点の記録である。いまは `packages/bullmq/src/__tests__/tick-driver.option-passthrough.test.ts` の「⭐ ADR 0525: everyMs が %s（数でない）なら TypeError」（152 行目の `expect(() => make({ everyMs: value })).toThrow(TypeError)`）が、この検査を外すと赤になる。`Number.isFinite` が同じ入力を断る点は変わらないが、断る例外の型が `RangeError` になるので、`TypeError` を求める歯が見分ける（等価な変異ではなくなった）。
+  - **確かめ方**【実測。2026-10-09、main `8dad21bc`】: `packages/bullmq/src/tick-driver.ts` の `assertEveryMs` の `if (typeof everyMs !== "number") {` を `if (false) {` に置き換え（1件一致のときだけ書き込む）、この試験ファイルだけを走らせた。この試験は `bullmq` を `vi.mock` で差し替えており Redis は要らない。結果は 84 本中 4 本赤（文字列 `'50'`・`null`・`undefined`・`bigint`。どれも `expected error to be instance of TypeError`）。控えから戻して `cmp` でバイト一致を確かめ、戻した後は 84 本とも緑。
+  - **出所**: Issue #1963 のコメント（別の棚卸しが、この歯を読んで指摘した）。上の実測で、読んだ判定を確かめ直した。
