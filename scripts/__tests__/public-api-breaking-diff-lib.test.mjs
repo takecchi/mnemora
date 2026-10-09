@@ -233,6 +233,14 @@ describe("Markdown 組み立て", () => {
     expect(buildPackageMarkdownSection("@mnemora/core", diff)).toBeNull();
   });
 
+  it("要人判断だけがあるパッケージも、節を落とさず「要人判断」枠に出す", () => {
+    const diff = diffOf(`export type Mode = "a" | "b";\n`, `export type Mode = "a" | "b" | "c";\n`);
+    const section = buildPackageMarkdownSection("@mnemora/core", diff);
+    expect(section).toContain("### @mnemora/core");
+    expect(section).toContain("要人判断");
+    expect(section).toContain("`Mode`");
+  });
+
   it("差分があれば見出しと箇条書きを含む", () => {
     const diff = diffOf(
       `export interface Foo { a: string; }\n`,

@@ -37,7 +37,7 @@ export const EMBEDDING_FINGERPRINT_FILENAME = "embedding-fingerprint.json";
 function diffCpuInfo(a, b) {
   const aFields = a && typeof a === "object" ? a : {};
   const bFields = b && typeof b === "object" ? b : {};
-  const keys = new Set([...Object.keys(aFields), ...Object.keys(bFields)]);
+  const keys = new Set(Object.keys(aFields));
   const diffs = [];
   for (const key of keys) {
     if (aFields[key] !== bFields[key]) {

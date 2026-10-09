@@ -45,6 +45,20 @@ describe("buildFingerprintSummaryMarkdown", () => {
     expect(markdown).toContain("門ではない");
   });
 
+  it("status=ok なら、vectorCount と CPU 情報の model を含め、測った値を落とさずに出す", () => {
+    const markdown = buildFingerprintSummaryMarkdown({
+      status: "ok",
+      sha256: "abc123",
+      dimensions: 256,
+      vectorCount: 7,
+      measuredAt: "2026-09-24T00:00:00.000Z",
+      cpuInfo: { source: "/proc/cpuinfo", model: "85", "model name": "test-cpu" },
+    });
+    expect(markdown).toContain("- vectorCount: 7");
+    expect(markdown).toContain("  - model: 85");
+    expect(markdown).toContain("  - model name: test-cpu");
+  });
+
   it("status=weights_unavailable なら sha256 を出さず、理由を出す", () => {
     const markdown = buildFingerprintSummaryMarkdown({
       status: "weights_unavailable",
