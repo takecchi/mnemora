@@ -1148,14 +1148,16 @@ export interface MemoryStore {
    * 🔴 **任意メソッドである。**理由は {@link MemoryStore.purgeExpiredEvents} と同じ。
    *
    * 契約:
-   * - **`opts.olderThan` は必須・既定の保持期間を持たない。**何日残すかは呼び出し側が決める。
+   * - **`opts.olderThan` は必須・既定の保持期間を持たない。**何日残すかは呼び出し側が決める（既定を持たないことは決まっている。
+   *   [ADR 0698](../../../../docs/decisions/0698-owner-decisions-purge-scope-retention-tick-limit-rule-name.md)。運用の手順は docs/memory-model.md §9「保持方針」）。
    * - 対象は `tenant_id = ctx.tenantId` かつ `created_at < opts.olderThan`（境界 `createdAt === olderThan` は対象外。
    *   {@link PurgeExpiredEventsOptions.olderThan} と同じ）。並びは `created_at` 昇順。
    * - **`recall_usages` は同一トランザクションで先に消える**（`recall_usages.recall_id` は `recalls(id)` への外部キーで、親だけを消せない）。
    *   ⟹ **消えた recall の使用記録も消える。**消した後にその `recallId` で {@link MemoryStore.recordUsage} を呼ぶと、
    *   `recall not found for tenant` の `Error` になる（ADR 0439）。
    * - `memory_events.meta` に `recallId` の文字列が載っていても、外部キーではないので残る。
-   * - **`recalls.query` の中身（約束の範囲）には触れていない**——行ごと消えるだけで、どこまでを消すと約束するかは決めていない（ADR 0404）。
+   * - `recalls.query` は、この口では行ごと消える。ただし purge（{@link MemoryStore.purgeMemory}）の約束には含めない——記憶を purge しても
+   *   `recalls.query` は残り、消えるのはこの口で行が消えたときだけである（ADR 0698）。
    * - `opts.limit` は必須・既定値なし（{@link PurgeExpiredEventsOptions.limit} と同じ）。対象が `limit` を超えれば `reachedLimit: true`。
    *   `limit` は **recalls の行数**であり、同時に消える `recall_usages` の行数は数えない（`result.purgedUsages` に別に返す）。
    * - `opts.dryRun === true` は1行も消さず、消していたら何が起きたかを返す。
@@ -1246,6 +1248,13 @@ export interface MemoryStore {
    * （`consolidate`/`reflect` が種の digest を `text` にして撃った recall の分を含む）、`contentHash`、元の Observation の `payload`、
    * `memory_events.digestSnapshot`（監査ログ）、`provenance.speaker`、`recall_usages`・完了した outbox の行、
    * **今の `embeddingProvider.space` 以外の embedding**（決定5）。
+   * このうち次の2つは、残ることを約束として決めた（[ADR 0698](../../../../docs/decisions/0698-owner-decisions-purge-scope-retention-tick-limit-rule-name.md)）:
+   * - `recalls.query`（問いの本文）は purge の約束に含めない。この呼び出しは書き換えない。
+   * - claim key の検出が積んだ監査イベント（`memory_events.meta.note` の JSON 文字列。その JSON の `kind` が `claim_key_conflict`・`claim_key_conflict_group`・
+   *   `claim_key_conflict_unresolved`）の `claimKey`（主語と述語）は残る。監査ログの行は書き換えない（`digestSnapshot` と同じ）。
+   *
+   * ⚠ **purge と同時に走る recall の目次帯は、約束の外である。**この呼び出しが伏せるのは、呼んだ時点で記録済みの `recalls` の目次帯だけで、
+   * recall の途中で purge が終わり、その recall の記録が後から INSERT されると、その行の目次帯には purge 前の digest が残りうる。
    *
    * 🔴 **任意メソッドである。**必須にすると第三者の adapter を壊す。この口を実装しない adapter では `Runtime.purge` が
    * `{ supported: false, outcomes: [...すべて not_attempted] }` を返す（`content`/`digest`/`purgedAt` を書く経路はこの口以外に無く、
