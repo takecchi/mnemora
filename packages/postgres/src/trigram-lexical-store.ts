@@ -481,7 +481,7 @@ export function buildTrigramLexicalSearchSelect(
   // 全体の文字数の上限は、ASCII 側・日本語側の両方に、同じ1つの切り詰め結果として効かせる。
   const totalCappedQuery = capLexicalQueryTotalChars(query);
   const asciiQuery = capLexicalQueryWords(query);
-  const conditions = [sql`tenant_id = ${opts.filter.tenantId}`];
+  const conditions = [sql`TRUE`];
   if (opts.ctxTenantId !== undefined) {
     conditions.push(sql`tenant_id = ${opts.ctxTenantId}`);
   }
