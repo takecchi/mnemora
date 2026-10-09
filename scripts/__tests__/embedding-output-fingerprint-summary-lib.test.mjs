@@ -59,6 +59,23 @@ describe("buildFingerprintSummaryMarkdown", () => {
     expect(markdown).toContain("  - model name: test-cpu");
   });
 
+  it.each(["lscpu", "/proc/cpuinfo"])(
+    "CPU 情報の取得元（source: %s）の欄は出さず、ほかの欄は出す",
+    (source) => {
+      const markdown = buildFingerprintSummaryMarkdown({
+        status: "ok",
+        sha256: "abc123",
+        dimensions: 256,
+        vectorCount: 7,
+        measuredAt: "2026-09-24T00:00:00.000Z",
+        cpuInfo: { source, "model name": "test-cpu" },
+      });
+      expect(markdown).not.toContain("source");
+      expect(markdown).not.toContain(source);
+      expect(markdown).toContain("  - model name: test-cpu");
+    },
+  );
+
   it("status=weights_unavailable なら sha256 を出さず、理由を出す", () => {
     const markdown = buildFingerprintSummaryMarkdown({
       status: "weights_unavailable",
