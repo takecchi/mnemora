@@ -76,10 +76,14 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - **無条件の追加（新しく赤になりうる）**: `describeOutboxStoreConformance` に、リースが切れた後の `now` で取り直したとき `availableAt` が切れた時刻（古い `claimedAt` + `leaseMs`）ではなく `opts.now` になること、の `it` が増えた。
   - **条件付きの追加（新しく赤になりうる）**: `supportsLabels: true` のとき、`describeMemoryStoreConformance` に、別々の呼び出しでコードポイント順の逆に作ったラベルも `listLabels` が `name` のコードポイント順で返すこと、の `it` が増えた。
   - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目79。DB マイグレーションは無い。
+- **conformance suite に約束を足した——`MemoryStore.purgeMemory` が、その記憶を目次帯に持つ recall の `query` と、claim key の衝突を記した監査イベントの `meta.note` を書き換えないこと、綴り違いのテナントで同じ `externalId` を書いたあと、後から書いた側の再送も自分の `Observation` を返すこと、`LexicalStore.search` の `filter.status` を省くと forgotten・superseded・archived の記憶も返ること**（10/09 マージ分の変異試験の確かめ直し。どれも変異試験で、これらを破る実装が suite では緑になり、`@mnemora/postgres` 専用の試験か、足りない入力のために、どの試験でも緑になると分かった。約束は `MemoryStore.purgeMemory` の TSDoc「`recalls.query` は purge の約束に含めない。この呼び出しは書き換えない」「claimKey は残る。監査ログの行は書き換えない」、`Ctx` の TSDoc「識別子は正規化せず、完全一致で比べる」、`LexicalFilter.status` の TSDoc「未指定なら絞らない」に既にあり、新しい約束ではない。ADR 0546 の作法どおり、suite に足した約束は Breaking に数える。クローンの判断で、オーナーの判断ではない）。`@mnemora/postgres`（`PostgresLexicalStore`・`PostgresTrigramLexicalStore` を含む）と `@mnemora/testkit` の fixture は変わっておらず、どれも緑。
+  - **無条件の追加（新しく赤になりうる）**: `describeMemoryStoreConformance` の既存の `createObservation` の `externalId` の冪等の `it` に、後から書いた側の再送が自分の `Observation` を返す確認が増えた（`it` の数は変わらない）。`describeLexicalStoreConformance` に、`filter.status` を省くと forgotten・superseded・archived の記憶も返ること、の `it` が増えた。
+  - **フラグに応じた追加**: `supportsPurgeMemory: true` の枝に、`purgeMemory` が recall の `query` を書き換えないこと、claim key の衝突を記したイベント（`meta.note` が `kind: "claim_key_conflict"` の JSON）の `meta.note` を書き換えないこと（`listEventsForMemory` で読み戻す）、の `it` が増えた。
+  - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目80。DB マイグレーションは無い。
 
 ### Added
 
-- **`MemoryStore.purgeMemory` の TSDoc に、purge の後も残るものの約束を足した——`recalls.query`（問いの本文）は purge の約束に含めず、残る。claim key の検出が積んだ監査イベント（`memory_events.meta.note`）の `claimKey`（主語と述語）も残る**（[ADR 0698](./docs/decisions/0698-owner-decisions-purge-scope-retention-tick-limit-rule-name.md)。オーナーへのまとめ問い c9335e43 の問2・問3〈全部推奨〉）。どちらも今の振る舞いを約束にしたもので、実行時の振る舞いは変わらない。conformance suite には足していない。
+- **`MemoryStore.purgeMemory` の TSDoc に、purge の後も残るものの約束を足した——`recalls.query`（問いの本文）は purge の約束に含めず、残る。claim key の検出が積んだ監査イベント（`memory_events.meta.note`）の `claimKey`（主語と述語）も残る**（[ADR 0698](./docs/decisions/0698-owner-decisions-purge-scope-retention-tick-limit-rule-name.md)。オーナーへのまとめ問い c9335e43 の問2・問3〈全部推奨〉）。どちらも今の振る舞いを約束にしたもので、実行時の振る舞いは変わらない。conformance suite には、この箇条の時点では足していなかった（後から足した。Breaking の「conformance suite に約束を足した——`MemoryStore.purgeMemory` が、その記憶を目次帯に持つ recall の `query` と…」の箇条）。
 - **`Runtime.purge`・`MemoryStore.purgeMemory` の TSDoc に、purge と同時に走る `recall()` の窓は約束の外だと書いた**（同 ADR。問4）。recall の途中で forget → purge が終わると、後から記録されるその recall の目次帯に、purge 前の digest が残りうる。
 - **`TickOptions.limit` の TSDoc に、既定が 50 であることと、リースの注意（`TickOptions.leaseMs`）への参照を書いた**（同 ADR。問7）。既定値・`leaseMs`・リースを延ばす口が無いことは変わらない。
 

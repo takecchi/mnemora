@@ -907,6 +907,12 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
         buildNewObservationFixture({ tenantId: UPPER_CASE_TENANT.tenantId, externalId }),
       );
       expect(resent.id).toBe(upperObservation.id);
+      // 後から書いた側の再送も、自分の Observation を返す（先に書いた側の綴りの行へは寄らない）。
+      const lowerResent = await store.createObservation(
+        LOWER_CASE_TENANT,
+        buildNewObservationFixture({ tenantId: LOWER_CASE_TENANT.tenantId, externalId }),
+      );
+      expect(lowerResent.id).toBe(lowerObservation.id);
     });
 
     it("getRecall は、大文字小文字だけが違う tenantId の recall を返さない（自分の綴りからは見える）", async () => {
@@ -8635,6 +8641,113 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
         expect(otherRecord?.indexBand.digestBand).toEqual([
           { memoryId: memory.id, digest: memory.digest },
         ]);
+      });
+
+      // `MemoryStore.purgeMemory` の TSDoc: `recalls.query` は purge の約束に含めない。この呼び出しは書き換えない。
+      // 目次帯の digest だけを墓石へ書き換える実装が、同じ行の `query` まで伏せると、この歯が赤になる。
+      it("purgeMemory は、その記憶を目次帯に持つ recall の query を書き換えない", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const memory = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            contentHash: "purge-memory-recall-query-kept",
+            status: "forgotten",
+            digest: "問いには関係の無い要旨",
+          }),
+        );
+        const query = { text: "purge の前から在る問い" };
+        const recallId = await store.createRecall(ctx, {
+          tenantId: "tenant-1",
+          subjectId: null,
+          query,
+          budget: null,
+          omitted: [],
+          usage: {
+            chars: 0,
+            estimatedTokens: 0,
+            counter: "heuristic" as const,
+            byTier: { full: 0, digest: 0, index: 0 },
+            indexChars: 0,
+          },
+          indexBand: {
+            groups: [],
+            totalInScope: 1,
+            countKind: "exact",
+            digestBand: [{ memoryId: memory.id, digest: memory.digest }],
+          },
+          explain: { stages: [] },
+          returnedMemories: [],
+        });
+
+        await store.purgeMemory!(
+          ctx,
+          memory.id,
+          { content: "[purged]", digest: "[purged]" },
+          {
+            tenantId: "tenant-1",
+            memoryId: memory.id,
+            kind: "purged",
+            actor: { type: "system" },
+            digestSnapshot: memory.digest,
+            meta: {},
+          },
+        );
+
+        const record = await store.getRecall(ctx, recallId);
+        expect(record?.indexBand.digestBand).toEqual([{ memoryId: memory.id, digest: "[purged]" }]);
+        expect(record?.query).toEqual(query);
+      });
+
+      // `MemoryStore.purgeMemory` の TSDoc: claimKey は残る。監査ログの行は書き換えない。
+      // claim key の衝突を記したイベントの `meta.note`（claimKey の主語・述語を含む JSON）が、purge で消えてはならない。
+      it("purgeMemory は、claim key の衝突を記した監査イベントの meta.note を書き換えない", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const claimKey = { subject: "user", predicate: "home_city" };
+        const memory = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            contentHash: "purge-memory-audit-note-kept",
+            claimKey,
+          }),
+        );
+        const note = JSON.stringify({ kind: "claim_key_conflict", claimKey });
+        await store.updateStatusWithEvent(
+          ctx,
+          memory.id,
+          "forgotten",
+          {},
+          {
+            tenantId: "tenant-1",
+            memoryId: memory.id,
+            kind: "updated",
+            actor: { type: "system" },
+            digestSnapshot: memory.digest,
+            meta: { reason: "contested", note },
+          },
+        );
+
+        await store.purgeMemory!(
+          ctx,
+          memory.id,
+          { content: "[purged]", digest: "[purged]" },
+          {
+            tenantId: "tenant-1",
+            memoryId: memory.id,
+            kind: "purged",
+            actor: { type: "system" },
+            digestSnapshot: memory.digest,
+            meta: {},
+          },
+        );
+
+        const events = await listEventsForMemory(ctx, memory.id);
+        const notes = events.filter((e) => e.kind === "updated").map((e) => e.meta["note"]);
+        expect(notes).toEqual([note]);
+        expect(JSON.parse(notes[0] as string)).toMatchObject({ claimKey });
       });
 
       // ADR 0437 決定3: 既に purge 済みの行（v1.1.0 より前に purge した行）の残骸を消す `scrubPurged`。

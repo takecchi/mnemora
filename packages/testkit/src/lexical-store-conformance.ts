@@ -365,6 +365,34 @@ export function describeLexicalStoreConformance(options: LexicalStoreConformance
       expect(ids).not.toContain(archivedId);
     });
 
+    // `LexicalFilter.status` の TSDoc: 未指定なら絞らない。active・contested 以外（forgotten・superseded・archived）も返る。
+    it("filter.status を省くと、forgotten・superseded・archived の Memory も返る", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      const ids = {
+        active: await prepareMemory(ctx, { content: "obsidian shards glimmer", status: "active" }),
+        forgotten: await prepareMemory(ctx, {
+          content: "obsidian shards glimmer",
+          status: "forgotten",
+        }),
+        superseded: await prepareMemory(ctx, {
+          content: "obsidian shards glimmer",
+          status: "superseded",
+        }),
+        archived: await prepareMemory(ctx, {
+          content: "obsidian shards glimmer",
+          status: "archived",
+        }),
+      };
+
+      const hits = await store.search(ctx, "obsidian shards", {
+        limit: 10,
+        filter: { tenantId: "tenant-1" },
+      });
+
+      expect(hits.map((hit) => hit.memoryId).sort()).toEqual(Object.values(ids).sort());
+    });
+
     // -------------------------------------------------------------------
     // filter.subjectId。
     // -------------------------------------------------------------------
