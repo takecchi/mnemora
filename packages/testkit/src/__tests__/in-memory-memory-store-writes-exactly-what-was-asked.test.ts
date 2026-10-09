@@ -79,7 +79,10 @@ describe("InMemoryMemoryStore.recordUsage: 記憶の status では挿入を断�
 describe("InMemoryMemoryStore.purgeExpiredRecalls: limit は recalls の行数で、recall_usages の行は数えない", () => {
   it("使用記録を2件持つ recall も、limit 1 で消し、使用記録の件数は purgedUsages に返す", async () => {
     const store = new InMemoryMemoryStore();
-    const oldest = await store.createRecall(ctx, recallRecord(new Date("2026-01-01T00:00:00.000Z")));
+    const oldest = await store.createRecall(
+      ctx,
+      recallRecord(new Date("2026-01-01T00:00:00.000Z")),
+    );
     const newer = await store.createRecall(ctx, recallRecord(new Date("2026-01-02T00:00:00.000Z")));
     const a = await store.createMemory(
       ctx,
