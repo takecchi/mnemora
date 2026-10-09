@@ -29,6 +29,20 @@ describe("expectMalformedIdentifierRejection: 道具そのものが約束どお�
     ).resolves.toBeUndefined();
   });
 
+  it("kind が malformed_identifier でない例外なら、message に入力値を含まなくても、道具が落ちる", async () => {
+    const otherKind = Promise.reject({ kind: "invalid_argument", message: "壊れた識別子" });
+    await expect(
+      expectMalformedIdentifierRejection(otherKind, "別の kind", value),
+    ).rejects.toThrow();
+  });
+
+  it('kind の値そのものは、文字列 "malformed_identifier" である（定数の値が変わっても、この値で縛る）', async () => {
+    const literal = Promise.reject({ kind: "malformed_identifier", message: "壊れた識別子" });
+    await expect(
+      expectMalformedIdentifierRejection(literal, "文字列の kind", value),
+    ).resolves.toBeUndefined();
+  });
+
   it("reject しなければ、道具が落ちる", async () => {
     await expect(
       expectMalformedIdentifierRejection(Promise.resolve("ok"), "通す実装", value),
