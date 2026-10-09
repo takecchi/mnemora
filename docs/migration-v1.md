@@ -3111,6 +3111,26 @@ Issue #1939 の「すり抜けのまとめ」。約束は `Ctx` の TSDoc（識�
 
 **DB マイグレーション**: 要らない。
 
+### 84. conformance suite に約束が増えた——同じテナントで綴りだけが違う `externalId` の `createObservation`・`createObservationWithOutbox` の再送（`@mnemora/testkit`）
+
+項目83の確かめ直しの続き。約束は `Ctx` の TSDoc「識別子は正規化せず、完全一致で比べる。`tenantId`・`subjectId`・`observe` の `externalId`…は、大文字小文字、Unicode の正規化形（NFC と NFD）、全角半角、前後の空白が違えば別の値として扱う」と ADR 0423 に既にある。ADR 0546 の作法（足した約束は 🔴 に数える）に揃えた（クローンの判断で、オーナーの判断ではない）。
+
+**何が変わったか**: 中身は [CHANGELOG.md](../CHANGELOG.md) の `[1.4.0]` 節 `### Breaking` の「conformance suite に約束を足した——`MemoryStore.createObservation`・`createObservationWithOutbox` の再送が、同じテナントの中で綴りだけが違う `externalId`…」の箇条を見ること。**ここには複製しない。**型・シグネチャは変わらない。
+
+**なぜ破壊的と数えるか**: 自前の adapter が、増えた `it` の約束を守っていなければ、新しく落ちる（足した約束は外せない）。
+
+**誰が影響を受けるか**:
+
+- 自前の `MemoryStore` で、`createObservation`・`createObservationWithOutbox` の `externalId` の冪等の判定・再読み（あるいは一意の制約）が、`externalId` を大文字小文字の無視・前後の空白の除去・Unicode 正規化・全角半角の同一視・前方一致で比べる人（綴りだけが違う別の `externalId` の再送に、先に書いた側の `Observation` を返してしまう）。
+
+どれもフラグ無しで走る。
+
+**どう直すか**: `externalId` を渡された値のまま、符号列の完全一致で比べる（`lower`・`trim`・`normalize`・照合順序による同一視や、`LIKE` による前方一致をしない）。
+
+**確かめたこと**: `@mnemora/testkit` の InMemory の fixture と、`@mnemora/postgres` の `conformance.postgres.test.ts` で緑（手元の PostgreSQL 17、UTF8・C.UTF-8、trust）。足した `it` は、InMemory の fixture に、冪等の判定で `externalId` を `normalize('NFKC')` で比べる変異（NFC/NFD と全角半角の組が赤）・`trim().toLowerCase()` で比べる変異（前後の空白と大文字小文字の組が赤）、Postgres の実装に、衝突したときの再読みを `lower(external_id) = lower(…)` で探す変異（大文字小文字の組が赤）を当てると、それぞれ赤になった。**確かめていないこと**: 外部の adapter が実際に赤くなるか。CI の scram-sha-256 認証・SQL_ASCII の脚（手元は trust・UTF8）。
+
+**DB マイグレーション**: 要らない。
+
 ## 🟡 後方互換だが挙動が変わりうるもの（v0.1.9 → v0.2.0）
 
 （⚠ 2026-09-27: この見出しは PR #1192 が「v1.0.1 → 次の版」の節を書き換えたときに一緒に消えており、下の3項目が「v1.0.2 → 次の版」の節の中に在るように読めていた。見出しを戻した。下の3項目は v0.1.9 → v0.2.0 の話である）
