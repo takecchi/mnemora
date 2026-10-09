@@ -3090,6 +3090,27 @@ Issue #1939 の「すり抜けのまとめ」。約束は `Ctx` の TSDoc（識�
 
 **DB マイグレーション**: 要らない。
 
+### 83. conformance suite に約束が増えた——`complete`・`fail`、綴り違いのテナントの後からの `createObservation`・`createObservationWithOutbox` の再送の、Unicode の正規化形・全角半角（`@mnemora/testkit`）
+
+項目82の確かめ直しの続き。約束は `Ctx` の TSDoc「識別子は正規化せず、完全一致で比べる。… 大文字小文字、Unicode の正規化形（NFC と NFD）、全角半角、前後の空白が違えば別の値として扱う」と ADR 0423 に既にある。ADR 0546 の作法（足した約束は 🔴 に数える）に揃えた（クローンの判断で、オーナーの判断ではない）。
+
+**何が変わったか**: 中身は [CHANGELOG.md](../CHANGELOG.md) の `[1.4.0]` 節 `### Breaking` の「conformance suite に約束を足した——`OutboxStore.complete`・`fail` が、Unicode の正規化形（NFC と NFD）だけ…」の箇条を見ること。**ここには複製しない。**型・シグネチャは変わらない。
+
+**なぜ破壊的と数えるか**: 自前の adapter が、増えた `it` の約束を守っていなければ、新しく落ちる（足した約束は外せない）。
+
+**誰が影響を受けるか**:
+
+- 自前の `OutboxStore` で、`complete`・`fail` がテナントを Unicode 正規化（NFC・NFKC など）や全角半角の同一視をしてから比べる人。
+- 自前の `MemoryStore` で、`createObservation`・`createObservationWithOutbox` の `externalId` の冪等の判定・再読みが、テナントを Unicode 正規化や全角半角の同一視をしてから探す人（先に同じ `externalId` を書いた綴り違いのテナントの行を返してしまう）。
+
+どれもフラグ無しで走る。
+
+**どう直すか**: テナントを渡された値のまま、符号列の完全一致で比べる（`normalize` や照合順序による同一視をしない）。
+
+**確かめたこと**: `@mnemora/postgres` の `conformance.postgres.test.ts` と fixture で緑。足した `it` は、Postgres の実装に、`complete` がテナントを `normalize(…, NFC)` で比べる変異・`fail` を NFKC 正規化して比べる変異（NFC/NFD の組と全角半角の組が赤）・`createObservation` の再読みを NFC 正規化して探す変異、InMemory の fixture に、`complete` を `normalize('NFC')` で比べる変異・`createObservation` の冪等の判定を `normalize('NFC')` で比べる変異を当てると、それぞれ赤になった。**確かめていないこと**: 外部の adapter が実際に赤くなるか。CI の scram-sha-256 認証・SQL_ASCII の脚（手元は trust・UTF8）。
+
+**DB マイグレーション**: 要らない。
+
 ## 🟡 後方互換だが挙動が変わりうるもの（v0.1.9 → v0.2.0）
 
 （⚠ 2026-09-27: この見出しは PR #1192 が「v1.0.1 → 次の版」の節を書き換えたときに一緒に消えており、下の3項目が「v1.0.2 → 次の版」の節の中に在るように読めていた。見出しを戻した。下の3項目は v0.1.9 → v0.2.0 の話である）
