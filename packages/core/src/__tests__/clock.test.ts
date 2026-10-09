@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { fixedClock, systemClock } from "../clock.js";
 
 describe("systemClock", () => {
@@ -8,6 +8,18 @@ describe("systemClock", () => {
     const after = Date.now();
     expect(now).toBeGreaterThanOrEqual(before);
     expect(now).toBeLessThanOrEqual(after);
+  });
+
+  it("呼ぶたびにその時点の時刻を返し、最初に呼んだ時刻で止まらない", () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
+      expect(systemClock.now().toISOString()).toBe("2026-01-01T00:00:00.000Z");
+      vi.setSystemTime(new Date("2026-01-02T03:04:05.006Z"));
+      expect(systemClock.now().toISOString()).toBe("2026-01-02T03:04:05.006Z");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
