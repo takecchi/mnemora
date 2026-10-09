@@ -105,6 +105,8 @@ describe("extractCandidates — 空白だけの本文", () => {
   it.each([
     ["1字の本文", "月"],
     ["ゼロ幅空白（U+200B）だけの本文（trim では消えない）", "​"],
+    // 判定は「trim で空になるか」だけ: 長さなど、空白かどうか以外の理由では断らない
+    ["とても長い本文（20万字）", "月".repeat(200_000)],
   ])("%s は、trim で空にならないので拒まず、そのまま受ける", async (_label, content) => {
     const result = await extractCandidates(
       llmReturning({ memories: [{ content, provenanceKind: "stated" }] }),
