@@ -221,6 +221,20 @@ describe("SeededEmbeddingProvider", () => {
     expect(provider.usage).toEqual({ seeded: 1, real: 1 });
   });
 
+  it("1回の embed に種ヒット2件・未ヒット3件を混ぜると、usage は呼び出し回数でなくテキスト件数で { seeded: 2, real: 3 }", async () => {
+    const seed = seedEmbeddingSection([
+      { text: "種A", vector: [1, 1, 1] },
+      { text: "種B", vector: [2, 2, 2] },
+    ]);
+    const delegate = new RespondingEmbeddingProvider();
+    const provider = new SeededEmbeddingProvider(delegate, { seed, expectedSpace: SPACE });
+
+    await provider.embed(ctx, ["種A", "未1", "種B", "未2", "未3"]);
+
+    expect(delegate.calls).toEqual([["未1", "未2", "未3"]]);
+    expect(provider.usage).toEqual({ seeded: 2, real: 3 });
+  });
+
   it("埋め込み空間が種と食い違えば構築時に例外", () => {
     const seed = seedEmbeddingSection([]);
     const delegate = new ThrowingEmbeddingProvider();
