@@ -1255,7 +1255,7 @@ CREATE TABLE tenant_settings (
 - **`tick()`/`observe()` には配線していない。**`purgeExpiredEventsForTenant` と同じく、運用側の cron などから、テナントごとに呼ぶ。
 - **1回で消しきれたとは限らない。**`reachedLimit: true` が返る間は、同じ `olderThan` で呼び直す。
   先に `dryRun: true` で件数（`purged`・`purgedUsages`）を見られる。
-- **消した記録は DB に残らない。**`events_purged` に当たる行は積まない（件数は戻り値だけで返る）。
+- **消した記録は DB に残らない。**`events_purged` に当たる行は積まない（件数は戻り値だけで返る）。監査行を積まないことと、`failed_at` の付いた行を消す口を作らないことも決まっている（オーナー。c9335e43 問6）。
 - 消した `recallId` に後から `recordUsage` を呼ぶと、`recall not found for tenant` の `Error` になる。
   使用の報告が遅れて届く運用なら、`olderThan` をその遅れより十分前に取る。
 - **`recalls.query`（問いの本文）は purge の約束の外で、記憶を purge しても残る**（下の「1つのテナントを消去した後に」の後の追記）。
@@ -1357,7 +1357,7 @@ purged_at timestamptz NULL   -- 非NULLなら content/digest はトゥームス�
 | claim key の検出が積んだ監査イベントの `meta.note` の `claimKey`（表の `memory_events` 行には載っていなかった。[ADR 0375](./decisions/0375-purge-scope-widened.md) の 2026-09-30 の追記「claim key の検出が積む監査イベントの `meta.note` に、claimKey の写しが残る」） | **purge の後も残ると約束する。**監査ログの行は書き換えない | `MemoryStore.purgeMemory` の doc |
 | purge と同時に走る recall の目次帯（[ADR 0421](./decisions/0421-concurrent-write-and-audit-event-holes.md) の R4） | **約束に含めない。**ただし窓があることを書く: recall の途中で forget → purge が終わると、後から記録されるその recall の `recalls.index_band` の digest 帯に、purge 前の digest が残りうる | `Runtime.purge`・`MemoryStore.purgeMemory` の doc |
 
-直前の追記の残りの2つ——**`failed` の `outbox` 行の扱いと、消すときに監査行を積むか——は、引き続き決まっていない**（ADR 0404「オーナーに聞く事柄」の2と4）。
+直前の追記の残りの2つも決まった——**`failed` の `outbox` 行を消す口と、`recalls`・`outbox` を消すときの監査行は、どちらも作らない**（今のまま。c9335e43 問6。ADR 0404「オーナーに聞く事柄」の2と4）。
 
 ---
 
