@@ -1771,8 +1771,9 @@ export interface MemoryStore {
    * - `opts.dryRun === true` のときは、削除もこの自己参照の書き換えも一切行わず、削除していたら消えていたであろう件数だけを返す。
    * - 戻り値の `deleted` は、この呼び出しで実際に削除した行数の合計（上の10表すべての合計。`dryRun` のときはプレビューの合計）。
    *
-   * ⚠ **`recalls` の保持方針は決めていない**（[ADR 0290](../../../../docs/decisions/0290-activity-seq-read-path-documented-not-implemented.md)）。
-   * この口は「テナントを丸ごと消す」操作の一部として `recalls` も消すが、生きているテナントの `recalls` を今後どう保持するかには答えていない。
+   * ⚠ **`recalls` に既定の保持期間は持たない**（[ADR 0698](../../../../docs/decisions/0698-owner-decisions-purge-scope-retention-tick-limit-rule-name.md)。運用の手順は docs/memory-model.md §9「保持方針」）。
+   * 古い `recalls` を消したい呼び出し側は、{@link MemoryStore.purgeExpiredRecalls} に `olderThan` を渡す。
+   * この口は「テナントを丸ごと消す」操作の一部として `recalls` も消すが、生きているテナントの `recalls` を消す口ではない。
    */
   eraseTenant?(ctx: Ctx, opts: EraseTenantStoreOptions): Promise<EraseTenantStoreResult>;
 }

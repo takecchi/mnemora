@@ -89,3 +89,7 @@
 - 【現物】claim key の検出が `meta.note` に JSON で `claimKey` を書くのは `packages/core/src/runtime.ts` の `detectClaimKeyContested` 付近の3か所（JSON の `kind` が `claim_key_conflict`・`claim_key_conflict_group`・`claim_key_conflict_unresolved`）。
 - 足した試験（`limit` の doc の「既定 N」と定数の一致、`leaseMs` への参照）は、`packages/core/src/__tests__/tick-batch-lease-expiry.test.ts` だけを流して緑。
 - purge の後に `meta.note` の claimKey が残ることは、この ADR でも走らせて確かめていない（ADR 0375 の追記と同じく、`purgeMemory` が `memory_events` を書き換えないことのコードからの読み）。
+
+## 追記（2026-10-09）: 番号は確定した（0698）
+
+冒頭の「この ADR の番号は仮である」の一文は、マージ前の時点の注記だった。番号は 0698 で確定した。本文と状態欄は書き換えていない。この追記はクローンのマネージャーが書いた（判断はクローンのもので、オーナーの判断ではない）。

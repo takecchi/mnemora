@@ -3025,6 +3025,28 @@ WHERE provenance->>'kind' IS NULL;
 
 **DB マイグレーション**: 要らない。
 
+### 80. conformance suite に約束が増えた——`purgeMemory` が書き換えないもの、綴り違いのテナントの `createObservation` の再送、`LexicalStore` の `filter.status` 未指定（`@mnemora/testkit`）
+
+10/09 マージ分の変異試験の確かめ直し。約束は `MemoryStore.purgeMemory` の TSDoc（`recalls.query` は書き換えない、claimKey は残る・監査ログの行は書き換えない）、`Ctx` の TSDoc、`LexicalFilter.status` の TSDoc（未指定なら絞らない）に既にある。ADR 0546 の作法（足した約束は 🔴 に数える）に揃えた（クローンの判断で、オーナーの判断ではない）。
+
+**何が変わったか**: 中身は [CHANGELOG.md](../CHANGELOG.md) の `[1.4.0]` 節 `### Breaking` の「conformance suite に約束を足した——`MemoryStore.purgeMemory` が、その記憶を目次帯に持つ recall の `query` と…」の箇条を見ること。**ここには複製しない。**型・シグネチャは変わらない。
+
+**なぜ破壊的と数えるか**: 自前の adapter が、増えた `it` の約束を守っていなければ、新しく落ちる（足した約束は外せない）。
+
+**誰が影響を受けるか**:
+
+- 自前の `MemoryStore` で `supportsPurgeMemory: true` を渡し、`purgeMemory` が目次帯を墓石へ書き換えるとき、同じ行の `query` まで伏せている人。または、purge のときにその記憶のイベントの `meta`（`note`）を消している人。
+- 自前の `MemoryStore` で、`createObservation` の `externalId` の冪等の判定が、先に書いた綴り違いのテナントの行へ寄る人（再送を、そのテナントの行ではなく、綴り違いで先に書かれた行から探す、など）。フラグ無しで走る。
+- 自前の `LexicalStore` で、`filter.status` を省いたとき、active・contested だけに絞っている人（forgotten・superseded・archived を落としている人）。フラグ無しで走る。
+
+`@mnemora/postgres`（`PostgresLexicalStore`・`PostgresTrigramLexicalStore` を含む）と `@mnemora/testkit` の fixture は緑。
+
+**どう直すか**: `purgeMemory` は `recalls.query` とイベントの `meta` に触れない（書き換えるのは目次帯の digest だけ）。`createObservation` の冪等の判定は、テナントの値ごとに、同じテナントの行だけを探す。`LexicalStore.search` は、`filter.status` を省いたとき status で絞らない。
+
+**確かめたこと**: `@mnemora/postgres` と fixture で緑。足した `it` は、purge が `query` を伏せる変異（InMemory と Postgres）、purge が `meta.note` を消す変異（InMemory と Postgres）、`createObservation` の冪等の再読みを綴り違いのテナントの行から探す変異（InMemory と Postgres）、`filter.status` 未指定のとき forgotten を落とす変異（InMemory と Postgres の lexical・trigram）、superseded を落とす変異（Postgres の lexical）で、それぞれ赤になった。**確かめていないこと**: 外部の adapter が実際に赤くなるか。`markContestedGroup` が既に在る `contradicts` の行を書き換えないこと（`ON CONFLICT DO NOTHING` 相当）は、suite の `listRelationsForMemory` フックが `memoryId` しか返さず、行の `createdAt` を観測できないので、suite には足していない（`@mnemora/postgres` 専用の試験だけが縛っている）。フックの型を広げるのは公開型の変更になるので、今回は見送った（クローンの判断で、オーナーの判断ではない）。
+
+**DB マイグレーション**: 要らない。
+
 ## 🟡 後方互換だが挙動が変わりうるもの（v0.1.9 → v0.2.0）
 
 （⚠ 2026-09-27: この見出しは PR #1192 が「v1.0.1 → 次の版」の節を書き換えたときに一緒に消えており、下の3項目が「v1.0.2 → 次の版」の節の中に在るように読めていた。見出しを戻した。下の3項目は v0.1.9 → v0.2.0 の話である）
