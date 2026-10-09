@@ -31,6 +31,7 @@ export function validateFingerprintRecord(data) {
 }
 
 /**
+ * CPU 情報の欄を1行ずつ並べる。取得元を表す `source` の欄（`lscpu` か `/proc/cpuinfo`）は出さない。
  * @param {Record<string, unknown> | undefined} cpuInfo
  * @returns {string[]}
  */
@@ -47,6 +48,7 @@ function formatCpuInfoLines(cpuInfo) {
 }
 
 /**
+ * CPU 情報は、取得元を表す `source` の欄を出さず、ほかの欄をそのまま並べる。
  * @param {Record<string, unknown>} measured
  * @returns {string}
  */
