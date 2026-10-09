@@ -101,6 +101,19 @@ describe("extractCandidates — 空白だけの本文", () => {
     expect(result.usedWholeObservationFallback).toBe(false);
     expect(result.candidates.map((c) => c.content)).toEqual([" 歯医者の予約は月曜 "]);
   });
+
+  it.each([
+    ["1字の本文", "月"],
+    ["ゼロ幅空白（U+200B）だけの本文（trim では消えない）", "​"],
+  ])("%s は、trim で空にならないので拒まず、そのまま受ける", async (_label, content) => {
+    const result = await extractCandidates(
+      llmReturning({ memories: [{ content, provenanceKind: "stated" }] }),
+      ctx,
+      observation,
+    );
+    expect(result.usedWholeObservationFallback).toBe(false);
+    expect(result.candidates.map((c) => c.content)).toEqual([content]);
+  });
 });
 
 function newMemory(content: string): NewMemory {
