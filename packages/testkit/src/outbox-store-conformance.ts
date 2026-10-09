@@ -777,6 +777,42 @@ export function describeOutboxStoreConformance(options: OutboxStoreConformanceOp
         expect(reclaimed.map((j) => j.id)).toContain(job.id);
       });
 
+      // `Ctx` の doc「識別子は正規化せず、完全一致で比べる。… 前後の空白が違えば別の値」「`LIKE` や前方一致で別の識別子が混ざることは無い」。
+      // 上の大文字小文字の組と同じく、前後の空白だけが違う組・名前が前方一致するだけの組の ctx からも、そのジョブに終端を付けない
+      // （`trim` してから比べる実装・前方一致で比べる実装は、この組を同じテナントにしてしまう）。
+      for (const [owner, other] of [
+        ["tenant-space", " tenant-space"],
+        ["tenant-space", "tenant-space "],
+        [" tenant-space ", "tenant-space"],
+        ["prefix-tenant-ab", "prefix-tenant"],
+        ["prefix-tenant", "prefix-tenant-ab"],
+      ] as const) {
+        it(`${how} は、前後の空白か前方一致だけが違う tenantId の ctx からは、同じ id と attempts を指定してもそのジョブに終端を付けない（${JSON.stringify(owner)} のジョブに ${JSON.stringify(other)} から）`, async () => {
+          const store = await createStore();
+          const job = await seedJob({ tenantId: owner }, { kind: "extract" });
+          const claimed = await store.claimBatch(
+            { tenantId: owner },
+            { limit: 10, now: new Date(), claimedBy: "worker-a", leaseMs: DEFAULT_LEASE_MS },
+          );
+          const claimedJob = claimed.find((j) => j.id === job.id)!;
+
+          await expect(
+            terminate(store, { tenantId: other }, job.id, claimedJob.attempts),
+          ).resolves.toBeUndefined();
+
+          const reclaimed = await store.claimBatch(
+            { tenantId: owner },
+            {
+              limit: 10,
+              now: new Date(Date.now() + DEFAULT_LEASE_MS + 1),
+              claimedBy: "worker-a2",
+              leaseMs: DEFAULT_LEASE_MS,
+            },
+          );
+          expect(reclaimed.map((j) => j.id)).toContain(job.id);
+        });
+      }
+
       // 上の歯の裏側（自分の綴りには届く）。大文字を含む自分の tenantId のジョブに、`complete`・`fail` が届く
       // （`Ctx.tenantId` は不透明な文字列で、store はこの値で行を分ける。小文字に寄せて比べる実装は、自分のジョブにも届かない）。
       it(`${how} は、大文字を含む自分の tenantId のジョブに終端を付ける`, async () => {
