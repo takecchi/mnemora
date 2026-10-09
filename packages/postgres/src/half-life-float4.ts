@@ -3,7 +3,9 @@ import type { NewMemory } from "@mnemora/core";
 
 /**
  * float4（`real`）列に入らない値（`Math.fround` が `Infinity` か 0 になる）を、DB の生の例外でなく、
- * `packages/testkit` の fixture と同じ判定・同じ文言の明示の例外で拒む。
+ * `packages/testkit` の fixture と同じ判定の明示の例外で拒む。
+ * 文言は揃えていない: fixture と core の Fake は 0 に丸まるときに `; rounds to 0` を足し、先頭の名前もそれぞれ違う。
+ * 揃っているのは、欄の名前から `(got <値>` まで（`<field> does not fit in a Postgres "real" (float4) column (got <値>`）である。
  */
 function assertFitsFloat4(label: string, field: string, value: number): void {
   const rounded = Math.fround(value);
