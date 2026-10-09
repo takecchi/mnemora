@@ -133,7 +133,7 @@ describe("heuristicTokenCounter の境界（ADR 0483、今の振る舞い）", (
 
   it("結合文字・ZWJ は1コードポイントずつ数える（見た目の1文字ではない）", () => {
     expect(tokens("é")).toBe(1);
-    expect(tokens("\u{1F468}‍\u{1F469}‍\u{1F467}")).toBe(2);
+    expect(tokens("\u{1F468}\u200D\u{1F469}\u200D\u{1F467}")).toBe(2);
   });
 
   it("CJK は 0.9、範囲の端: U+4E00 は CJK、U+D7FF までのハングルも CJK、U+D800 以降は非CJK", () => {

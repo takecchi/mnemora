@@ -548,7 +548,7 @@ describe("FakeMemoryStore: Observation の口と createMemory の jsonb 列は�
 
   it("NUL でない値（結合文字・ZWJ・RTL・異体字セレクタ・文字どおりの \\u0000）は受け入れる", async () => {
     const { memoryStore } = createFakeRuntimeStores();
-    const text = "é 👨‍👩‍👧 שלום 葛\u{E0100} \\u0000";
+    const text = "é 👨\u200D👩\u200D👧 שלום 葛\u{E0100} \\u0000";
     const created = await memoryStore.createObservation(
       ctx,
       observation({ payload: { text }, attributes: { k: text } }),

@@ -363,7 +363,7 @@ describe("packDigestBand — 切り詰め位置が書記素の途中（穴 O-5�
   });
 
   it("ZWJ で繋がった絵文字を、ZWJ だけ残して切らない", () => {
-    const family = "👨‍👩‍👧"; // 👨 ZWJ 👩 ZWJ 👧（8コードユニット）
+    const family = "👨\u200D👩\u200D👧"; // 👨 ZWJ 👩 ZWJ 👧（8コードユニット）
     expect(family).toHaveLength(8);
     expect(pack(`a${family}b`, 4)).toBe("a");
     expect(pack(`a${family}b`, 8)).toBe("a");
@@ -371,7 +371,7 @@ describe("packDigestBand — 切り詰め位置が書記素の途中（穴 O-5�
   });
 
   it("最初の書記素だけで上限を超えるなら、空文字列になる（上限は超えない）", () => {
-    expect(pack("👨‍👩‍👧", 3)).toBe("");
+    expect(pack("👨\u200D👩\u200D👧", 3)).toBe("");
   });
 
   it("陽性対照: 書記素が1コードユニットの ASCII は今までどおり maxEntryChars 文字で切れる", () => {

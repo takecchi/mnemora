@@ -15,7 +15,7 @@ describe("describeFailure: 上限での切り詰めは書記素の境目で止�
   });
 
   it("ZWJ で繋いだ絵文字を割らない", () => {
-    const family = "👨‍👩‍👧";
+    const family = "👨\u200D👩\u200D👧";
     const text = "a".repeat(MAX - 3) + family + "tail";
     expect(body(describeText(text))).toBe("a".repeat(MAX - 3));
   });
@@ -26,7 +26,7 @@ describe("describeFailure: 上限での切り詰めは書記素の境目で止�
   });
 
   it("ちょうど収まる書記素は残す", () => {
-    const family = "👨‍👩‍👧";
+    const family = "👨\u200D👩\u200D👧";
     const text = "a".repeat(MAX - family.length) + family + "tail";
     expect(body(describeText(text))).toBe("a".repeat(MAX - family.length) + family);
   });

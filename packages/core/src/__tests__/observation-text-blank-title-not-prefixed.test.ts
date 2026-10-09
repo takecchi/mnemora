@@ -21,8 +21,8 @@ const BLANKS: Array<[string, string]> = [
   ["U+00A0（NBSP）", " "],
   ["垂直タブ（\\v）", "\v"],
   ["改ページ（\\f）", "\f"],
-  ["U+FEFF（BOM）", "﻿"],
-  ["種類の混在", " \t\n　 \v\f﻿ "],
+  ["U+FEFF（BOM）", "\uFEFF"],
+  ["種類の混在", " \t\n　 \v\f\uFEFF "],
 ];
 
 describe("observationPayloadText: 空白だけの title は前置きにしない（ADR 0517）", () => {

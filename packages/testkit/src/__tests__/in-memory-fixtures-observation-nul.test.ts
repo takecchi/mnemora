@@ -63,7 +63,7 @@ describe("InMemoryMemoryStore: Observation の口は、NUL を含む値を Postg
 
   it("NUL でない値は、これまでどおり受け入れる（回帰確認: 結合文字・ZWJ・RTL・異体字セレクタ・文字どおりの \\u0000）", async () => {
     const store = new InMemoryMemoryStore();
-    const text = "é 👨‍👩‍👧 שלום 葛\u{E0100} \\u0000";
+    const text = "é 👨\u200D👩\u200D👧 שלום 葛\u{E0100} \\u0000";
     const created = await store.createObservation(
       ctx,
       observation({ payload: { text }, attributes: { k: text } }),

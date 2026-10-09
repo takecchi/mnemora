@@ -10,7 +10,7 @@ describe("truncateForFallbackDigest: 書記素の途中で切らない", () => {
   });
 
   it("ZWJ で繋いだ絵文字を割らない", () => {
-    const family = "👨‍👩‍👧";
+    const family = "👨\u200D👩\u200D👧";
     expect(truncateForFallbackDigest(`ab${family}cd`, 5)).toBe("ab…");
     expect(truncateForFallbackDigest(`ab${family}cd`, 7)).toBe("ab…");
     expect(truncateForFallbackDigest(`ab${family}cd`, 2 + family.length)).toBe(`ab${family}…`);
@@ -22,7 +22,7 @@ describe("truncateForFallbackDigest: 書記素の途中で切らない", () => {
   });
 
   it("最初の書記素だけで上限を超えるなら、本文を残さない（上限0と同じ）", () => {
-    expect(truncateForFallbackDigest("👨‍👩‍👧x", 3)).toBe("…");
+    expect(truncateForFallbackDigest("👨\u200D👩\u200D👧x", 3)).toBe("…");
   });
 
   it("陽性対照: 今までと同じ結果（収まる・サロゲートペア・日本語）", () => {

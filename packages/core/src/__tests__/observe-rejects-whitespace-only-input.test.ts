@@ -16,8 +16,8 @@ const BLANKS: Array<[string, string]> = [
   ["垂直タブ・改ページ", "\v\f"],
   ["U+3000（全角空白）", "　"],
   ["U+00A0（NBSP）", " "],
-  ["U+FEFF（BOM）", "﻿"],
-  ["U+2028・U+2029（行・段落区切り）", "  "],
+  ["U+FEFF（BOM）", "\uFEFF"],
+  ["U+2028・U+2029（行・段落区切り）", "\u2028\u2029"],
   ["U+2003（EM SPACE）", " "],
   ["種類の混在", " \t\n　 "],
 ];
@@ -48,7 +48,7 @@ describe.each(FIELDS)("%s", (_field, build, key) => {
     ["内側に空白のある文", "a b\tc\nd"],
     ["1文字", "a"],
     ["全角空白で挟んだ1文字", "　a　"],
-    ["U+200B（ZERO WIDTH SPACE。trim は落とさない）", "​"],
+    ["U+200B（ZERO WIDTH SPACE。trim は落とさない）", "\u200B"],
   ])("通す: %s", (_name, value) => {
     expect(issuesOf(build(value))).toBeNull();
   });
