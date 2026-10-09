@@ -18,11 +18,14 @@ import { embeddingCassetteKey, llmCassetteKey } from "./cassette.js";
  * 種のモデル名・埋め込み空間は必須の引数で、食い違えば構築時に落とす: 省略できると、呼び忘れで食い違ったまま素通りする。
  */
 
-/** 種から返した回数と、委譲先を呼んだ回数。 */
+/**
+ * 種から返した件数と、委譲先へ渡した件数。「呼び出し回数」ではなく「件数」である。
+ * LLM は1呼び出しで1件。埋め込みは入力テキスト1件で1件（1回の `embed` に複数テキストを渡せば、その分だけ増える）。
+ */
 export interface SeedUsageCounts {
-  /** 種カセットから返した回数。 */
+  /** 種カセットから返した件数（LLM は1呼び出し1件、埋め込みは入力テキスト1件で1件）。 */
   seeded: number;
-  /** 委譲先を呼んだ回数。 */
+  /** 委譲先へ渡した件数（LLM は1呼び出し1件、埋め込みは種に無かった入力テキスト1件で1件。委譲先の `embed` を呼んだ回数ではない）。 */
   real: number;
 }
 
@@ -59,7 +62,7 @@ export class SeededLLMProvider implements LLMProvider {
     this.entries = seed.entries;
   }
 
-  /** 種から返した回数・委譲先を呼んだ回数（呼び出す時点の実測。ライブに変わる）。 */
+  /** 種から返した件数・委譲先へ渡した件数（1呼び出しで1件。呼び出す時点の実測。ライブに変わる）。 */
   get usage(): SeedUsageCounts {
     return { seeded: this.seededCalls, real: this.realCalls };
   }
@@ -157,7 +160,7 @@ export class SeededEmbeddingProvider implements EmbeddingProvider {
     this.space = delegate.space;
   }
 
-  /** 種から返した回数・委譲先を呼んだ回数（呼び出す時点の実測。ライブに変わる）。 */
+  /** 種から返したテキスト件数・委譲先へ渡したテキスト件数（`embed` の呼び出し回数ではない。呼び出す時点の実測。ライブに変わる）。 */
   get usage(): SeedUsageCounts {
     return { seeded: this.seededCalls, real: this.realCalls };
   }
