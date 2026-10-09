@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { Ctx, MemoryId } from "@mnemora/core";
 import { sql } from "drizzle-orm";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
-import { buildNewMemoryFixture } from "@mnemora/testkit";
+import { buildNewMemoryEventFixture, buildNewMemoryFixture } from "@mnemora/testkit";
 import { PostgresMemoryStore } from "../memory-store.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
@@ -38,6 +38,50 @@ describe("PostgresMemoryStore.purgeMemory が label に触れる範囲", () => {
 
   afterAll(async () => {
     await closeTestClient();
+  });
+
+  it("claim key の衝突を記した監査イベントの meta.note は、その記憶を purge したあとも残る", async () => {
+    const { db } = await getTestClient();
+    const store = new PostgresMemoryStore(db);
+    const claimKey = { subject: "user", predicate: "likes" };
+    const first = await store.createMemory(
+      ctx,
+      buildNewMemoryFixture({
+        tenantId: ctx.tenantId,
+        contentHash: `purge-note-first-${randomUUID()}`,
+        claimKey,
+      }),
+    );
+    const second = await store.createMemory(
+      ctx,
+      buildNewMemoryFixture({
+        tenantId: ctx.tenantId,
+        contentHash: `purge-note-second-${randomUUID()}`,
+        claimKey,
+      }),
+    );
+    const note = JSON.stringify({ kind: "claim_key_conflict", claimKey });
+    const contestedEvent = (memoryId: MemoryId) =>
+      buildNewMemoryEventFixture({
+        tenantId: ctx.tenantId,
+        memoryId,
+        kind: "updated",
+        meta: { note },
+      });
+    await store.markContestedPair(
+      ctx,
+      { id: first.id, event: contestedEvent(first.id) },
+      { id: second.id, event: contestedEvent(second.id) },
+    );
+    await store.updateStatus(ctx, first.id, "forgotten");
+
+    await purge(store, first.id);
+
+    const result = await db.execute(
+      sql`SELECT meta->>'note' AS note FROM memory_events WHERE tenant_id = ${ctx.tenantId} AND memory_id = ${first.id} AND kind = 'updated'`,
+    );
+    expect((result.rows as { note: string | null }[]).map((row) => row.note)).toEqual([note]);
+    expect(JSON.parse(note)).toMatchObject({ claimKey });
   });
 
   it("目次帯のエントリが truncated: true だったとき、墓石へ書き換えたあとの形は { memoryId, digest } だけ", async () => {

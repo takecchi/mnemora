@@ -141,6 +141,39 @@ describe("InMemoryMemoryStore.purgeExpiredEvents: kind が superseded の行も�
   });
 });
 
+describe("InMemoryMemoryStore.purgeExpiredEvents: kind が purged の行も、保持期間を過ぎれば消す", () => {
+  it("期限切れの purged の行を消す", async () => {
+    const store = new InMemoryMemoryStore();
+    const memory = await store.createMemory(
+      ctx,
+      buildNewMemoryFixture({
+        tenantId: ctx.tenantId,
+        contentHash: "hash-purged",
+        status: "forgotten",
+      }),
+    );
+    await store.purgeMemory(
+      ctx,
+      memory.id,
+      { content: "[purged]", digest: "[purged]" },
+      buildNewMemoryEventFixture({
+        tenantId: ctx.tenantId,
+        memoryId: memory.id,
+        kind: "purged",
+        at: new Date("2026-01-01T00:00:00.000Z"),
+      }),
+    );
+
+    const result = await store.purgeExpiredEvents(ctx, {
+      olderThan: new Date("2026-02-01T00:00:00.000Z"),
+      limit: 10,
+    });
+
+    expect(result.purged).toBe(1);
+    expect(store.events.filter((event) => event.kind === "purged")).toEqual([]);
+  });
+});
+
 describe("InMemoryMemoryStore.eraseTenant: 消すのは自分が持つ10表だけで、outbox のジョブには触れない", () => {
   it("テナントの outbox ジョブを残し、deleted にも数えない", async () => {
     const store = new InMemoryMemoryStore();
@@ -169,6 +202,18 @@ describe("InMemoryMemoryStore.createObservation: 空文字の kind を拒まず�
 
     expect(observation.kind).toBe("");
     expect((await store.getObservation(ctx, observation.id))?.kind).toBe("");
+  });
+
+  it("createObservation は kind が空白だけの Observation も、そのまま書いて返す", async () => {
+    const store = new InMemoryMemoryStore();
+
+    const observation = await store.createObservation(
+      ctx,
+      buildNewObservationFixture({ tenantId: ctx.tenantId, kind: "  " }),
+    );
+
+    expect(observation.kind).toBe("  ");
+    expect((await store.getObservation(ctx, observation.id))?.kind).toBe("  ");
   });
 
   it("createObservationWithOutbox も、kind が空文字の Observation を書いてジョブを積む", async () => {

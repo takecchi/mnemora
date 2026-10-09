@@ -60,6 +60,23 @@ describe("InMemoryMemoryStore.listActiveClaimPredicates: status と claim key �
 
     expect(predicates).toEqual(["lived_in"]);
   });
+
+  it("validFrom が未来の active の行の predicate も、一覧に入れる", async () => {
+    const store = new InMemoryMemoryStore();
+    await store.createMemory(
+      ctx,
+      buildNewMemoryFixture({
+        tenantId: ctx.tenantId,
+        contentHash: "hash-future",
+        claimKey: { subject: "user", predicate: "will_live_in" },
+        validFrom: new Date("2999-01-01T00:00:00.000Z"),
+      }),
+    );
+
+    const predicates = await store.listActiveClaimPredicates(ctx, { subjectId: null, limit: 10 });
+
+    expect(predicates).toEqual(["will_live_in"]);
+  });
 });
 
 describe("InMemoryMemoryStore.listLabels: proposedCount が 0 になった proposed のラベルも出し続ける", () => {

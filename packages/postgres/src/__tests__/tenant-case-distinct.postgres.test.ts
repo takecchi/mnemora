@@ -134,6 +134,13 @@ describe("綴りだけが違う tenant は別の tenant（PostgresMemoryStore）
       buildNewObservationFixture({ tenantId: UPPER.tenantId, externalId: "ext-same-spelling" }),
     );
     expect(resent.id).toBe(upperObservation.id);
+
+    // 後から書いた側の再送も、自分の Observation を返す（先に書いた側の綴りの行へは寄らない）。
+    const lowerResent = await store.createObservation(
+      LOWER,
+      buildNewObservationFixture({ tenantId: LOWER.tenantId, externalId: "ext-same-spelling" }),
+    );
+    expect(lowerResent.id).toBe(lowerObservation.id);
   });
 
   it("getRecall: 相手の綴りの tenant からは null。自分の tenant からは見える", async () => {
