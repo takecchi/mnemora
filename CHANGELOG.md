@@ -80,6 +80,10 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - **無条件の追加（新しく赤になりうる）**: `describeMemoryStoreConformance` の既存の `createObservation` の `externalId` の冪等の `it` に、後から書いた側の再送が自分の `Observation` を返す確認が増えた（`it` の数は変わらない）。`describeLexicalStoreConformance` に、`filter.status` を省くと forgotten・superseded・archived の記憶も返ること、の `it` が増えた。
   - **フラグに応じた追加**: `supportsPurgeMemory: true` の枝に、`purgeMemory` が recall の `query` を書き換えないこと、claim key の衝突を記したイベント（`meta.note` が `kind: "claim_key_conflict"` の JSON）の `meta.note` を書き換えないこと（`listEventsForMemory` で読み戻す）、の `it` が増えた。
   - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目80。DB マイグレーションは無い。
+- **conformance suite に約束を足した——`OutboxStore.claimBatch` がテナントを前後の空白・前方一致で混ぜないこと、`kinds` に2つ以上の種別を渡したらそのどれかを取ること、`complete`・`fail` が大文字を含む自分のテナントのジョブに届くこと、`MemoryStore.updateStatus`・`supersedeWithNewMemories` が purge されていない forgotten の行を `expectedStatus: 'forgotten'` で更新・置き換えること**（Issue #1939 の「すり抜けのまとめ」。どれも InMemory の fixture に変異を当てると、これらを破る実装が suite では緑になると分かった。約束は `Ctx` の TSDoc「識別子は正規化せず、完全一致で比べる。… 前後の空白が違えば別の値」「`LIKE` や前方一致で別の識別子が混ざることは無い」「store はこの値で行を分ける」、`ClaimOutboxJobsOptions.kinds` の TSDoc「この種別のジョブだけを取る」、`MemoryStore.updateStatus` の TSDoc「書き込み時点で対象 Memory の `status` がその値と一致するときだけ更新する」と ADR 0499〔弾くのは purge 済みの行だけ〕に既にあり、新しい約束ではない。ADR 0546 の作法どおり、suite に足した約束は Breaking に数える。クローンの判断で、オーナーの判断ではない。オーナー回答 6af9b37a の Q3 による）。`@mnemora/postgres` と `@mnemora/testkit` の fixture は変わっておらず、どれも緑。
+  - **無条件の追加（新しく赤になりうる）**: `describeOutboxStoreConformance` に、前後の空白だけが違う tenantId・名前が前方一致するだけの tenantId のジョブを `claimBatch` が返さないこと、`kinds` に2つ以上の種別を渡すとそのどれかのジョブを取りそれ以外は取らないこと、`complete`・`fail` が大文字を含む自分の tenantId のジョブに終端を付けること、の `it` が増えた。`describeMemoryStoreConformance` に、`updateStatus` が purge されていない forgotten の行を `expectedStatus: 'forgotten'` で更新できること、の `it` が増えた。
+  - **フラグに応じた追加**: `supportsSupersedeWithNewMemories: true` のとき、`describeMemoryStoreConformance` に、`supersedeWithNewMemories` が purge されていない forgotten の対象を `expectedStatus: 'forgotten'` で置き換えること、の `it` が増えた。
+  - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目81。DB マイグレーションは無い。
 
 ### Added
 

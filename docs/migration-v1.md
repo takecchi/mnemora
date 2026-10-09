@@ -3047,6 +3047,28 @@ WHERE provenance->>'kind' IS NULL;
 
 **DB マイグレーション**: 要らない。
 
+### 81. conformance suite に約束が増えた——`claimBatch` のテナント比較と `kinds`、`complete`・`fail` の大文字のテナント、purge されていない forgotten への `expectedStatus: 'forgotten'`（`@mnemora/testkit`）
+
+Issue #1939 の「すり抜けのまとめ」。約束は `Ctx` の TSDoc（識別子は完全一致で比べる・前後の空白が違えば別の値・前方一致で混ざらない・store はこの値で行を分ける）、`ClaimOutboxJobsOptions.kinds` の TSDoc（この種別のジョブだけを取る）、`MemoryStore.updateStatus` の TSDoc と ADR 0499（`expectedStatus` が一致すれば更新する。弾くのは purge 済みの行だけ）に既にある。ADR 0546 の作法（足した約束は 🔴 に数える）に揃えた（クローンの判断で、オーナーの判断ではない。オーナー回答 6af9b37a の Q3 による）。
+
+**何が変わったか**: 中身は [CHANGELOG.md](../CHANGELOG.md) の `[1.4.0]` 節 `### Breaking` の「conformance suite に約束を足した——`OutboxStore.claimBatch` がテナントを前後の空白・前方一致で混ぜないこと…」の箇条を見ること。**ここには複製しない。**型・シグネチャは変わらない。
+
+**なぜ破壊的と数えるか**: 自前の adapter が、増えた `it` の約束を守っていなければ、新しく落ちる（足した約束は外せない）。
+
+**誰が影響を受けるか**:
+
+- 自前の `OutboxStore` で、`claimBatch` がテナントを `trim` してから比べる人、または前方一致（`LIKE 'x%'` や `startsWith`）で比べる人。
+- 自前の `OutboxStore` で、`claimBatch` が `kinds` の先頭の1つだけで絞る人。
+- 自前の `OutboxStore` で、`complete`・`fail` が、大文字を含む自分のテナントのジョブに届かない人（テナントを小文字へ寄せてから比べ、行側とずれる、など）。
+- 自前の `MemoryStore` で、purge されていない forgotten の行への `expectedStatus: 'forgotten'` の `updateStatus`、または（`supportsSupersedeWithNewMemories: true` なら）`supersedeWithNewMemories` を、purge 済みかどうかを見ずに弾いている人（`status` が forgotten なら一律に弾く、など）。
+
+どれもフラグ無し、または既存のフラグの下で走る。`@mnemora/postgres` と `@mnemora/testkit` の fixture は緑。
+
+**どう直すか**: `claimBatch` はテナントを、渡された値のまま完全一致で比べる（`trim`・小文字化・前方一致をしない）。`kinds` は渡された種別のどれかに当たるジョブを取る。`complete`・`fail` もテナントを完全一致で比べる。`expectedStatus` の CAS は、purge 済み（`purgedAt` が非 `null`）の行だけを、どの `expectedStatus` にも一致しないものとして弾く。
+
+**確かめたこと**: `@mnemora/postgres` の `conformance.postgres.test.ts` と fixture で緑。足した `it` は、InMemory の fixture に、`claimBatch` が `trim` して比べる変異、前方一致で比べる変異、`kinds[0]` だけで絞る変異、`complete`・`fail` が小文字のテナントにしか届かない変異、CAS が forgotten の行を一律に弾く変異（`updateStatus`・`supersedeWithNewMemories` の本適用）を当てると、それぞれ赤になった。**確かめていないこと**: Postgres の実装への変異（`@mnemora/postgres` 専用の試験が #1951 で縛っている）、外部の adapter が実際に赤くなるか。`supersedeWithNewMemories` の事前判定（`wouldConflict`）だけを forgotten 一律に弾く変異は、足した `it` では赤にならない（事前判定と本適用の区別は suite の観測の外で、InMemory 専用の `in-memory-cas-purged-row.test.ts` が縛っている）。
+**DB マイグレーション**: 要らない。
+
 ## 🟡 後方互換だが挙動が変わりうるもの（v0.1.9 → v0.2.0）
 
 （⚠ 2026-09-27: この見出しは PR #1192 が「v1.0.1 → 次の版」の節を書き換えたときに一緒に消えており、下の3項目が「v1.0.2 → 次の版」の節の中に在るように読めていた。見出しを戻した。下の3項目は v0.1.9 → v0.2.0 の話である）

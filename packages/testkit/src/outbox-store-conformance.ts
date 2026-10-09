@@ -217,6 +217,25 @@ export function describeOutboxStoreConformance(options: OutboxStoreConformanceOp
       expect(claimed.length).toBeGreaterThanOrEqual(1);
     });
 
+    // `kinds` は「この種別のジョブだけを取る」配列である。2つ以上の種別を渡したら、そのどれかに当たるジョブを取る
+    // （先頭の1つだけで絞る実装は、2つ目以降の種別のジョブを取りこぼす）。
+    it("claimBatch は kinds に2つ以上の種別を渡すと、そのどれかに当たるジョブを取り、それ以外は取らない", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      await seedJob(ctx, { kind: "extract" });
+      const embed = await seedJob(ctx, { kind: "embed" });
+      const consolidate = await seedJob(ctx, { kind: "consolidate" });
+
+      const claimed = await store.claimBatch(ctx, {
+        kinds: ["embed", "consolidate"],
+        limit: 10,
+        now: new Date(),
+        claimedBy: "worker-1",
+        leaseMs: DEFAULT_LEASE_MS,
+      });
+      expect(new Set(claimed.map((j) => j.id))).toEqual(new Set([embed.id, consolidate.id]));
+    });
+
     // `kinds` は「この種別のジョブだけを取る」。空配列はどの種別にも当たらないので、何も取らない
     // （`Runtime.tick` の `kinds` の doc「空配列は何も claim しない」は、tick がそのまま渡すこの口に頼っている）。
     it("claimBatch は kinds: [] なら何も claim しない（絞り込みなしと同じにしない）", async () => {
@@ -643,6 +662,58 @@ export function describeOutboxStoreConformance(options: OutboxStoreConformanceOp
       expect(claimedUpper.map((j) => j.id)).toEqual([upperJob.id]);
     });
 
+    // `Ctx` の doc「識別子は正規化せず、完全一致で比べる。… 前後の空白が違えば別の値として扱う」。
+    // 空白だけが違う tenantId は別のテナントである（`trim` してから比べる実装は、この組を同じテナントにしてしまう）。
+    it("claimBatch は、前後の空白だけが違う tenantId のジョブを返さない（自分の綴りのジョブは返す）", async () => {
+      const store = await createStore();
+      const plain: Ctx = { tenantId: "tenant-space" };
+      const leading: Ctx = { tenantId: " tenant-space" };
+      const trailing: Ctx = { tenantId: "tenant-space " };
+      const plainJob = await seedJob(plain, { kind: "extract" });
+      const leadingJob = await seedJob(leading, { kind: "extract" });
+      const trailingJob = await seedJob(trailing, { kind: "extract" });
+
+      for (const [ctx, job] of [
+        [plain, plainJob],
+        [leading, leadingJob],
+        [trailing, trailingJob],
+      ] as const) {
+        const claimed = await store.claimBatch(ctx, {
+          limit: 10,
+          now: new Date(),
+          claimedBy: "worker-1",
+          leaseMs: DEFAULT_LEASE_MS,
+        });
+        expect(claimed.map((j) => j.id)).toEqual([job.id]);
+      }
+    });
+
+    // 同じ `Ctx` の doc「`%`・`_`・`/`・`:` も普通の文字であり、`LIKE` や前方一致で別の識別子が混ざることは無い」。
+    // 片方の名前がもう片方の名前で始まる組（`tenant-a` と `tenant-ab` の形）は別のテナントである。
+    it("claimBatch は、名前が前方一致するだけの別の tenantId のジョブを返さない（自分の綴りのジョブは返す）", async () => {
+      const store = await createStore();
+      const shorter: Ctx = { tenantId: "prefix-tenant" };
+      const longer: Ctx = { tenantId: "prefix-tenant-ab" };
+      const shorterJob = await seedJob(shorter, { kind: "extract" });
+      const longerJob = await seedJob(longer, { kind: "extract" });
+
+      const claimedShorter = await store.claimBatch(shorter, {
+        limit: 10,
+        now: new Date(),
+        claimedBy: "worker-1",
+        leaseMs: DEFAULT_LEASE_MS,
+      });
+      expect(claimedShorter.map((j) => j.id)).toEqual([shorterJob.id]);
+
+      const claimedLonger = await store.claimBatch(longer, {
+        limit: 10,
+        now: new Date(),
+        claimedBy: "worker-1",
+        leaseMs: DEFAULT_LEASE_MS,
+      });
+      expect(claimedLonger.map((j) => j.id)).toEqual([longerJob.id]);
+    });
+
     // 別テナントの ctx からの `complete` / `fail` は、その行に触れない・存在も知らせない。
     // 「触れない」は、リースが切れた後に持ち主が再 claim できる（＝終端が付いていない）ことで測る。
     // 「知らせない」は、attempts が一致しない呼び出しでも `OutboxLeaseConflictError` にならず
@@ -704,6 +775,32 @@ export function describeOutboxStoreConformance(options: OutboxStoreConformanceOp
           leaseMs: DEFAULT_LEASE_MS,
         });
         expect(reclaimed.map((j) => j.id)).toContain(job.id);
+      });
+
+      // 上の歯の裏側（自分の綴りには届く）。大文字を含む自分の tenantId のジョブに、`complete`・`fail` が届く
+      // （`Ctx.tenantId` は不透明な文字列で、store はこの値で行を分ける。小文字に寄せて比べる実装は、自分のジョブにも届かない）。
+      it(`${how} は、大文字を含む自分の tenantId のジョブに終端を付ける`, async () => {
+        const store = await createStore();
+        const owner: Ctx = { tenantId: "Tenant-Upper" };
+        const job = await seedJob(owner, { kind: "extract" });
+        const claimed = await store.claimBatch(owner, {
+          limit: 10,
+          now: new Date(),
+          claimedBy: "worker-a",
+          leaseMs: DEFAULT_LEASE_MS,
+        });
+        const claimedJob = claimed.find((j) => j.id === job.id)!;
+
+        await terminate(store, owner, job.id, claimedJob.attempts);
+
+        // 終端が付いていれば、リースが切れた後でも再 claim されない。
+        const reclaimed = await store.claimBatch(owner, {
+          limit: 10,
+          now: new Date(Date.now() + DEFAULT_LEASE_MS + 1),
+          claimedBy: "worker-a2",
+          leaseMs: DEFAULT_LEASE_MS,
+        });
+        expect(reclaimed.map((j) => j.id)).not.toContain(job.id);
       });
 
       // `complete` の doc: UUID 形式の `jobId` は大文字小文字を区別しない（CAS・先勝ちも同じ行に対して働く）。`fail` も同じ。
