@@ -915,6 +915,39 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
       expect(lowerResent.id).toBe(lowerObservation.id);
     });
 
+    // `Ctx` の doc「識別子は正規化せず、完全一致で比べる。… 前後の空白が違えば別の値」「`LIKE` や前方一致で別の識別子が混ざることは無い」。
+    // externalId の冪等の再送は、同じ externalId を先に書いた綴り違いのテナントの行へ寄らない。先に書くのは相手の側にする
+    // （再読みを `trim`・前方一致・大文字小文字無視で探す実装は、先に在る相手の行を拾う）。
+    // `createObservationWithOutbox` の冪等も同じ（`createObservation` の TSDoc「`createObservationWithOutbox` も同じである」）。
+    for (const how of ["createObservation", "createObservationWithOutbox"] as const) {
+      for (const [first, owner] of [
+        ["tenant-ws", " tenant-ws"],
+        [" tenant-ws ", "tenant-ws"],
+        ["prefix-obs-ab", "prefix-obs"],
+        ["Tenant-Obs", "tenant-obs"],
+      ] as const) {
+        it(`${how} の externalId の再送は、同じ externalId を先に書いた綴り違いの tenantId の Observation を返さない（${JSON.stringify(first)} の後に ${JSON.stringify(owner)}）`, async () => {
+          const store = await createStore();
+          const externalId = `tenant-spelling-external-id-${Math.random()}`;
+          const create = async (tenantId: string) => {
+            const input = buildNewObservationFixture({ tenantId, externalId });
+            return how === "createObservation"
+              ? store.createObservation({ tenantId }, input)
+              : (await store.createObservationWithOutbox({ tenantId }, input, [])).observation;
+          };
+          const firstObservation = await create(first);
+          const ownObservation = await create(owner);
+          expect(ownObservation.id).not.toBe(firstObservation.id);
+
+          const resent = await create(owner);
+          expect({ id: resent.id, tenantId: resent.tenantId }).toEqual({
+            id: ownObservation.id,
+            tenantId: owner,
+          });
+        });
+      }
+    }
+
     it("getRecall は、大文字小文字だけが違う tenantId の recall を返さない（自分の綴りからは見える）", async () => {
       const store = await createStore();
       const recallId = await store.createRecall(UPPER_CASE_TENANT, {
