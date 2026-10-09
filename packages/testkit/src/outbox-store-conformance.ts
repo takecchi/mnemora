@@ -878,6 +878,37 @@ export function describeOutboxStoreConformance(options: OutboxStoreConformanceOp
       expect(third.map((j) => j.id)).toEqual([later.id]);
     });
 
+    // 上の歯は、取り直す時刻がリースの切れた時刻ちょうど（claimedAt + leaseMs）なので、availableAt を opts.now ではなく
+    // 「リースが切れた時刻」にする実装と値が一致して区別できない。リースが切れた後の now で取り直して見る。
+    it("リースが切れた後の now で取り直すと、availableAt は切れた時刻ではなく opts.now になる（ADR 0357）", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      const base = new Date("2026-01-01T00:00:00.000Z");
+      const leaseMs = 1000;
+      const stuck = await seedJob(ctx, { kind: "extract", availableAt: base });
+
+      const firstNow = new Date(base.getTime() + 100);
+      const first = await store.claimBatch(ctx, {
+        limit: 1,
+        now: firstNow,
+        claimedBy: "worker-1",
+        leaseMs,
+      });
+      expect(first.map((j) => j.id)).toEqual([stuck.id]);
+
+      const leaseExpiredAt = firstNow.getTime() + leaseMs;
+      const reclaimNow = new Date(leaseExpiredAt + 5000);
+      const second = await store.claimBatch(ctx, {
+        limit: 1,
+        now: reclaimNow,
+        claimedBy: "worker-2",
+        leaseMs,
+      });
+      expect(second.map((j) => j.id)).toEqual([stuck.id]);
+      expect(second[0]!.availableAt.getTime()).toBe(reclaimNow.getTime());
+      expect(second[0]!.availableAt.getTime()).not.toBe(leaseExpiredAt);
+    });
+
     // -------------------------------------------------------------------
     // complete / fail の CAS（ADR 0142, Issue #233）
     // -------------------------------------------------------------------
