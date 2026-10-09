@@ -84,6 +84,9 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - **無条件の追加（新しく赤になりうる）**: `describeOutboxStoreConformance` に、前後の空白だけが違う tenantId・名前が前方一致するだけの tenantId のジョブを `claimBatch` が返さないこと、`kinds` に2つ以上の種別を渡すとそのどれかのジョブを取りそれ以外は取らないこと、`complete`・`fail` が大文字を含む自分の tenantId のジョブに終端を付けること、の `it` が増えた。`describeMemoryStoreConformance` に、`updateStatus` が purge されていない forgotten の行を `expectedStatus: 'forgotten'` で更新できること、の `it` が増えた。
   - **フラグに応じた追加**: `supportsSupersedeWithNewMemories: true` のとき、`describeMemoryStoreConformance` に、`supersedeWithNewMemories` が purge されていない forgotten の対象を `expectedStatus: 'forgotten'` で置き換えること、の `it` が増えた。
   - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目81。DB マイグレーションは無い。
+- **conformance suite に約束を足した——`OutboxStore.complete`・`fail` が、前後の空白だけ・前方一致するだけが違う tenantId の ctx からはジョブに終端を付けないこと、`MemoryStore.createObservation`・`createObservationWithOutbox` の `externalId` の再送が、同じ `externalId` を先に書いた綴り違いの tenantId の `Observation` を返さないこと**（10/09 マージ分（#2062・#2063・#2066）の確かめ直し。`@mnemora/postgres` の実装に、`complete`・`fail` がテナントを `btrim` や前方一致で比べる変異、`createObservation` の再読みを `btrim` で、`createObservationWithOutbox` の再読みを大文字小文字無視で探す変異を当てると、suite が緑のままだった。約束は `Ctx` の TSDoc「識別子は正規化せず、完全一致で比べる。… 前後の空白が違えば別の値」「`LIKE` や前方一致で別の識別子が混ざることは無い」と、`MemoryStore.createObservation` の TSDoc「`createObservationWithOutbox` も同じである」に既にある）。
+  - **無条件の追加（新しく赤になりうる）**: `describeOutboxStoreConformance` に、`complete`・`fail` それぞれについて、前後の空白だけが違う組・名前が前方一致するだけの組（両向き）の ctx からは、同じ id と attempts を渡してもそのジョブに終端を付けないこと、の `it` が増えた。`describeMemoryStoreConformance` に、`createObservation`・`createObservationWithOutbox` それぞれについて、同じ `externalId` を綴り違い（前後の空白・前方一致・大文字小文字）の tenantId が先に書いたあとでも、後から書いた側の再送は自分の `Observation` を返すこと、の `it` が増えた。
+  - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目82。DB マイグレーションは無い。
 
 ### Added
 

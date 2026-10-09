@@ -3069,6 +3069,27 @@ Issue #1939 の「すり抜けのまとめ」。約束は `Ctx` の TSDoc（識�
 **確かめたこと**: `@mnemora/postgres` の `conformance.postgres.test.ts` と fixture で緑。足した `it` は、InMemory の fixture に、`claimBatch` が `trim` して比べる変異、前方一致で比べる変異、`kinds[0]` だけで絞る変異、`complete`・`fail` が小文字のテナントにしか届かない変異、CAS が forgotten の行を一律に弾く変異（`updateStatus`・`supersedeWithNewMemories` の本適用）を当てると、それぞれ赤になった。**確かめていないこと**: Postgres の実装への変異（`@mnemora/postgres` 専用の試験が #1951 で縛っている）、外部の adapter が実際に赤くなるか。`supersedeWithNewMemories` の事前判定（`wouldConflict`）だけを forgotten 一律に弾く変異は、足した `it` では赤にならない（事前判定と本適用の区別は suite の観測の外で、InMemory 専用の `in-memory-cas-purged-row.test.ts` が縛っている）。
 **DB マイグレーション**: 要らない。
 
+### 82. conformance suite に約束が増えた——`complete`・`fail` の空白・前方一致だけが違うテナント、綴り違いのテナントの後からの `createObservation`・`createObservationWithOutbox` の再送（`@mnemora/testkit`）
+
+10/09 マージ分（#2062・#2063・#2066）の確かめ直し。約束は `Ctx` の TSDoc（識別子は完全一致で比べる・前後の空白が違えば別の値・前方一致で混ざらない）と、`MemoryStore.createObservation` の TSDoc（`createObservationWithOutbox` も同じ）に既にある。ADR 0546 の作法（足した約束は 🔴 に数える）に揃えた（クローンの判断で、オーナーの判断ではない）。
+
+**何が変わったか**: 中身は [CHANGELOG.md](../CHANGELOG.md) の `[1.4.0]` 節 `### Breaking` の「conformance suite に約束を足した——`OutboxStore.complete`・`fail` が、前後の空白だけ・前方一致するだけが違う tenantId の ctx からは…」の箇条を見ること。**ここには複製しない。**型・シグネチャは変わらない。
+
+**なぜ破壊的と数えるか**: 自前の adapter が、増えた `it` の約束を守っていなければ、新しく落ちる（足した約束は外せない）。
+
+**誰が影響を受けるか**:
+
+- 自前の `OutboxStore` で、`complete`・`fail` がテナントを `trim` してから比べる人、または前方一致（`LIKE 'x%'` や `startsWith`、その逆向き）で比べる人。
+- 自前の `MemoryStore` で、`createObservation`・`createObservationWithOutbox` の `externalId` の冪等の再読みが、テナントを `trim`・前方一致・大文字小文字無視で探す人（先に同じ `externalId` を書いた綴り違いのテナントの行を返してしまう）。
+
+どれもフラグ無しで走る。`@mnemora/postgres` と `@mnemora/testkit` の fixture は緑。
+
+**どう直すか**: `complete`・`fail` は、`claimBatch` と同じく、テナントを渡された値のまま完全一致で比べる。`externalId` の冪等の再読みも、渡されたテナントの値と完全一致する行だけから探す。
+
+**確かめたこと**: `@mnemora/postgres` の `conformance.postgres.test.ts` と fixture で緑。足した `it` は、Postgres の実装に、`complete`・`fail` がテナントを `btrim` で比べる変異・前方一致（両向き）で比べる変異、`createObservation`・`createObservationWithOutbox` の再読みを `btrim`・前方一致・大文字小文字無視で探す変異を当てると、それぞれ赤になった。InMemory の fixture に、`complete` を前方一致にする変異・`fail` を `trim` で比べる変異・`createObservation` の再読みを `trim` で探す変異を当てても、赤になった。**確かめていないこと**: 外部の adapter が実際に赤くなるか。CI の scram-sha-256 認証・SQL_ASCII の脚（手元は trust・UTF8）。
+
+**DB マイグレーション**: 要らない。
+
 ## 🟡 後方互換だが挙動が変わりうるもの（v0.1.9 → v0.2.0）
 
 （⚠ 2026-09-27: この見出しは PR #1192 が「v1.0.1 → 次の版」の節を書き換えたときに一緒に消えており、下の3項目が「v1.0.2 → 次の版」の節の中に在るように読めていた。見出しを戻した。下の3項目は v0.1.9 → v0.2.0 の話である）
