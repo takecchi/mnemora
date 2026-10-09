@@ -780,14 +780,31 @@ export function describeOutboxStoreConformance(options: OutboxStoreConformanceOp
       // `Ctx` の doc「識別子は正規化せず、完全一致で比べる。… 前後の空白が違えば別の値」「`LIKE` や前方一致で別の識別子が混ざることは無い」。
       // 上の大文字小文字の組と同じく、前後の空白だけが違う組・名前が前方一致するだけの組の ctx からも、そのジョブに終端を付けない
       // （`trim` してから比べる実装・前方一致で比べる実装は、この組を同じテナントにしてしまう）。
-      for (const [owner, other] of [
+      // 同じ並びに、Unicode の正規化形（NFC と NFD）だけが違う組・全角半角だけが違う組も置く（`Ctx` の doc「Unicode の正規化形（NFC と NFD）、
+      // 全角半角…が違えば別の値」）。`normalize` してから比べる実装は、この組を同じテナントにしてしまう。第3要素は、その組が
+      // どの正規化で同じ文字列になるか（道具の取り違えを防ぐため、組が実際に別の符号列で、その正規化では同じになることを確かめる）。
+      const tenantPairs: ReadonlyArray<readonly [string, string, ("NFC" | "NFKC")?]> = [
         ["tenant-space", " tenant-space"],
         ["tenant-space", "tenant-space "],
         [" tenant-space ", "tenant-space"],
         ["prefix-tenant-ab", "prefix-tenant"],
         ["prefix-tenant", "prefix-tenant-ab"],
-      ] as const) {
-        it(`${how} は、前後の空白か前方一致だけが違う tenantId の ctx からは、同じ id と attempts を指定してもそのジョブに終端を付けない（${JSON.stringify(owner)} のジョブに ${JSON.stringify(other)} から）`, async () => {
+        ["tenant-caf\u00e9", "tenant-cafe\u0301", "NFC"],
+        ["tenant-cafe\u0301", "tenant-caf\u00e9", "NFC"],
+        ["tenant-\uff21", "tenant-A", "NFKC"],
+        ["tenant-A", "tenant-\uff21", "NFKC"],
+      ];
+      const escapeNonAscii = (s: string) =>
+        JSON.stringify(s).replace(
+          /[^\x20-\x7e]/g,
+          (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, "0")}`,
+        );
+      for (const [owner, other, form] of tenantPairs) {
+        it(`${how} は、前後の空白か前方一致か Unicode の綴り違いだけが違う tenantId の ctx からは、同じ id と attempts を指定してもそのジョブに終端を付けない（${escapeNonAscii(owner)} のジョブに ${escapeNonAscii(other)} から）`, async () => {
+          if (form !== undefined) {
+            expect(owner).not.toBe(other);
+            expect(owner.normalize(form)).toBe(other.normalize(form));
+          }
           const store = await createStore();
           const job = await seedJob({ tenantId: owner }, { kind: "extract" });
           const claimed = await store.claimBatch(

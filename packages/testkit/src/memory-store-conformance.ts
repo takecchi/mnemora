@@ -920,13 +920,29 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
     // （再読みを `trim`・前方一致・大文字小文字無視で探す実装は、先に在る相手の行を拾う）。
     // `createObservationWithOutbox` の冪等も同じ（`createObservation` の TSDoc「`createObservationWithOutbox` も同じである」）。
     for (const how of ["createObservation", "createObservationWithOutbox"] as const) {
-      for (const [first, owner] of [
+      // Unicode の正規化形（NFC と NFD）だけが違う組・全角半角だけが違う組も、両向きで置く。第3要素は、その組が
+      // どの正規化で同じ文字列になるか（組が実際に別の符号列で、その正規化では同じになることを確かめる）。
+      const spellingPairs: ReadonlyArray<readonly [string, string, ("NFC" | "NFKC")?]> = [
         ["tenant-ws", " tenant-ws"],
         [" tenant-ws ", "tenant-ws"],
         ["prefix-obs-ab", "prefix-obs"],
         ["Tenant-Obs", "tenant-obs"],
-      ] as const) {
-        it(`${how} の externalId の再送は、同じ externalId を先に書いた綴り違いの tenantId の Observation を返さない（${JSON.stringify(first)} の後に ${JSON.stringify(owner)}）`, async () => {
+        ["tenant-caf\u00e9", "tenant-cafe\u0301", "NFC"],
+        ["tenant-cafe\u0301", "tenant-caf\u00e9", "NFC"],
+        ["tenant-\uff21", "tenant-A", "NFKC"],
+        ["tenant-A", "tenant-\uff21", "NFKC"],
+      ];
+      const escapeNonAscii = (s: string) =>
+        JSON.stringify(s).replace(
+          /[^\x20-\x7e]/g,
+          (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, "0")}`,
+        );
+      for (const [first, owner, form] of spellingPairs) {
+        it(`${how} の externalId の再送は、同じ externalId を先に書いた綴り違いの tenantId の Observation を返さない（${escapeNonAscii(first)} の後に ${escapeNonAscii(owner)}）`, async () => {
+          if (form !== undefined) {
+            expect(first).not.toBe(owner);
+            expect(first.normalize(form)).toBe(owner.normalize(form));
+          }
           const store = await createStore();
           const externalId = `tenant-spelling-external-id-${Math.random()}`;
           const create = async (tenantId: string) => {
