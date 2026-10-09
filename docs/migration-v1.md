@@ -3043,7 +3043,7 @@ WHERE provenance->>'kind' IS NULL;
 
 **どう直すか**: `purgeMemory` は `recalls.query` とイベントの `meta` に触れない（書き換えるのは目次帯の digest だけ）。`createObservation` の冪等の判定は、テナントの値ごとに、同じテナントの行だけを探す。`LexicalStore.search` は、`filter.status` を省いたとき status で絞らない。
 
-**確かめたこと**: `@mnemora/postgres` と fixture で緑。足した `it` は、purge が `query` を伏せる変異（InMemory と Postgres）、purge が `meta.note` を消す変異（InMemory と Postgres）、`createObservation` の冪等の再読みを綴り違いのテナントの行から探す変異（InMemory と Postgres）、`filter.status` 未指定のとき forgotten を落とす変異（InMemory と Postgres の lexical・trigram）、superseded を落とす変異（Postgres の lexical）で、それぞれ赤になった。**確かめていないこと**: 外部の adapter が実際に赤くなるか。`markContestedGroup` が既に在る `contradicts` の行を書き換えないこと（`ON CONFLICT DO NOTHING` 相当）は、suite の `listRelationsForMemory` フックが `memoryId` しか返さず、行の `createdAt` を観測できないので、suite には足していない（`@mnemora/postgres` 専用の試験だけが縛っている）。
+**確かめたこと**: `@mnemora/postgres` と fixture で緑。足した `it` は、purge が `query` を伏せる変異（InMemory と Postgres）、purge が `meta.note` を消す変異（InMemory と Postgres）、`createObservation` の冪等の再読みを綴り違いのテナントの行から探す変異（InMemory と Postgres）、`filter.status` 未指定のとき forgotten を落とす変異（InMemory と Postgres の lexical・trigram）、superseded を落とす変異（Postgres の lexical）で、それぞれ赤になった。**確かめていないこと**: 外部の adapter が実際に赤くなるか。`markContestedGroup` が既に在る `contradicts` の行を書き換えないこと（`ON CONFLICT DO NOTHING` 相当）は、suite の `listRelationsForMemory` フックが `memoryId` しか返さず、行の `createdAt` を観測できないので、suite には足していない（`@mnemora/postgres` 専用の試験だけが縛っている）。フックの型を広げるのは公開型の変更になるので、今回は見送った（クローンの判断で、オーナーの判断ではない）。
 
 **DB マイグレーション**: 要らない。
 
