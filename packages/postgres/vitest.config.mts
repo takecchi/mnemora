@@ -66,6 +66,9 @@ const SERIAL_TEST_FILES = [
   // クラスタ全体には効かないが直列群に置く: 適合の suite を import して登録し直すので、
   // `isolate: false` の並列群では、同じ worker で先に評価された適合ファイルの評価が残り、何も登録されない。
   "src/__tests__/outbox-concurrent-claim-wiring.postgres.test.ts",
+  // クラスタ全体には効かないが直列群に置く: `vi.mock("pg")` で `Pool` の生成を数えるので、`isolate: false` の並列群では、
+  // 同じ worker で先に走ったファイルが `client.ts` を読み込み済みだとモックが当たらず、数が 0 のままになる。
+  "src/__tests__/create-postgres-client-unsafe-schema-builds-no-pool.test.ts",
 ];
 
 const SHARED_SETUP_FILES = [

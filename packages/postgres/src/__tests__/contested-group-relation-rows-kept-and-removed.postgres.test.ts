@@ -59,6 +59,43 @@ describe("markContestedGroup: 既存の contradicts を消さない", () => {
   });
 });
 
+describe("markContestedGroup: 既に在る contradicts の行は書き換えない", () => {
+  it("既に contradicts が張られたメンバーで呼んでも、その行の id と created_at は変わらない", async () => {
+    const tenantId = "cg-mark-leaves-existing-relation-rows";
+    await resetTestDatabase();
+    const { db, pool } = await getTestClient();
+    const store = new PostgresMemoryStore(db);
+    const relations = new PostgresRelationStore(db);
+    const ctx: Ctx = { tenantId };
+    const a = await insertRawMemory(pool, tenantId, "a", none);
+    const b = await insertRawMemory(pool, tenantId, "b", none);
+    const c = await insertRawMemory(pool, tenantId, "c", none);
+    await relations.link(ctx, "contradicts", a, b);
+    await relations.link(ctx, "contradicts", b, a);
+    const rowsOf = async () =>
+      (
+        await pool.query(
+          `SELECT id, from_memory_id, to_memory_id, created_at FROM memory_relations
+           WHERE tenant_id = $1 AND from_memory_id IN ($2, $3) AND to_memory_id IN ($2, $3)
+           ORDER BY from_memory_id`,
+          [tenantId, a, b],
+        )
+      ).rows;
+    const before = await rowsOf();
+    expect(before).toHaveLength(2);
+
+    await store.markContestedGroup(
+      ctx,
+      [a, b, c].map((id) => ({ id, event: newEvent(tenantId, id, "m") })),
+    );
+
+    expect(await rowsOf()).toEqual(before);
+    // 重なる組のうち、まだ無かった a-c・b-c には新しく張られている。
+    expect(await contradicts(pool, tenantId, a, c)).toBe(1);
+    expect(await contradicts(pool, tenantId, c, b)).toBe(1);
+  });
+});
+
 describe("resolveContestedGroup: 群から抜けた元メンバーとの行を消さない", () => {
   it("群の外へ向かう contradicts は、残りのメンバーを解消したあとも残る", async () => {
     const tenantId = "cg-resolve-keeps-outside-relation";
