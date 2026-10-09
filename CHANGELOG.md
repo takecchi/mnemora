@@ -68,6 +68,9 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 - **`MemoryStore.getMany` の `ids` と `OutboxStore.complete`・`fail` の `jobId` は、UUID 形式なら大文字小文字を区別しない、と TSDoc に書き、conformance suite に足した**（それまで約束が無かった2つ。`@mnemora/postgres`・`@mnemora/testkit` の fixture・core の Fake は、UUID 形式の id については揃って区別していなかった。UUID 形式でない id では揃っておらず、そちらは約束しない。約束を足すのはオーナーの判断。ADR 0546 の作法どおり、足した約束は Breaking に数える）。`@mnemora/postgres` と `@mnemora/testkit` の fixture は変わっておらず、どれも緑。
   - **無条件の追加（新しく赤になりうる）**: `describeMemoryStoreConformance` に `getMany` の、`describeOutboxStoreConformance` に `complete`・`fail` の、大文字の UUID でも同じ行に当たることの `it` が増えた（`complete`・`fail` は、大文字の jobId でも同じ行の attempts で CAS すること、終端が付くことを見る）。どれも、id が UUID 形式でなければ skip する——**testkit の fixture の id は UUID 形式でないので、実際に走るのは UUID 形式の id を発行する adapter（`@mnemora/postgres` など）だけ**。
   - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目77。DB マイグレーションは無い。
+- **conformance suite に約束を足した——`MemoryStore` の `createObservation` の `externalId` の冪等と `getRecall` も、大文字小文字だけが違う `tenantId` を別のテナントとして扱うこと**（[Issue #2048](https://github.com/takecchi/mnemora/issues/2048)。#1938 が `MemoryStore` に足した同じ約束〔上の項目〕の外に残っていた2つの口。`Ctx` の TSDoc「識別子は正規化せず、完全一致で比べる」と `MemoryStore` の TSDoc「テナント分離」に既にある約束で、新しい約束ではない。ADR 0546 の作法どおり、suite に足した約束は Breaking に数える。クローンの判断で、オーナーの判断ではない）。`@mnemora/postgres` と `@mnemora/testkit` の fixture は変わっておらず、どれも緑。
+  - **無条件の追加（新しく赤になりうる）**: `createObservation` が、綴り違いのテナントで同じ `externalId` を渡されたとき、相手の Observation を返さずに自分のテナントに書くこと（同じ綴りの再送は同じ Observation を返す）、`getRecall` が綴り違いのテナントの recall を返さないこと、の `it` が増えた。
+  - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目78。DB マイグレーションは無い。
 
 ### Added
 

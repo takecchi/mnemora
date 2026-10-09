@@ -2589,7 +2589,7 @@ export class PostgresMemoryStore implements MemoryStore {
       return null;
     }
     const result = await this.db.execute(sql`
-      SELECT * FROM recalls WHERE tenant_id = ${ctx.tenantId} AND id = ${id} LIMIT 1
+      SELECT * FROM recalls WHERE lower(tenant_id) = lower(${ctx.tenantId}) AND id = ${id} LIMIT 1
     `);
     return result.rows.length > 0
       ? rowToRecallRecord(result.rows[0] as unknown as RecallRow)

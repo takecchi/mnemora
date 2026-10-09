@@ -169,3 +169,18 @@ PR ごとに1件1行。
 ## これが覆るとしたら
 
 schema 名を検査してから同梱の呼び出しを使うこと、trigram の閾値が渡した値のまま効くこと、reinforce の起点が `lastReinforcedAt ?? recordedAt` であること、`setEventRetention` が `kind` を完全一致で拒むこと、resolve 系の note 付きイベントが対向の id を持つこと、consolidate・reflect の created の actor と note（tick 経由は `system` で note 無し）、種が withdrawn かを `status` と `purgedAt` の両方で見ること、`purgeExpiredEvents` が実際に消えた行から件数・期間を取り古い順に消し同時の呼び出しでも掴まれた行を飛ばさないこと、LLM の本文・tags の空白の扱い、`reextract` が使用報告だけを拒むことが変わるとき。ADR 0354・0547 のように関数の置き場が変わるときは、変異の入れ先を読み替えて当て直す。
+
+## 追記（2026-10-09、[Issue #2048](https://github.com/takecchi/mnemora/issues/2048)）: #1176 の出所に挙げた TSDoc の文面は、今の `schema-namespace.ts` に無い
+
+上の「#1176（schema 名の検査・trigram の閾値）」で、出所を「`schema-namespace.ts` の TSDoc（同梱の呼び出しは、どれも先に検査を通してから呼んでいる）」と書いた。**この文面は、いまの `schema-namespace.ts` に無い。**#1873（2026-10-07、コメントを Why not と公開の約束だけに縮めた PR）で消えた（`git log -S"同梱の呼び出し" -- packages/postgres/src/schema-namespace.ts` は、足した #1176 と消した #1873 の2件を返す。[Issue #2016](https://github.com/takecchi/mnemora/issues/2016)）。
+
+#2023 は、`schema-name-guard-bundled-callers.test.ts` の冒頭のコメントの出所を、この ADR に向け直した。ところが、この ADR が挙げる出所はもう無い。そのため、この ADR から今の出所を辿れるよう、ここに書く。上の本文は書き換えない。
+
+**今の出所**（main `8ca9f585` で確かめた）:
+
+| 呼び出し | 「受け取ったスキーマ名を、使う前に `assertSafeSchemaName` で検査する」の出所 |
+|---|---|
+| `runMigrations` | `packages/postgres/src/migrate.ts` の `runMigrations` の TSDoc、「`options.schema`」節の1（`schema`（と `extensionSchema`）を、ロック取得より前に `assertSafeSchemaName` で検証する） |
+| `registerEmbeddingSpace` | `packages/postgres/src/vector-space.ts` の `registerEmbeddingSpace` の TSDoc（`schema`・`extensionSchema` が `assertSafeSchemaName` を通らなければ、通常の `Error`。検査はロック取得より前） |
+| `createPostgresClient` | `packages/postgres/src/client.ts` の `createPostgresClient` の TSDoc、「`config.schema`」節（`schema`・`extensionSchema` を、接続オプションへ入れる前に `assertSafeSchemaName` で検査する）。#1873 で落ちた文面を、この追記と同じ PR で書き戻した。出所は、この ADR が #1176 の確かめ直しで歯を足すと決めたこと（上の本文と「これが覆るとしたら」の「schema 名を検査してから同梱の呼び出しを使うこと」）であり、新しい約束ではない |
+

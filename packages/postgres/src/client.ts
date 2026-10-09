@@ -56,6 +56,9 @@ export interface PostgresClient {
  * `-c search_path=<searchPathFor(...)>` を載せる。呼び出し側が既に `config.options` を渡していれば、
  * その値の後ろに空白区切りで追記する。
  *
+ * `schema` を指定したときは、`schema` と `extensionSchema`（省略時は {@link DEFAULT_EXTENSION_SCHEMA}）を、
+ * 接続オプションへ入れる前に `assertSafeSchemaName` で検査する。通らなければ `Pool` を作らずに `Error` を投げる。
+ *
  * 接続のたびに `SET search_path` を発行する形（`connect` イベントで `SET`）にしない。`options` は接続確立時に
  * サーバへ渡るので、pool が接続を張り直しても自動的に適用される。`connect` イベントで `SET` する形は、
  * 張り直しのたびに取りこぼしなく処理を挟む必要があり、余計な往復も要る。
