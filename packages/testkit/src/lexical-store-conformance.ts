@@ -706,6 +706,30 @@ export function describeLexicalStoreConformance(options: LexicalStoreConformance
       expect(ids).toContain(stillValidId);
     });
 
+    // vector 側の suite にはある歯が lexical 側に無かった（Issue #1940 の L12）。
+    it("filter.validAt: validFrom がちょうど validAt の Memory は返り（閉じた左端）、validAt より後の Memory は返らない", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      const boundary = new Date("2026-01-01T00:00:00.000Z");
+      const onBoundaryId = await prepareMemory(ctx, {
+        content: "obsidian shards glimmer",
+        validFrom: boundary,
+      });
+      const afterBoundaryId = await prepareMemory(ctx, {
+        content: "obsidian shards glimmer",
+        validFrom: new Date(boundary.getTime() + 1000),
+      });
+
+      const hits = await store.search(ctx, "obsidian shards", {
+        limit: 10,
+        filter: { tenantId: "tenant-1", validAt: boundary },
+      });
+      const ids = hits.map((hit) => hit.memoryId);
+
+      expect(ids).toContain(onBoundaryId);
+      expect(ids).not.toContain(afterBoundaryId);
+    });
+
     it("filter.validAt: validFrom/validUntil が両方 null の記憶は、いつ問うても返る（マネージャー決定1「いつでも真」）", async () => {
       const store = await createStore();
       const ctx: Ctx = { tenantId: "tenant-1" };
@@ -748,6 +772,32 @@ export function describeLexicalStoreConformance(options: LexicalStoreConformance
 
       expect(ids).toContain(matchingId);
       expect(ids).not.toContain(mismatchingId);
+    });
+
+    // vector 側の suite にはある歯が lexical 側に無かった（Issue #1940 の L06）。
+    it("filter.attributes: 複数キーは AND——すべて一致する Memory だけが残る", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      const bothId = await prepareMemory(ctx, {
+        content: "obsidian shards glimmer",
+        attributes: { visibility: "internal", region: "jp" },
+      });
+      const onlyOneId = await prepareMemory(ctx, {
+        content: "obsidian shards glimmer",
+        attributes: { visibility: "internal", region: "us" },
+      });
+
+      const hits = await store.search(ctx, "obsidian shards", {
+        limit: 10,
+        filter: {
+          tenantId: "tenant-1",
+          attributes: { visibility: "internal", region: "jp" },
+        },
+      });
+      const ids = hits.map((hit) => hit.memoryId);
+
+      expect(ids).toContain(bothId);
+      expect(ids).not.toContain(onlyOneId);
     });
 
     // -------------------------------------------------------------------

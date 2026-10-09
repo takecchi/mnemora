@@ -3166,6 +3166,25 @@ Issue #1939 の「すり抜けのまとめ」。約束は `Ctx` の TSDoc（識�
 
 **DB マイグレーション**: 要らない。
 
+### 87. conformance suite に約束が増えた——`LexicalStore.search` の `filter.attributes` の AND と `validFrom` の閉じた左端（`@mnemora/testkit`）
+
+[Issue #1940](https://github.com/takecchi/mnemora/issues/1940) の L06・L12。約束は `VectorFilter.attributes`・`VectorFilter.validAt` の TSDoc と、それを指す `LexicalFilter.attributes`（「同じ欄・同じ意味（ADR 0312）」）・`LexicalFilter.validAt`（「同じ絞り・同じ意味」）に既にある。`describeVectorStoreConformance` には同じ歯があり、`describeLexicalStoreConformance` に無かった。ADR 0546 の作法（足した約束は 🔴 に数える）に揃えた（クローンの判断で、オーナーの判断ではない。オーナー回答 6af9b37a の Q3 による）。
+
+**何が変わったか**: 中身は [CHANGELOG.md](../CHANGELOG.md) の `[1.4.0]` 節 `### Breaking` の「conformance suite に約束を足した——`LexicalStore.search` の `filter.attributes` の複数キーが AND であること…」の箇条を見ること。**ここには複製しない。**型・シグネチャは変わらない。
+
+**なぜ破壊的と数えるか**: 自前の adapter が、増えた `it` の約束を守っていなければ、新しく落ちる（足した約束は外せない）。
+
+**誰が影響を受けるか**: 自前の `LexicalStore` の `search` が、次のどちらかに当たる人。どちらもフラグ無しで走る。
+
+- `filter.attributes` の複数キーを、どれか1つが一致すれば通す（OR）形で絞っている。
+- `validFrom` を `valid_from < validAt`（開いた左端）で比べている。
+
+**どう直すか**: `attributes` は渡したキーすべてが同じ値で在る記憶だけを通す（`jsonb` なら `@>`）。`validFrom` は `valid_from <= validAt` で比べる。
+
+**確かめたこと**: `@mnemora/testkit` の InMemory の fixture と、`@mnemora/postgres` の `conformance.postgres.test.ts`・`trigram-lexical-store.conformance.postgres.test.ts` で緑（手元の PostgreSQL 17、UTF8・C.UTF-8、trust）。足した `it` は、InMemory の fixture と Postgres の語彙・trigram の実装のそれぞれで、attributes の判定をキーごとの OR にする変異と、`validFrom` の比較を開いた左端にする変異で、狙った1本だけが赤になった。**確かめていないこと**: 外部の adapter が実際に赤くなるか。CI の scram-sha-256 認証・SQL_ASCII の脚。
+
+**DB マイグレーション**: 要らない。
+
 ## 🟡 後方互換だが挙動が変わりうるもの（v0.1.9 → v0.2.0）
 
 （⚠ 2026-09-27: この見出しは PR #1192 が「v1.0.1 → 次の版」の節を書き換えたときに一緒に消えており、下の3項目が「v1.0.2 → 次の版」の節の中に在るように読めていた。見出しを戻した。下の3項目は v0.1.9 → v0.2.0 の話である）
