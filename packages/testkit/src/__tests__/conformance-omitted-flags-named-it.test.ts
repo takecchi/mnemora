@@ -92,6 +92,7 @@ class MinimalTenantSettingsStore implements TenantSettingsStore {
     return this.halfLifeHours.has(ctx.tenantId) ? { kind: "unlimited" } : { kind: "unset" };
   }
   async setEventRetention(ctx: Ctx, retention: EventRetentionSetting): Promise<void> {
+    assertWellFormedCtx(ctx);
     if (retention.kind === "days") assertValidEventRetentionDays(retention.days);
     this.retention.set(ctx.tenantId, retention);
   }
