@@ -6,7 +6,7 @@ const MAX = LEXICAL_QUERY_MAX_TOTAL_CHARS;
 const SURROGATE_PAIR = "😀";
 const COMBINING_SEQUENCE = "é";
 const KANA_WITH_COMBINING_VOICED_MARK = "が";
-const FAMILY_ZWJ_SEQUENCE = "👨‍👩‍👧";
+const FAMILY_ZWJ_SEQUENCE = "👨\u200D👩\u200D👧";
 
 const segmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
 

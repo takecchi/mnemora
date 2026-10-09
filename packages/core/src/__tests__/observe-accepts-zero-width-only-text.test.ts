@@ -8,7 +8,7 @@ import { createFakeRuntimeStores } from "./runtime-fakes.js";
 // スキーマ単体の試験はあるので、ここは runtime.observe の入口から通ることを見る。
 
 const ctx: Ctx = { tenantId: "tenant-observe-zero-width-only" };
-const ZERO_WIDTH_ONLY = "​";
+const ZERO_WIDTH_ONLY = "\u200B";
 
 const llm: LLMProvider = {
   complete: async () => ({ content: "unused" }),
