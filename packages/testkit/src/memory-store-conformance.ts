@@ -4873,6 +4873,29 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
       expect(updated.status).toBe("superseded");
     });
 
+    // ADR 0499 の対照: 弾くのは purge 済み（`purgedAt` が非 `null`）の行だけで、purge されていない forgotten の行は
+    // `expectedStatus: 'forgotten'` に一致して更新できる（doc「書き込み時点で対象 Memory の `status` がその値と一致するときだけ更新する」）。
+    it("updateStatus は purge されていない forgotten の行には expectedStatus: 'forgotten' で更新できる（ADR 0499 の対照）", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      const memory = await store.createMemory(
+        ctx,
+        buildNewMemoryFixture({
+          tenantId: "tenant-1",
+          contentHash: "non-purged-forgotten-cas-update-status",
+          status: "forgotten",
+        }),
+      );
+      expect(memory.purgedAt ?? null).toBeNull();
+
+      const updated = await store.updateStatus(ctx, memory.id, "active", {
+        expectedStatus: "forgotten",
+      });
+
+      expect(updated.status).toBe("active");
+      expect((await store.get(ctx, memory.id))?.status).toBe("active");
+    });
+
     it("updateStatus は expectedStatus が現在の status と不一致なら MemoryStatusConflictError を投げ、行を一切変えない", async () => {
       const store = await createStore();
       const ctx: Ctx = { tenantId: "tenant-1" };
@@ -5175,6 +5198,52 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
     // -------------------------------------------------------------------
 
     if (supportsSupersedeWithNewMemories) {
+      // ADR 0499 の対照: 弾くのは purge 済み（`purgedAt` が非 `null`）の行だけである。purge されていない forgotten の行は
+      // `expectedStatus: 'forgotten'` に一致する（`updateStatus` の doc「書き込み時点で対象 Memory の `status` がその値と
+      // 一致するときだけ更新する」。`supersede[].expectedStatus` も同じ）。forgotten 全般を弾く実装を捕まえる。
+      it("supersedeWithNewMemories は purge されていない forgotten の対象には expectedStatus: 'forgotten' で置き換わる（ADR 0499 の対照）", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const memory = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            contentHash: "non-purged-forgotten-cas-supersede",
+            status: "forgotten",
+          }),
+        );
+        expect(memory.purgedAt ?? null).toBeNull();
+
+        const result = await store.supersedeWithNewMemories!(
+          ctx,
+          [
+            {
+              input: buildNewMemoryFixture({
+                tenantId: "tenant-1",
+                contentHash: "non-purged-forgotten-cas-supersede-news",
+              }),
+              jobKinds: [],
+            },
+          ],
+          [
+            {
+              id: memory.id,
+              supersededByIndex: 0,
+              expectedStatus: "forgotten",
+              event: buildSupersedeEvent(ctx, memory.id, memory.digest),
+            },
+          ],
+        );
+
+        expect(result.conflicted).toEqual([]);
+        expect(result.superseded).toHaveLength(1);
+        const after = await store.get(ctx, memory.id);
+        expect({ status: after?.status, supersededById: after?.supersededById }).toEqual({
+          status: "superseded",
+          supersededById: result.created[0]!.memory.id,
+        });
+      });
+
       it("supersedeWithNewMemories は news を作り（3件）、created を news と同じ順序で返し、supersededByIndex が指す行へ寄せる", async () => {
         const store = await createStore();
         const ctx: Ctx = { tenantId: "tenant-1" };
