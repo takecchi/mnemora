@@ -962,6 +962,43 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
           });
         });
       }
+
+      // 同じテナントの中でも、externalId は正規化せず完全一致で比べる（`Ctx` の doc「`observe` の `externalId`…は、
+      // 大文字小文字、Unicode の正規化形（NFC と NFD）、全角半角、前後の空白が違えば別の値」）。綴りだけが違う externalId の
+      // 再送は、先に書いた側の Observation を返さず、自分の Observation を作る
+      const externalIdPairs: ReadonlyArray<readonly [string, string, ("NFC" | "NFKC")?]> = [
+        ["external-ws", " external-ws"],
+        [" external-ws ", "external-ws"],
+        ["external-prefix-ab", "external-prefix"],
+        ["External-Case", "external-case"],
+        ["external-café", "external-café", "NFC"],
+        ["external-café", "external-café", "NFC"],
+        ["external-Ａ", "external-A", "NFKC"],
+        ["external-A", "external-Ａ", "NFKC"],
+      ];
+      for (const [first, second, form] of externalIdPairs) {
+        it(`${how} の再送は、同じテナントでも綴りだけが違う externalId の Observation を返さない（${escapeNonAscii(first)} の後に ${escapeNonAscii(second)}）`, async () => {
+          if (form !== undefined) {
+            expect(first).not.toBe(second);
+            expect(first.normalize(form)).toBe(second.normalize(form));
+          }
+          const store = await createStore();
+          const tenantId = `tenant-external-id-spelling-${Math.random()}`;
+          const create = async (externalId: string) => {
+            const input = buildNewObservationFixture({ tenantId, externalId });
+            return how === "createObservation"
+              ? store.createObservation({ tenantId }, input)
+              : (await store.createObservationWithOutbox({ tenantId }, input, [])).observation;
+          };
+          const firstObservation = await create(first);
+          const secondObservation = await create(second);
+          expect(secondObservation.id).not.toBe(firstObservation.id);
+
+          // それぞれの綴りの再送は、それぞれの Observation を返す
+          expect((await create(second)).id).toBe(secondObservation.id);
+          expect((await create(first)).id).toBe(firstObservation.id);
+        });
+      }
     }
 
     it("getRecall は、大文字小文字だけが違う tenantId の recall を返さない（自分の綴りからは見える）", async () => {
