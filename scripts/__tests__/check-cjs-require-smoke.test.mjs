@@ -50,6 +50,15 @@ describe("collectExternalRuntimeDependencyNames", () => {
       ]),
     ).toEqual([]);
   });
+
+  it("@mnemora/ 以外のスコープ付きの依存は、外部の実行時依存として残す", () => {
+    expect(
+      externalRuntimeDependencyNames({
+        dependencies: { "@huggingface/transformers": "^3.0.0", "@mnemora/core": "workspace:^" },
+        peerDependencies: { "@types/pg": "^8.0.0" },
+      }),
+    ).toEqual(["@huggingface/transformers", "@types/pg"]);
+  });
 });
 
 describe("meetsRequireEsmNodeVersion", () => {
