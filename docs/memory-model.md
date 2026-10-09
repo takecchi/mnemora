@@ -1237,6 +1237,30 @@ CREATE TABLE tenant_settings (
 既に呼び出し側から渡されている `tenant_id` に対する**任意の運用パラメータ**（保持期間・
 既定 half-life・taxonomy モード）を保持するだけであり、無くても mnemora は動く。
 
+#### `recalls` と完了済みの `outbox` の保持期間——既定は持たない。呼び出し側が `olderThan` を渡す
+
+**既定の保持期間は持たない**（オーナーが決めた。まとめ問い c9335e43、2026-10-08。
+[ADR 0698](./decisions/0698-owner-decisions-purge-scope-retention-tick-limit-rule-name.md)）。
+`memory_events` と違い、`tenant_settings` に日数の列は無く、mnemora が自分から消すことはない。
+**何もしなければ、`recalls`（とその `recall_usages`）と完了済みの `outbox` の行は残り続ける。**
+消すのは運用側で、次の2つの口を自分で呼ぶ（どちらも任意メソッド。口は
+[ADR 0404](./decisions/0404-purge-expired-recalls-and-completed-outbox-jobs.md)）:
+
+| 口 | 消すもの | 消さないもの |
+|---|---|---|
+| `MemoryStore.purgeExpiredRecalls?` | `created_at < olderThan` の `recalls` 行と、その `recall_usages`（同一トランザクション） | `memory_events.meta` に載った `recallId` の文字列 |
+| `OutboxStore.purgeCompletedJobs?` | `completed_at < olderThan` の完了した行 | claim 中・未処理・`failed_at` の付いた行（どれだけ古くても） |
+
+- **`olderThan` と `limit` は必須で、既定値は無い。**何日残すかは、利用側の要件（監査・説明に recall の記録をどれだけ遡って使うか）で決める。
+- **`tick()`/`observe()` には配線していない。**`purgeExpiredEventsForTenant` と同じく、運用側の cron などから、テナントごとに呼ぶ。
+- **1回で消しきれたとは限らない。**`reachedLimit: true` が返る間は、同じ `olderThan` で呼び直す。
+  先に `dryRun: true` で件数（`purged`・`purgedUsages`）を見られる。
+- **消した記録は DB に残らない。**`events_purged` に当たる行は積まない（件数は戻り値だけで返る）。監査行を積まないことと、`failed_at` の付いた行を消す口を作らないことも決まっている（オーナー。c9335e43 問6）。
+- 消した `recallId` に後から `recordUsage` を呼ぶと、`recall not found for tenant` の `Error` になる。
+  使用の報告が遅れて届く運用なら、`olderThan` をその遅れより十分前に取る。
+- **`recalls.query`（問いの本文）は purge の約束の外で、記憶を purge しても残る**（下の「1つのテナントを消去した後に」の後の追記）。
+  `recalls.query` を消す手段は、この口で行ごと消すことである。
+
 ### forget() と purge() を分ける
 
 削除には二種類ある。`forget()` = 論理削除（`status` を変える。復元可能）。`purge()` = 物理削除
@@ -1323,6 +1347,17 @@ purged_at timestamptz NULL   -- 非NULLなら content/digest はトゥームス�
 **⚠ 2026-09-30 追記（[ADR 0389](./decisions/0389-recalls-digest-band-index.md)）: `purge()` が `recalls.index_band` の digest 帯を書き換えるときの走査の費用は、索引を足して解消した。** ADR 0375 決定6 は、この書き換えがテナントの `recalls` 全体を走査し、索引を足すかどうかは「決めていない」として残していた。`migrations/0030_recalls_digest_band_index.sql` の式 GIN 索引 `idx_recalls_digest_band`（`(index_band->'digestBand') jsonb_path_ops`）を足し、走査は対象行だけを引く形になった（振る舞いは変えていない）。代わりに `recalls` への INSERT の費用が増える（実測は ADR 0389）。`recalls` の**保持方針**（生きているテナントの分）は、引き続き決まっていない（ADR 0290）。
 
 **⚠ 2026-09-30 追記（[ADR 0404](./decisions/0404-purge-expired-recalls-and-completed-outbox-jobs.md)）: 生きているテナントの `recalls` と完了した `outbox` の行を消す口を足した。上の表の「行は全部残る」「完了した行を消す経路も保持期間も無い」は、口が無いという意味ではもう今の姿ではない。** `MemoryStore.purgeExpiredRecalls?`（`created_at < olderThan` の `recalls` を、その `recall_usages` ごと同一トランザクションで消す）と `OutboxStore.purgeCompletedJobs?`（`completed_at IS NOT NULL AND completed_at < olderThan` の行だけを消す。claim 中・未処理・`failed_at` の行は消さない）。どちらも任意メソッドで、`olderThan` は呼び出し側が必ず渡す。**保持期間の既定値・`failed` 行の扱い・`recalls.query` を約束の範囲に入れるか・監査行を積むかは、決まっていない**（オーナーに聞く事柄。ADR 0404）。消した `recallId` への `recordUsage` は例外になり、`memory_events.meta` に載った `recallId` の文字列は残る。
+
+**⚠ 2026-10-09 追記（[ADR 0698](./decisions/0698-owner-decisions-purge-scope-retention-tick-limit-rule-name.md)。オーナーが決めた。まとめ問い c9335e43、2026-10-08）: 上の表と直前の追記にある「決まっていない」のうち、次の4つは決まった。** 上の表と追記は当時の記録として書き換えていない。実行時の振る舞いは何も変えていない（どれも今の振る舞いを約束にしたもの）。
+
+| 何が | 決まったこと | 書いた場所 |
+|---|---|---|
+| `recalls`・完了済みの `outbox` の保持期間（表の `recalls`・`outbox` 行、直前の追記の「保持期間の既定値」） | **既定は持たない。**呼び出し側が `olderThan` を渡す | 上の「保持方針」の「`recalls` と完了済みの `outbox` の保持期間」 |
+| `recalls.query`（表の `recalls` 行、直前の追記の「`recalls.query` を約束の範囲に入れるか」） | **purge の約束に含めない。残る。** | `MemoryStore.purgeMemory`・`purgeExpiredRecalls` の doc |
+| claim key の検出が積んだ監査イベントの `meta.note` の `claimKey`（表の `memory_events` 行には載っていなかった。[ADR 0375](./decisions/0375-purge-scope-widened.md) の 2026-09-30 の追記「claim key の検出が積む監査イベントの `meta.note` に、claimKey の写しが残る」） | **purge の後も残ると約束する。**監査ログの行は書き換えない | `MemoryStore.purgeMemory` の doc |
+| purge と同時に走る recall の目次帯（[ADR 0421](./decisions/0421-concurrent-write-and-audit-event-holes.md) の R4） | **約束に含めない。**ただし窓があることを書く: recall の途中で forget → purge が終わると、後から記録されるその recall の `recalls.index_band` の digest 帯に、purge 前の digest が残りうる | `Runtime.purge`・`MemoryStore.purgeMemory` の doc |
+
+直前の追記の残りの2つも決まった——**`failed` の `outbox` 行を消す口と、`recalls`・`outbox` を消すときの監査行は、どちらも作らない**（今のまま。c9335e43 問6。ADR 0404「オーナーに聞く事柄」の2と4）。
 
 ---
 

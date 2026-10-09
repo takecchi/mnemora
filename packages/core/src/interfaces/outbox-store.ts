@@ -154,7 +154,8 @@ export interface OutboxStore {
    * 🔴 **任意メソッドである。** 理由は `eraseTenant?` と同じ。
    *
    * 契約:
-   * - **`opts.olderThan` は必須・既定の保持期間を持たない。**
+   * - **`opts.olderThan` は必須・既定の保持期間を持たない。**何日残すかは呼び出し側が決める（既定を持たないことは決まっている。
+   *   [ADR 0698](../../../../docs/decisions/0698-owner-decisions-purge-scope-retention-tick-limit-rule-name.md)。運用の手順は docs/memory-model.md §9「保持方針」）。
    * - **完了していない行は決して消さない**——claim 中（リース内でもリース切れでも）・未処理・`failed_at` が付いた行は、
    *   どれだけ古くても対象外。**`failed` は完了ではない。**
    * - 境界は `completed_at < olderThan`（`completed_at === olderThan` は対象外）。並びは `completed_at` 昇順。

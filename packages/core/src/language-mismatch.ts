@@ -25,7 +25,10 @@ export const LANGUAGE_MISMATCH_MIN_OBSERVATION_CJK_SHARE = 0.3;
 
 /** 言語の取り違えの疑い。`created` イベントの `meta.languageMismatch` に、そのまま入る。 */
 export interface LanguageMismatch {
-  /** 判定規則の名前（規則を変えたときに、過去の印と区別できるようにする）。 */
+  /**
+   * 判定規則の名前。判定の基準（何を取り違えとみなすか）を変えたときに名前を変え、過去の印と区別できるようにする。
+   * 数え方の修正（基準はそのままで、数え間違いを直す）だけなら名前は変えない。
+   */
   rule: "cjk_observation_latin_content";
   /** 本文のラテン文字の数（URL を除いた後）。 */
   contentLatinLetters: number;

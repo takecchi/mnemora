@@ -1,10 +1,30 @@
 import { describe, expect, it } from "vitest";
-import type { Ctx } from "@mnemora/core";
+import type { Ctx, NewRecallRecord } from "@mnemora/core";
 import { buildNewMemoryFixture, buildNewObservationFixture } from "../test-data.js";
 import { InMemoryMemoryStore } from "../__fixtures__/in-memory-memory-store.js";
 
 const UPPER: Ctx = { tenantId: "Tenant-A" };
 const LOWER: Ctx = { tenantId: "tenant-a" };
+
+function recallRecord(ctx: Ctx): NewRecallRecord {
+  return {
+    tenantId: ctx.tenantId,
+    subjectId: null,
+    query: { text: "tenant-case" },
+    budget: null,
+    omitted: [],
+    usage: {
+      chars: 0,
+      estimatedTokens: 0,
+      counter: "heuristic",
+      byTier: { full: 0, digest: 0, index: 0 },
+      indexChars: 0,
+    },
+    indexBand: { groups: [], totalInScope: 0, countKind: "exact" },
+    explain: { stages: [] },
+    returnedMemories: [],
+  };
+}
 
 async function setup() {
   const store = new InMemoryMemoryStore();
@@ -67,5 +87,34 @@ describe("綴りだけが違う tenant は別の tenant（InMemoryMemoryStore）
     expect(erased.kind === "executed" ? erased.deleted : 0).toBeGreaterThan(0);
     expect(await store.get(UPPER, upperMemory.id)).toBeNull();
     expect((await store.get(LOWER, lowerMemory.id))?.id).toBe(lowerMemory.id);
+  });
+
+  it("createObservation の externalId の冪等は tenant の綴りごと: 綴りの違う tenant の Observation を返さず、自分の tenant に書く", async () => {
+    const store = new InMemoryMemoryStore();
+    const upperObservation = await store.createObservation(
+      UPPER,
+      buildNewObservationFixture({ tenantId: UPPER.tenantId, externalId: "ext-same-spelling" }),
+    );
+    const lowerObservation = await store.createObservation(
+      LOWER,
+      buildNewObservationFixture({ tenantId: LOWER.tenantId, externalId: "ext-same-spelling" }),
+    );
+    expect(lowerObservation.id).not.toBe(upperObservation.id);
+    expect(lowerObservation.tenantId).toBe("tenant-a");
+    expect((await store.getObservation(LOWER, lowerObservation.id))?.id).toBe(lowerObservation.id);
+
+    // 同じ綴りの tenant からの再送は、同じ Observation を返す（「常に新しく書く」実装で緑にならない対照）。
+    const resent = await store.createObservation(
+      UPPER,
+      buildNewObservationFixture({ tenantId: UPPER.tenantId, externalId: "ext-same-spelling" }),
+    );
+    expect(resent.id).toBe(upperObservation.id);
+  });
+
+  it("getRecall: 相手の綴りの tenant からは null。自分の tenant からは見える", async () => {
+    const store = new InMemoryMemoryStore();
+    const upperRecallId = await store.createRecall(UPPER, recallRecord(UPPER));
+    expect(await store.getRecall(LOWER, upperRecallId)).toBeNull();
+    expect((await store.getRecall(UPPER, upperRecallId))?.recallId).toBe(upperRecallId);
   });
 });

@@ -638,3 +638,13 @@ Issue #207/#933 PR2（決定10、マネージャー経由でオーナー側の�
 (2) purge のときに該当する監査行の `meta.note` を書き換える（監査ログの行を書き換えることになり、
 上の表の `memory_events.digest_snapshot` の行が「意図的に残す」とした理由と正面から当たる）。
 どちらを採るか、あるいは残すと約束し直すかは、オーナーの判断に回した。
+
+---
+
+## 追記（2026-10-09）: claimKey の写しは残すと約束し直した。同時に走る recall の窓は約束の外のまま、文書に書いた（[ADR 0698](./0698-owner-decisions-purge-scope-retention-tick-limit-rule-name.md)）
+
+**決めたのはオーナーである**（まとめ問い c9335e43、2026-10-08）。この追記はクローンのマネージャーが書いた。上の本文と、これまでの追記は書き換えていない。
+
+- 上の追記「claim key の検出が積む監査イベントの `meta.note` に、claimKey の写しが残る」で、オーナーの判断に回した点は、**残すと約束し直す**に決まった。監査ログの行は書き換えない。`MemoryStore.purgeMemory` の doc の、残るものの一覧に足した。
+- 決定4で対象外とした `recalls.query` は、purge の約束に含めないことが、オーナーの判断として確定した。
+- 上の追記「purge と同時に走る recall は、この約束の範囲外のままである」は、**約束の外のまま**に決まった。窓があることを `Runtime.purge`・`MemoryStore.purgeMemory` の doc と `docs/memory-model.md` §9 に書いた。
