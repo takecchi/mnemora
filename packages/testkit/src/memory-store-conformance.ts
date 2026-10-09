@@ -60,6 +60,8 @@ const FLOAT4_MESSAGE = /does not fit in a Postgres "real" \(float4\) column/;
  */
 const NONEXISTENT_MEMORY_ID = randomUUID();
 
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 /**
  * 「対象が無い」異常系が投げる例外を検査するための、両実装に共通する部分文字列。
  *
@@ -997,6 +999,24 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
       );
       const result = await store.getMany(ctx, [a.id, b.id, a.id, a.id]);
       expect(result.map((m) => m.id).sort()).toEqual([a.id, b.id].sort());
+    });
+
+    // `getMany` の doc: UUID 形式の id は大文字小文字を区別しない。返る `id` の綴りは約束していないので、小文字に揃えて比べる。
+    // UUID 形式でない id の扱いは約束していないので、id が UUID 形式の adapter でだけ測る。
+    it("getMany は UUID 形式の id を大文字で渡しても、同じ Memory を返す", async ({ skip }) => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      const memory = await store.createMemory(
+        ctx,
+        buildNewMemoryFixture({ tenantId: "tenant-1", contentHash: "get-many-uuid-upper" }),
+      );
+      if (!UUID_PATTERN.test(memory.id)) {
+        skip("この adapter の id は UUID 形式ではない（大文字小文字の扱いは約束の外）");
+      }
+
+      const result = await store.getMany(ctx, [memory.id.toUpperCase()]);
+      expect(result.map((m) => m.id.toLowerCase())).toEqual([memory.id.toLowerCase()]);
+      expect(result[0]?.contentHash).toBe("get-many-uuid-upper");
     });
 
     // -------------------------------------------------------------------
