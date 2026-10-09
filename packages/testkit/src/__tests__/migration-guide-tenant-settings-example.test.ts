@@ -27,6 +27,7 @@ class MyTenantSettingsStore implements TenantSettingsStore {
   }
 
   async setEventRetention(ctx: Ctx, retention: EventRetentionSetting): Promise<void> {
+    assertWellFormedCtx(ctx);
     if (retention.kind === "days") assertValidEventRetentionDays(retention.days);
     this.retention.set(ctx.tenantId, retention);
   }

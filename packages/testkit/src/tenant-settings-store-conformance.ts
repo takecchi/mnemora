@@ -659,30 +659,55 @@ export function describeTenantSettingsStoreConformance(
     }
 
     // 保存の形で区別できない識別子は、入口で断る（ADR 0423）
+    // `ctx` を取る全メソッドの入口で同じ検査をすること（`Ctx` の TSDoc、ADR 0423 決定4）。
+    // 他の引数は正しい形にしておき、`ctx` だけが理由で断られることを見る。
+    // 任意メソッドは、それを持つと名乗る adapter（フラグ）だけが対象。
+    type CtxCall = [name: string, call: (ctx: Ctx) => Promise<unknown>];
+    const ctxCallsOf = (store: TenantSettingsStore): CtxCall[] => [
+      ["getDefaultHalfLifeHours", (ctx) => store.getDefaultHalfLifeHours(ctx)],
+      ["getEventRetention", (ctx) => store.getEventRetention(ctx)],
+      ["setEventRetention", (ctx) => store.setEventRetention(ctx, { kind: "days", days: 30 })],
+      ...(supportsDecayClock
+        ? ([
+            ["getDecayClock", (ctx) => store.getDecayClock!(ctx)],
+            ["setDecayClock", (ctx) => store.setDecayClock!(ctx, "activity")],
+            ["getDefaultHalfLifeRecalls", (ctx) => store.getDefaultHalfLifeRecalls!(ctx)],
+            ["setDefaultHalfLifeRecalls", (ctx) => store.setDefaultHalfLifeRecalls!(ctx, 100)],
+            ["getActivitySeq", (ctx) => store.getActivitySeq!(ctx)],
+            ["hasSubjectActivityCounters", (ctx) => store.hasSubjectActivityCounters!(ctx)],
+            ["getSubjectActivitySeqs", (ctx) => store.getSubjectActivitySeqs!(ctx, ["alice"])],
+          ] as CtxCall[])
+        : []),
+      ...(supportsTaxonomyMode
+        ? ([
+            ["getTaxonomyMode", (ctx) => store.getTaxonomyMode!(ctx)],
+            ["setTaxonomyMode", (ctx) => store.setTaxonomyMode!(ctx, "strict")],
+          ] as CtxCall[])
+        : []),
+      ...(supportsEraseTenant
+        ? ([["eraseTenant", (ctx) => store.eraseTenant!(ctx, { limit: 10 })]] as CtxCall[])
+        : []),
+    ];
+
     for (const [label, value] of MALFORMED_IDENTIFIER_CASES) {
       it(`${label}を含む識別子は、ctx.tenantId でも ctx.subjectId でも断る`, async () => {
         const store = await createStore();
-        const calls: Array<[string, () => Promise<unknown>]> = [
-          [
-            "getDefaultHalfLifeHours の ctx.tenantId",
-            () => store.getDefaultHalfLifeHours({ tenantId: value }),
-          ],
-          ["getEventRetention の ctx.tenantId", () => store.getEventRetention({ tenantId: value })],
-          // ADR 0437 決定2: `subjectIds` の各要素（ctx の外の識別子）も断る。
-          // `getSubjectActivitySeqs` は `supportsDecayClock: true` の adapter だけが持つ。
-          ...(supportsDecayClock
-            ? ([
-                [
-                  "getSubjectActivitySeqs の subjectIds[1]",
-                  () => store.getSubjectActivitySeqs!({ tenantId: "tenant-wf" }, ["alice", value]),
-                ],
-              ] as Array<[string, () => Promise<unknown>]>)
-            : []),
-          [
-            "getEventRetention の ctx.subjectId",
-            () => store.getEventRetention({ tenantId: "tenant-wf", subjectId: value }),
-          ],
-        ];
+        const calls: Array<[string, () => Promise<unknown>]> = [];
+        for (const [name, call] of ctxCallsOf(store)) {
+          calls.push([`${name} の ctx.tenantId`, () => call({ tenantId: value })]);
+          calls.push([
+            `${name} の ctx.subjectId`,
+            () => call({ tenantId: "tenant-wf", subjectId: value }),
+          ]);
+        }
+        // ADR 0437 決定2: `subjectIds` の各要素（ctx の外の識別子）も断る。
+        // `getSubjectActivitySeqs` は `supportsDecayClock: true` の adapter だけが持つ。
+        if (supportsDecayClock) {
+          calls.push([
+            "getSubjectActivitySeqs の subjectIds[1]",
+            () => store.getSubjectActivitySeqs!({ tenantId: "tenant-wf" }, ["alice", value]),
+          ]);
+        }
         for (const [where, call] of calls) {
           await expectMalformedIdentifierRejection(call(), `${label} / ${where}`, value);
         }

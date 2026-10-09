@@ -14948,6 +14948,24 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
         expect(labels.map((label) => label.name)).toEqual(["B", "Foo", "_a", "foo", "！", "😀"]);
       });
 
+      // 上の歯は、ラベルを createMemory 1回で作るので、挿入順がたまたま求める順と並びうる。ORDER BY（並べ替え）を外して挿入順に
+      // 任せる実装を区別するため、コードポイント順の逆（降順）に、別々の呼び出しでラベルを作ってから読む。
+      // 名前は ASCII と BMP・補助面の文字だけで、ロケール（ICU）に依存して並びが変わる組を使わない。
+      it("listLabels: 別々の呼び出しでコードポイント順の逆に作ったラベルも、name のコードポイント順で返す", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: `tenant-label-order-separate-calls-${Math.random()}` };
+        const descending = ["😀", "！", "foo", "_a", "Foo", "B"];
+        for (const tag of descending) {
+          await store.createMemory(
+            ctx,
+            buildNewMemoryFixture({ tenantId: ctx.tenantId, tags: [tag] }),
+          );
+        }
+
+        const labels = await store.listLabels!(ctx);
+        expect(labels.map((label) => label.name)).toEqual(["B", "Foo", "_a", "foo", "！", "😀"]);
+      });
+
       it("listLabels は、大文字小文字だけが違う tenantId に登録したラベルを返さない（自分の綴りからは見える）", async () => {
         const store = await createStore();
         const suffix = Math.random();
