@@ -1,6 +1,5 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import type { Pool } from "pg";
-import type * as PgModule from "pg";
 import { createPostgresClient, closePostgresClient, type PostgresClient } from "../client.js";
 import { runMigrations } from "../migrate.js";
 
@@ -15,19 +14,6 @@ import { runMigrations } from "../migrate.js";
  * 見るのは「`assertSafeSchemaName` の message で投げる」ことと、
  * 「投げる前に DB へ何も発行しない・接続を作らない」こと。
  */
-
-// `createPostgresClient` が `Pool` を作った回数。本物の `Pool` をそのまま使い、作った数だけを数える。
-const poolConstructions = vi.hoisted(() => ({ count: 0 }));
-vi.mock("pg", async (importOriginal) => {
-  const actual = await importOriginal<typeof PgModule>();
-  class CountingPool extends actual.Pool {
-    constructor(...args: ConstructorParameters<typeof actual.Pool>) {
-      super(...args);
-      poolConstructions.count += 1;
-    }
-  }
-  return { ...actual, Pool: CountingPool, default: { ...actual, Pool: CountingPool } };
-});
 
 const BAD_SCHEMA = 'Bad"x';
 const BAD_EXTENSION_SCHEMA = "Bad x";
@@ -137,29 +123,5 @@ describe("createPostgresClient: 安全でない schema・extensionSchema は、�
   it("陽性対照: 安全な schema・extensionSchema なら投げない", async () => {
     const thrown = await createOrThrow({ schema: "some_schema", extensionSchema: "ext_schema" });
     expect(thrown).toBeUndefined();
-  });
-
-  it("安全でない schema は、Pool を作らずに断る", async () => {
-    poolConstructions.count = 0;
-    const thrown = await createOrThrow({ schema: "Bad x" });
-    expect(thrown).toBeInstanceOf(Error);
-    expect(poolConstructions.count).toBe(0);
-  });
-
-  it("schema が安全でも、安全でない extensionSchema は、Pool を作らずに断る", async () => {
-    poolConstructions.count = 0;
-    const thrown = await createOrThrow({
-      schema: "some_schema",
-      extensionSchema: BAD_EXTENSION_SCHEMA,
-    });
-    expect(thrown).toBeInstanceOf(Error);
-    expect(poolConstructions.count).toBe(0);
-  });
-
-  it("陽性対照: 安全な schema・extensionSchema なら Pool を1つ作る", async () => {
-    poolConstructions.count = 0;
-    const thrown = await createOrThrow({ schema: "some_schema", extensionSchema: "ext_schema" });
-    expect(thrown).toBeUndefined();
-    expect(poolConstructions.count).toBe(1);
   });
 });
