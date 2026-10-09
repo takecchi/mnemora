@@ -1441,6 +1441,20 @@ export function describeVectorStoreConformance(options: VectorStoreConformanceOp
         expect(entries).toEqual([]);
       });
 
+      // 大文字と小文字だけが違う tenantId は別のテナント（`Ctx.tenantId` は不透明な文字列）。上の歯のテナントは綴りがまるごと違うので、テナントの比較を大文字小文字無視にした実装でも緑になる。
+      it("getVectors: 大文字小文字だけが違う tenantId の ctx には、もう片方の綴りの vector を返さない", async () => {
+        const store = await createStore();
+        const upper: Ctx = { tenantId: "Tenant-Case-GetVectors" };
+        const lower: Ctx = { tenantId: "tenant-case-getvectors" };
+        const memoryId = await prepareMemoryId(upper);
+        await store.upsert(upper, space, memoryId, [1, 0, 0]);
+
+        expect(await store.getVectors!(lower, space, [memoryId])).toEqual([]);
+        expect((await store.getVectors!(upper, space, [memoryId])).map((e) => e.memoryId)).toEqual(
+          [memoryId],
+        );
+      });
+
       // -----------------------------------------------------------------
       // Issue #1412 A8（Issue #1238 棚卸し、ADR 0373）: 渡した入力・返した値が、
       // store の中の実体と切り離されている。`getVectors`（任意メソッド）を持つ
@@ -1746,6 +1760,31 @@ export function describeVectorStoreConformance(options: VectorStoreConformanceOp
         });
         expect(hitsB1.map((h) => h.memoryId)).toContain(memoryIdB1);
         expect(hitsB2.map((h) => h.memoryId)).toContain(memoryIdB2);
+      });
+
+      // 大文字と小文字だけが違う tenantId は別のテナント（`Ctx.tenantId` は不透明な文字列）。上の歯のテナントは綴りがまるごと違うので、テナントの比較を大文字小文字無視にした実装でも緑になる。
+      it("eraseTenant は、大文字小文字だけが違う tenantId の embedding を消さない", async () => {
+        const store = await createStore();
+        const upper: Ctx = { tenantId: "Erase-Tenant-Case" };
+        const lower: Ctx = { tenantId: "erase-tenant-case" };
+        const memoryIdUpper = await prepareMemoryId(upper);
+        const memoryIdLower = await prepareMemoryId(lower);
+        await store.upsert(upper, space, memoryIdUpper, [1, 0, 0]);
+        await store.upsert(lower, space, memoryIdLower, [1, 0, 0]);
+
+        const result = await store.eraseTenant!(lower, { limit: 1000 });
+        expect(result.deleted).toBeGreaterThan(0);
+
+        const hitsLower = await store.search(lower, space, [1, 0, 0], {
+          limit: 10,
+          filter: { tenantId: lower.tenantId },
+        });
+        const hitsUpper = await store.search(upper, space, [1, 0, 0], {
+          limit: 10,
+          filter: { tenantId: upper.tenantId },
+        });
+        expect(hitsLower).toEqual([]);
+        expect(hitsUpper.map((h) => h.memoryId)).toEqual([memoryIdUpper]);
       });
 
       it("eraseTenant は limit に達すると reachedLimit: true を返し、同じ opts で呼び直すと最終的に全部消える", async () => {

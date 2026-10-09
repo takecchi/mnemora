@@ -723,7 +723,7 @@ export class PostgresVectorStore implements VectorStore {
             const result = await tx.execute(sql`
             WITH victims AS (
               SELECT tenant_id, memory_id FROM ${sql.identifier(schema)}.${sql.identifier(table)}
-              WHERE tenant_id = ${ctx.tenantId} LIMIT ${budget}
+              WHERE lower(tenant_id) = lower(${ctx.tenantId}) LIMIT ${budget}
             )
             DELETE FROM ${sql.identifier(schema)}.${sql.identifier(table)} t
             USING victims v
