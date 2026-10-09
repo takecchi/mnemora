@@ -888,6 +888,51 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
       );
     });
 
+    it("createObservation の externalId の冪等は tenantId の綴りごとで、大文字小文字だけが違う tenantId の Observation を返さない（同じ綴りの再送は同じ Observation）", async () => {
+      const store = await createStore();
+      const externalId = `tenant-case-external-id-${Math.random()}`;
+      const upperObservation = await store.createObservation(
+        UPPER_CASE_TENANT,
+        buildNewObservationFixture({ tenantId: UPPER_CASE_TENANT.tenantId, externalId }),
+      );
+      const lowerObservation = await store.createObservation(
+        LOWER_CASE_TENANT,
+        buildNewObservationFixture({ tenantId: LOWER_CASE_TENANT.tenantId, externalId }),
+      );
+
+      expect(lowerObservation.id).not.toBe(upperObservation.id);
+      expect(lowerObservation.tenantId).toBe(LOWER_CASE_TENANT.tenantId);
+      const resent = await store.createObservation(
+        UPPER_CASE_TENANT,
+        buildNewObservationFixture({ tenantId: UPPER_CASE_TENANT.tenantId, externalId }),
+      );
+      expect(resent.id).toBe(upperObservation.id);
+    });
+
+    it("getRecall は、大文字小文字だけが違う tenantId の recall を返さない（自分の綴りからは見える）", async () => {
+      const store = await createStore();
+      const recallId = await store.createRecall(UPPER_CASE_TENANT, {
+        tenantId: UPPER_CASE_TENANT.tenantId,
+        subjectId: null,
+        query: { text: "tenant-case-recall" },
+        budget: null,
+        omitted: [],
+        usage: {
+          chars: 0,
+          estimatedTokens: 0,
+          counter: "heuristic" as const,
+          byTier: { full: 0, digest: 0, index: 0 },
+          indexChars: 0,
+        },
+        indexBand: { groups: [], totalInScope: 0, countKind: "exact" as const },
+        explain: { stages: [] },
+        returnedMemories: [],
+      });
+
+      expect(await store.getRecall(LOWER_CASE_TENANT, recallId)).toBeNull();
+      expect((await store.getRecall(UPPER_CASE_TENANT, recallId))?.recallId).toBe(recallId);
+    });
+
     // -------------------------------------------------------------------
     // createObservation の冪等性（docs/memory-model.md §10、observe() の再送）
     // -------------------------------------------------------------------
@@ -14898,6 +14943,24 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
             tags: ["foo", "😀", "B", "_a", "！", "Foo"],
           }),
         );
+
+        const labels = await store.listLabels!(ctx);
+        expect(labels.map((label) => label.name)).toEqual(["B", "Foo", "_a", "foo", "！", "😀"]);
+      });
+
+      // 上の歯は、ラベルを createMemory 1回で作るので、挿入順がたまたま求める順と並びうる。ORDER BY（並べ替え）を外して挿入順に
+      // 任せる実装を区別するため、コードポイント順の逆（降順）に、別々の呼び出しでラベルを作ってから読む。
+      // 名前は ASCII と BMP・補助面の文字だけで、ロケール（ICU）に依存して並びが変わる組を使わない。
+      it("listLabels: 別々の呼び出しでコードポイント順の逆に作ったラベルも、name のコードポイント順で返す", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: `tenant-label-order-separate-calls-${Math.random()}` };
+        const descending = ["😀", "！", "foo", "_a", "Foo", "B"];
+        for (const tag of descending) {
+          await store.createMemory(
+            ctx,
+            buildNewMemoryFixture({ tenantId: ctx.tenantId, tags: [tag] }),
+          );
+        }
 
         const labels = await store.listLabels!(ctx);
         expect(labels.map((label) => label.name)).toEqual(["B", "Foo", "_a", "foo", "！", "😀"]);

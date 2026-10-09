@@ -2987,6 +2987,44 @@ WHERE provenance->>'kind' IS NULL;
 
 **DB マイグレーション**: 要らない。
 
+### 78. conformance suite に約束が増えた——`createObservation` の `externalId` の冪等と `getRecall` の、綴り違いのテナントの分離（`@mnemora/testkit`）
+
+[Issue #2048](https://github.com/takecchi/mnemora/issues/2048)。項目75で `MemoryStore` に足した約束（大文字小文字だけが違う `tenantId` は別のテナント）の外に残っていた2つの口を、suite に足した。約束は `Ctx` の TSDoc と `MemoryStore` の TSDoc に既にある。ADR 0546 の作法（足した約束は 🔴 に数える）に揃えた（クローンの判断で、オーナーの判断ではない）。
+
+**何が変わったか**: 中身は [CHANGELOG.md](../CHANGELOG.md) の `[1.4.0]` 節 `### Breaking` の「conformance suite に約束を足した——`MemoryStore` の `createObservation` の `externalId` の冪等と `getRecall` も…」の箇条を見ること。**ここには複製しない。**型・シグネチャは変わらない。
+
+**なぜ破壊的と数えるか**: 自前の adapter が、増えた `it` の約束を守っていなければ、新しく落ちる（足した約束は外せない）。
+
+**誰が影響を受けるか**: 自前の `MemoryStore` を書き、`@mnemora/testkit` の conformance suite に当てている人のうち、`externalId` の冪等の判定（同じ `externalId` の既存の Observation を探す箇所）か `getRecall` で、テナントの列を大文字小文字無視で比べている人（`lower(tenant_id) = lower($1)`、大文字小文字を区別しない照合順序の列〔MySQL の `_ci` など〕、`citext` の列）。どちらもフラグ無しで走る。`@mnemora/postgres` と `@mnemora/testkit` の fixture は緑。
+
+**どう直すか**: `tenantId` は不透明な文字列として、そのままの値で比べる（項目73・75と同じ）。`externalId` の一意性は、テナントの値ごと（`(tenant_id, external_id)`）にとる。
+
+**確かめたこと**: `@mnemora/postgres` と fixture で緑。足した `it` は、`createObservation` の冪等の判定のテナントの比較を大文字小文字無視にする変異（InMemory）、`getRecall` のテナントの比較を大文字小文字無視にする変異（InMemory と Postgres）で、それぞれ赤になった（Issue #2048）。Postgres の `createObservation` は `(tenant_id, external_id)` の一意索引で冪等を決めるので、同じ形の自然な変異が無く、当てていない。**確かめていないこと**: 外部の adapter が実際に赤くなるか。
+
+**DB マイグレーション**: 要らない。
+
+### 79. conformance suite に約束が増えた——`TenantSettingsStore` の残りのメソッドの壊れた `ctx`、`claimBatch` の取り直しの `availableAt`、`listLabels` のコードポイント順（`@mnemora/testkit`）
+
+[Issue #2012](https://github.com/takecchi/mnemora/issues/2012)・[Issue #1939](https://github.com/takecchi/mnemora/issues/1939)（M15・M35）。約束は `Ctx` の TSDoc（ADR 0423 決定4）、`OutboxStore.claimBatch` の TSDoc（ADR 0357）、`MemoryStore.listLabels` の TSDoc に既にある。ADR 0546 の作法（足した約束は 🔴 に数える）に揃えた（クローンの判断で、オーナーの判断ではない）。
+
+**何が変わったか**: 中身は [CHANGELOG.md](../CHANGELOG.md) の `[1.4.0]` 節 `### Breaking` の「conformance suite に約束を足した——`TenantSettingsStore` の `ctx` を取る残りのメソッドも…」の箇条を見ること。**ここには複製しない。**型・シグネチャは変わらない。
+
+**なぜ破壊的と数えるか**: 自前の adapter が、増えた `it` の約束を守っていなければ、新しく落ちる（足した約束は外せない）。
+
+**誰が影響を受けるか**:
+
+- 自前の `TenantSettingsStore` を書き、`describeTenantSettingsStoreConformance` に当てている人のうち、`getDefaultHalfLifeHours`・`getEventRetention` 以外の `ctx` を取る口（`setEventRetention`、フラグを立てているなら活動時計・taxonomy mode・`eraseTenant` の口）の入口で `assertWellFormedCtx` を呼んでいない人。DB が NUL を別の理由で断るだけの口や、孤立サロゲートを置換文字に変えて保存する口は赤になる。`setEventRetention` はフラグ無しで走る。
+- 自前の `OutboxStore` で、取り直し（`claimed_at` が既に非 NULL の行の再 claim）の `available_at` を `opts.now` ではなく、リースが切れた時刻（古い `claimed_at` + `leaseMs`）に書いている人。フラグ無しで走る。
+- 自前の `MemoryStore` で `supportsLabels: true` を渡し、`listLabels` の並べ替えを持たず（挿入順・ハッシュ順・DB の返す順に任せている）、または `name` をコードポイント順でない照合順序で並べている人。
+
+`@mnemora/postgres` と `@mnemora/testkit` の fixture は緑。
+
+**どう直すか**: `ctx` を取る全メソッドの入口で `assertWellFormedCtx(ctx)` を呼ぶ。取り直しの `available_at` は `opts.now` を書く。`listLabels` は `name` をコードポイント順（Postgres なら `ORDER BY name COLLATE "C"`）で明示的に並べる。
+
+**確かめたこと**: `@mnemora/postgres` と fixture で緑。足した `it` は、InMemory と Postgres の `TenantSettingsStore` の13メソッドの `assertWellFormedCtx` を1つずつ外す変異、取り直しの `availableAt` を「古い `claimedAt` + `leaseMs`」にする変異（InMemory と Postgres）、`listLabels` の並べ替えを外す変異（InMemory と Postgres）で赤になった。**確かめていないこと**: 外部の adapter が実際に赤くなるか。
+
+**DB マイグレーション**: 要らない。
+
 ## 🟡 後方互換だが挙動が変わりうるもの（v0.1.9 → v0.2.0）
 
 （⚠ 2026-09-27: この見出しは PR #1192 が「v1.0.1 → 次の版」の節を書き換えたときに一緒に消えており、下の3項目が「v1.0.2 → 次の版」の節の中に在るように読めていた。見出しを戻した。下の3項目は v0.1.9 → v0.2.0 の話である）
