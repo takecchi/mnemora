@@ -267,6 +267,33 @@ export function describeLexicalStoreConformance(options: LexicalStoreConformance
       expect(hitsUpper.map((hit) => hit.memoryId)).toEqual([memoryId]);
     });
 
+    // `LexicalFilter.tenantId` は `ctx.tenantId` と AND で掛かり、食い違えば0件（例外は投げない）。上の2つのテナントの歯は ctx と filter.tenantId に同じテナントを渡すので、片方だけで絞る実装でも緑になる。
+    it("ctx と filter.tenantId が食い違う search は、どちらのテナントの Memory も返さず、例外も投げない", async () => {
+      const store = await createStore();
+      const ctxA: Ctx = { tenantId: "tenant-mismatch-a" };
+      const ctxB: Ctx = { tenantId: "tenant-mismatch-b" };
+      const memoryIdA = await prepareMemory(ctxA, { content: "obsidian shards glimmer" });
+      await prepareMemory(ctxB, { content: "obsidian shards glimmer" });
+
+      const ctxAFilterB = await store.search(ctxA, "obsidian shards", {
+        limit: 10,
+        filter: { tenantId: ctxB.tenantId },
+      });
+      const ctxBFilterA = await store.search(ctxB, "obsidian shards", {
+        limit: 10,
+        filter: { tenantId: ctxA.tenantId },
+      });
+      // 陽性の対照: ctx と filter が一致していれば、そのテナントの Memory だけが返る。
+      const ctxAFilterA = await store.search(ctxA, "obsidian shards", {
+        limit: 10,
+        filter: { tenantId: ctxA.tenantId },
+      });
+
+      expect(ctxAFilterB).toEqual([]);
+      expect(ctxBFilterA).toEqual([]);
+      expect(ctxAFilterA.map((hit) => hit.memoryId)).toEqual([memoryIdA]);
+    });
+
     // -------------------------------------------------------------------
     // coverage の降順（同値なら rank の降順）・limit の遵守（ADR 0092）。
     //

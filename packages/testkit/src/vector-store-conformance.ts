@@ -361,6 +361,36 @@ export function describeVectorStoreConformance(options: VectorStoreConformanceOp
       expect(hitsUpper.map((hit) => hit.memoryId)).toEqual([memoryId]);
     });
 
+    // `VectorFilter.tenantId` は `ctx.tenantId` と AND で掛かり、食い違えば0件（例外は投げない）。上の2つのテナントの歯は ctx と filter.tenantId に同じテナントを渡すので、片方だけで絞る実装でも緑になる。
+    it("ctx と filter.tenantId が食い違う search は、どちらのテナントの vector も返さず、例外も投げない", async () => {
+      const store = await createStore();
+      const ctxA: Ctx = { tenantId: "tenant-mismatch-a" };
+      const ctxB: Ctx = { tenantId: "tenant-mismatch-b" };
+      const memoryIdA = await prepareMemoryId(ctxA);
+      const memoryIdB = await prepareMemoryId(ctxB);
+
+      await store.upsert(ctxA, space, memoryIdA, [1, 0, 0]);
+      await store.upsert(ctxB, space, memoryIdB, [1, 0, 0]);
+
+      const ctxAFilterB = await store.search(ctxA, space, [1, 0, 0], {
+        limit: 10,
+        filter: { tenantId: ctxB.tenantId },
+      });
+      const ctxBFilterA = await store.search(ctxB, space, [1, 0, 0], {
+        limit: 10,
+        filter: { tenantId: ctxA.tenantId },
+      });
+      // 陽性の対照: ctx と filter が一致していれば、そのテナントの vector だけが返る。
+      const ctxAFilterA = await store.search(ctxA, space, [1, 0, 0], {
+        limit: 10,
+        filter: { tenantId: ctxA.tenantId },
+      });
+
+      expect(ctxAFilterB).toEqual([]);
+      expect(ctxBFilterA).toEqual([]);
+      expect(ctxAFilterA.map((hit) => hit.memoryId)).toEqual([memoryIdA]);
+    });
+
     // -------------------------------------------------------------------
     // space 分離（ADR 0065）: 同一 tenant で2つの embedding space を同時に使っても
     // search が混同しないこと。`InMemoryVectorStore` は key の prefix
