@@ -3991,6 +3991,13 @@ export class PostgresMemoryStore implements MemoryStore {
     try {
       return await this.db.transaction(async (tx) => {
         await lockTenantForErase(tx, ctx.tenantId);
+        if (!dryRun) {
+          await tx.execute(sql`
+            UPDATE memories SET superseded_by_id = NULL, contested_with_id = NULL
+            WHERE tenant_id = ${ctx.tenantId}
+              AND (superseded_by_id IS NOT NULL OR contested_with_id IS NOT NULL)
+          `);
+        }
         const blocked = await countForeignReferences(tx, ctx.tenantId);
         if (blocked > 0) {
           return { kind: "blocked_by_foreign_reference", count: blocked };
