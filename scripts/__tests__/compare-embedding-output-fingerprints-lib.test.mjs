@@ -63,6 +63,30 @@ describe("compareFingerprints（歯2: 一致/不一致）", () => {
     expect(result.status).toBe("mismatch");
     expect(result.cpuDiff).toEqual([]);
   });
+
+  it("sha256・dimensions が同じなら、CPU 情報が違っても match のままで、差は cpuDiff に添える", () => {
+    const legA = okLeg("example-chat", { sha256: "abc123", dimensions: 256, cpuInfo: cpuInfoA });
+    const legB = okLeg("root-gate-db-stage", {
+      sha256: "abc123",
+      dimensions: 256,
+      cpuInfo: cpuInfoB,
+    });
+    const result = compareFingerprints(legA, legB);
+    expect(result.status).toBe("match");
+    expect(result.cpuDiff).toEqual([{ field: "Model name", a: "cpu-a", b: "cpu-b" }]);
+  });
+
+  it("片方にしか無い CPU 情報の欄も、差として並ぶ", () => {
+    const legA = okLeg("example-chat", { sha256: "abc123", dimensions: 256, cpuInfo: cpuInfoA });
+    const legB = okLeg("root-gate-db-stage", {
+      sha256: "def456",
+      dimensions: 256,
+      cpuInfo: { ...cpuInfoA, "L3 cache": "32 MiB" },
+    });
+    const result = compareFingerprints(legA, legB);
+    expect(result.status).toBe("mismatch");
+    expect(result.cpuDiff).toEqual([{ field: "L3 cache", a: undefined, b: "32 MiB" }]);
+  });
 });
 
 describe("compareFingerprints（歯3: 陽性対照——片方が無いとき）", () => {
