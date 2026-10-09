@@ -109,6 +109,18 @@ describe("LLM が返した tags の空文字・空白だけの要素は捨てる
     expect(memory.tags).toEqual([]);
   });
 
+  it("1字の要素も、空白でなければ捨てない（抽出）", () => {
+    const extracted = buildNewMemoryFromCandidate({
+      ...common,
+      observation,
+      candidate: { content: "本文", provenanceKind: "stated", tags: ["旅", " ", "a"] },
+      extractorVersion: "v1",
+      llmModelId: "model",
+      promptVersion: "p1",
+    });
+    expect(extracted.tags).toEqual(["旅", "a"]);
+  });
+
   it("空白でない要素は、前後の空白を削らず、そのまま残す（抽出・統合・内省）", () => {
     const tags = [" ", " 旅行 ", "\n出張\t", ""];
     const extracted = buildNewMemoryFromCandidate({
