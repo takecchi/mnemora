@@ -3150,6 +3150,22 @@ Issue #1939 の「すり抜けのまとめ」。約束は `Ctx` の TSDoc（識�
 
 **DB マイグレーション**: 要らない。
 
+### 86. conformance suite に約束が増えた——`ctx` と `filter.tenantId` が食い違う `VectorStore.search`・`LexicalStore.search`（`@mnemora/testkit`）
+
+[Issue #1940](https://github.com/takecchi/mnemora/issues/1940) の「conformance はすり抜けたが、他の既存試験が赤にしたもの」の1つ。約束は `VectorFilter.tenantId`・`LexicalFilter.tenantId` の TSDoc「adapter は、この欄と `ctx.tenantId` の**両方**に一致する行だけを返す。2つが食い違えば0件を返し、例外は投げない」と [ADR 0007](./decisions/0007-tenant-scoping.md) の追記（Issue #1050）に既にある。ADR 0546 の作法（足した約束は 🔴 に数える）に揃えた（クローンの判断で、オーナーの判断ではない。オーナー回答 6af9b37a の Q3 による）。
+
+**何が変わったか**: 中身は [CHANGELOG.md](../CHANGELOG.md) の `[1.4.0]` 節 `### Breaking` の「conformance suite に約束を足した——`VectorStore.search`・`LexicalStore.search` が、`ctx.tenantId` と `filter.tenantId` が食い違うときは…」の箇条を見ること。**ここには複製しない。**型・シグネチャは変わらない。
+
+**なぜ破壊的と数えるか**: 自前の adapter が、増えた `it` の約束を守っていなければ、新しく落ちる（足した約束は外せない）。
+
+**誰が影響を受けるか**: 自前の `VectorStore`・`LexicalStore` の `search` が、テナントを `filter.tenantId` だけで、あるいは `ctx.tenantId` だけで絞っている人（2026-09-27 より前の `@mnemora/postgres` と testkit の InMemory はこの形だった。ADR 0007 の追記）。食い違いを例外にしている人も落ちる。どれもフラグ無しで走る。
+
+**どう直すか**: `ctx.tenantId` と `filter.tenantId` の両方に一致する行だけを返す。食い違えば0件を返し、例外は投げない。
+
+**確かめたこと**: `@mnemora/testkit` の InMemory の fixture と、`@mnemora/postgres` の `conformance.postgres.test.ts`・`trigram-lexical-store.conformance.postgres.test.ts` で緑（手元の PostgreSQL 17、UTF8・C.UTF-8、trust）。足した `it` は、InMemory の vector・lexical で `ctx` 側の比較を外す変異、Postgres の vector（統計なしの枝）・語彙・trigram で `ctx` 側・`filter` 側の条件をそれぞれ `TRUE` にする変異で、狙った1本だけが赤になった。**確かめていないこと**: Postgres の vector の統計ありの枝（suite の fixture は統計を持たないので、suite からは届かない。`tenant-boundary-reads-and-writes.postgres.test.ts` が見ている）。外部の adapter が実際に赤くなるか。CI の scram-sha-256 認証・SQL_ASCII の脚。
+
+**DB マイグレーション**: 要らない。
+
 ## 🟡 後方互換だが挙動が変わりうるもの（v0.1.9 → v0.2.0）
 
 （⚠ 2026-09-27: この見出しは PR #1192 が「v1.0.1 → 次の版」の節を書き換えたときに一緒に消えており、下の3項目が「v1.0.2 → 次の版」の節の中に在るように読めていた。見出しを戻した。下の3項目は v0.1.9 → v0.2.0 の話である）

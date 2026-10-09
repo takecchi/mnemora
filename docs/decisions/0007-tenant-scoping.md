@@ -108,3 +108,12 @@
   ——第三者の adapter にこの要件は、まだ課していない。
 - **同じ調査で、決めずに残したもの**: 書き込みの口が他テナントの id を参照として受け付ける件は
   [Issue #1051](https://github.com/takecchi/mnemora/issues/1051) に置いた（拒むのは入力を狭める新しい方針になる）。
+
+## 追記（2026-10-10、[Issue #1940](https://github.com/takecchi/mnemora/issues/1940)）: **上の追記の約束を conformance suite に足した**
+
+⚠ **上の追記は当時の記録なので書き換えていない。**上の追記の「`*-conformance.ts` には足していない（Issue #809）」は、この追記の時点で当てはまらなくなった。
+
+- **何をしたか**: `describeVectorStoreConformance`・`describeLexicalStoreConformance` に、`ctx` と `filter.tenantId` が食い違う `search` は（両向きとも）0件を返し、例外を投げないことの `it` を足した。
+- **なぜ今か**: Issue #1940 の変異試験で、テナントの絞りを片方だけにする変異（InMemory の vector・lexical、Postgres の vector・語彙・trigram）が suite を緑のまま通った。約束そのものは上の追記で `VectorFilter.tenantId`/`LexicalFilter.tenantId` の TSDoc に書いてあった。TSDoc に既にある約束を suite に足すことは、オーナー回答 6af9b37a の Q3 により、クローンが決めてよいものに当たる（Issue #809 は閉じている）。足した約束は ADR 0546 の作法で 🔴 に数え、CHANGELOG `[1.4.0]` `### Breaking` と `docs/migration-v1.md` の項目86に書いた。
+- **決めたのは誰か**: クローン miku の判断。オーナーの判断ではない。
+- **届いていないもの**: `PostgresVectorStore` の統計ありの枝（suite の fixture は統計を持たないので、suite からは届かない）。この枝は `packages/postgres/src/__tests__/tenant-boundary-reads-and-writes.postgres.test.ts` が見ている。

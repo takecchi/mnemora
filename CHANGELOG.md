@@ -97,6 +97,9 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - **フラグに応じた追加（新しく赤になりうる）**: `describeVectorStoreConformance` の `getVectors` を持つ store の枝に、綴り違いのテナントの ctx の `getVectors` がもう片方の綴りの vector を返さないこと、`supportsEraseTenant` の枝に、`eraseTenant` が大文字小文字だけが違うテナントの embedding を消さないこと、の `it` が増えた。
   - **無条件の追加（新しく赤になりうる）**: `describeRelationStoreConformance` に、大文字小文字だけが違う tenantId の ctx からの `unlink` は、同じ組を指定してもその行を消さないこと、の `it` が増えた。クローンの判断で、オーナーの判断ではない。
   - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目85。DB マイグレーションは無い。
+- **conformance suite に約束を足した——`VectorStore.search`・`LexicalStore.search` が、`ctx.tenantId` と `filter.tenantId` が食い違うときは0件を返し、例外を投げないこと**（Issue #1940 の「conformance はすり抜けたが、他の既存試験が赤にしたもの」の1つ。InMemory の fixture と `@mnemora/postgres` の vector・語彙・trigram の実装で、テナントの絞りを `ctx` か `filter.tenantId` の片方だけにする変異を当てると、suite は緑のままだった。suite の2テナントの歯は、`ctx` と `filter.tenantId` に同じテナントを渡していた。約束は `VectorFilter.tenantId`・`LexicalFilter.tenantId` の TSDoc「adapter は、この欄と `ctx.tenantId` の**両方**に一致する行だけを返す。2つが食い違えば0件を返し、例外は投げない」と ADR 0007 の追記（Issue #1050）に既にある。ADR 0007 の追記は「`*-conformance.ts` には足していない（Issue #809）」と書いていたので、ADR 0007 に追記した）。`@mnemora/postgres` と `@mnemora/testkit` の fixture は変わっておらず、どれも緑。
+  - **無条件の追加（新しく赤になりうる）**: `describeVectorStoreConformance`・`describeLexicalStoreConformance` に、`ctx` と `filter.tenantId` が食い違う `search` は（両向きとも）どちらのテナントの記憶も返さず、例外も投げないこと、の `it` が増えた。クローンの判断で、オーナーの判断ではない。
+  - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目86。DB マイグレーションは無い。
 
 ### Added
 
