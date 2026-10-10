@@ -108,6 +108,7 @@ export class CassetteRecorder {
  * - 同じ入力を並列に呼んでも delegate は1回だけ呼ぶ。失敗した呼び出しは memo に残さない。
  *   ⚠ 並列に待っている側は、先に呼んだ側の `opts.signal` の abort も共有する。
  * - delegate が壊れたベクトル（次元の食い違い・有限でない成分）を返したら、記録せずに落とす。
+ * - delegate が入力と違う件数のベクトルを返したら、1件も記録せずに落とす（件数がずれると、どの入力にどのベクトルが対応するかが決まらないため）。
  * - 返すベクトルは記録とは別の配列。
  */
 export class RecordingEmbeddingProvider implements EmbeddingProvider {

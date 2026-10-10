@@ -90,6 +90,71 @@ describe("RecordingEmbeddingProvider: 約束違反の戻りは記録せずに落
     await expect(recording.embed(ctx, ["あ"])).rejects.toThrow(/違う件数を返した/);
     expect(recorder.embeddingCount).toBe(0);
   });
+
+  it("入力より少ない件数（3件に2件）を返したら、3件とも記録せずに落とす（先頭だけ記録しない）", async () => {
+    const recorder = new CassetteRecorder();
+    const recording = new RecordingEmbeddingProvider(
+      providerReturning([
+        [1, 1],
+        [2, 2],
+      ]),
+      recorder,
+    );
+    await expect(recording.embed(ctx, ["あ", "い", "う"])).rejects.toThrow(/違う件数を返した/);
+    for (const text of ["あ", "い", "う"]) {
+      expect(recorder.lookupEmbedding(text)).toBeUndefined();
+    }
+    expect(recorder.embeddingCount).toBe(0);
+  });
+
+  it("入力より多い件数（2件に3件）を返したら、2件とも記録せずに落とす", async () => {
+    const recorder = new CassetteRecorder();
+    const recording = new RecordingEmbeddingProvider(
+      providerReturning([
+        [1, 1],
+        [2, 2],
+        [3, 3],
+      ]),
+      recorder,
+    );
+    await expect(recording.embed(ctx, ["あ", "い"])).rejects.toThrow(/違う件数を返した/);
+    for (const text of ["あ", "い"]) {
+      expect(recorder.lookupEmbedding(text)).toBeUndefined();
+    }
+    expect(recorder.embeddingCount).toBe(0);
+  });
+
+  it("件数違いで落ちても、それより前に記録した入力は引け、同じ入力を再度呼べば委譲先を呼び直して記録する", async () => {
+    const responses: number[][][] = [
+      [[1, 1]],
+      [[2, 2]],
+      [
+        [2, 2],
+        [3, 3],
+      ],
+    ];
+    let calls = 0;
+    const delegate: EmbeddingProvider = {
+      space,
+      embed: async () => responses[calls++]!,
+    };
+    const recorder = new CassetteRecorder();
+    const recording = new RecordingEmbeddingProvider(delegate, recorder);
+    await recording.embed(ctx, ["あ"]);
+
+    await expect(recording.embed(ctx, ["い", "う"])).rejects.toThrow(/違う件数を返した/);
+    expect(recorder.lookupEmbedding("あ")?.vector).toEqual([1, 1]);
+    expect(recorder.lookupEmbedding("い")).toBeUndefined();
+
+    await expect(recording.embed(ctx, ["い", "う"])).resolves.toEqual([
+      [2, 2],
+      [3, 3],
+    ]);
+    expect(calls).toBe(3);
+    expect(recorder.lookupEmbedding("い")?.vector).toEqual([2, 2]);
+    expect(recorder.lookupEmbedding("う")?.vector).toEqual([3, 3]);
+    expect(recorder.lookupEmbedding("あ")?.vector).toEqual([1, 1]);
+  });
 });
 
 describe("RecordingLLMProvider: delegate が返した後に自分の戻りを書き換えても、記録は動かない（ADR 0500 の追記）", () => {
