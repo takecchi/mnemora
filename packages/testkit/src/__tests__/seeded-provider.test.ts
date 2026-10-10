@@ -152,6 +152,39 @@ describe("SeededLLMProvider", () => {
     expect(delegate.calls).toHaveLength(0);
   });
 
+  it("委譲先の complete が失敗しても、渡した件数として real が1増える（seeded は増えない）", async () => {
+    const delegate = new ThrowingLLMProvider();
+    const provider = new SeededLLMProvider(delegate, {
+      seed: seedLLMSection([]),
+      expectedModel: MODEL,
+    });
+
+    await expect(provider.complete(ctx, promptFor("種に無い・失敗する"))).rejects.toThrow(
+      /呼ばれてはいけない/,
+    );
+
+    expect(delegate.calls).toHaveLength(1);
+    expect(provider.usage).toEqual({ seeded: 0, real: 1 });
+  });
+
+  it("委譲先の completeStructured が失敗しても、渡した件数として real が1増える（seeded は増えない）", async () => {
+    const delegate = new ThrowingLLMProvider();
+    const provider = new SeededLLMProvider(delegate, {
+      seed: seedLLMSection([]),
+      expectedModel: MODEL,
+    });
+
+    await expect(
+      provider.completeStructured(ctx, {
+        prompt: promptFor("種に無い・失敗する2"),
+        schema: SCHEMA,
+      }),
+    ).rejects.toThrow(/呼ばれてはいけない/);
+
+    expect(delegate.calls).toHaveLength(1);
+    expect(provider.usage).toEqual({ seeded: 0, real: 1 });
+  });
+
   it("モデル名が種と食い違えば構築時に例外", () => {
     const seed = seedLLMSection([]);
     const delegate = new ThrowingLLMProvider();
@@ -275,6 +308,59 @@ describe("SeededEmbeddingProvider", () => {
     await expect(provider.embed(ctx, ["種に無い文A", "種に無い文B"])).rejects.toThrow(
       /委譲先が入力と違う件数を返した/,
     );
+  });
+
+  it("委譲先が reject しても、種に無かったテキストの件数が real に入り、seeded は種から返した件数のまま（種ヒット1・未ヒット2 で { seeded: 1, real: 2 }）", async () => {
+    const seed = seedEmbeddingSection([{ text: "種にある文", vector: [9, 9, 9] }]);
+    const delegate = new ThrowingEmbeddingProvider();
+    const provider = new SeededEmbeddingProvider(delegate, { seed, expectedSpace: SPACE });
+
+    await expect(provider.embed(ctx, ["種にある文", "未1", "未2"])).rejects.toThrow(
+      /呼ばれてはいけない/,
+    );
+
+    expect(delegate.calls).toEqual([["未1", "未2"]]);
+    expect(provider.usage).toEqual({ seeded: 1, real: 2 });
+  });
+
+  it("委譲先が違う件数を返して落ちても、委譲先へ渡した件数が real に入る", async () => {
+    const seed = seedEmbeddingSection([]);
+    const delegate: EmbeddingProvider = {
+      space: SPACE,
+      embed: async () => [[1, 2, 3]],
+    };
+    const provider = new SeededEmbeddingProvider(delegate, { seed, expectedSpace: SPACE });
+
+    await expect(provider.embed(ctx, ["種に無い文A", "種に無い文B"])).rejects.toThrow(
+      /委譲先が入力と違う件数を返した/,
+    );
+
+    expect(provider.usage).toEqual({ seeded: 0, real: 2 });
+  });
+
+  it("委譲先が失敗した embed を繰り返すと、渡した件数が呼び出しごとに1回ずつだけ real に積まれる", async () => {
+    const seed = seedEmbeddingSection([]);
+    const delegate = new ThrowingEmbeddingProvider();
+    const provider = new SeededEmbeddingProvider(delegate, { seed, expectedSpace: SPACE });
+
+    await expect(provider.embed(ctx, ["未1", "未2"])).rejects.toThrow();
+    await expect(provider.embed(ctx, ["未3"])).rejects.toThrow();
+
+    expect(provider.usage).toEqual({ seeded: 0, real: 3 });
+  });
+
+  it("種ヒットだけの embed では委譲先が呼ばれず、real は 0 のまま", async () => {
+    const seed = seedEmbeddingSection([
+      { text: "種A", vector: [1, 1, 1] },
+      { text: "種B", vector: [2, 2, 2] },
+    ]);
+    const delegate = new ThrowingEmbeddingProvider();
+    const provider = new SeededEmbeddingProvider(delegate, { seed, expectedSpace: SPACE });
+
+    await provider.embed(ctx, ["種A", "種B"]);
+
+    expect(delegate.calls).toHaveLength(0);
+    expect(provider.usage).toEqual({ seeded: 2, real: 0 });
   });
 
   it("種と欠けを交互に混ぜた入力で、戻りが入力の順になる（欠けが2件以上）", async () => {
