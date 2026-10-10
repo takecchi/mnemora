@@ -109,6 +109,24 @@ describe("LLM が返した tags の空文字・空白だけの要素は捨てる
     expect(memory.tags).toEqual([]);
   });
 
+  it("統合: LLM が tags: [] を返したら、統合元にタグがあっても空配列（和集合へ倒れない）", () => {
+    const memory = buildConsolidatedMemory({
+      ...common,
+      eligible: [eligible("a", ["x"]), eligible("b", ["y"])],
+      llmResult: { content: "統合", tags: [] },
+    });
+    expect(memory.tags).toEqual([]);
+  });
+
+  it("内省: LLM が tags: [] を返したら、統合元にタグがあっても空配列（和集合へ倒れない）", () => {
+    const memory = buildReflectedMemory({
+      ...common,
+      eligible: [eligible("a", ["x"]), eligible("b", ["y"])],
+      llmResult: { outcome: "reflected", content: "内省", tags: [] },
+    });
+    expect(memory.tags).toEqual([]);
+  });
+
   it("1字の要素も、空白でなければ捨てない（抽出）", () => {
     const extracted = buildNewMemoryFromCandidate({
       ...common,

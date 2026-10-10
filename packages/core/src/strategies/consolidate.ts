@@ -116,8 +116,9 @@ export interface BuildConsolidatedMemoryParams {
  *
  * - `subjectId`: eligible 全件の `subjectId` が一致すればその値、割れていれば `null`。
  * - `provenance`: `{ kind: 'consolidated', sources: <eligible の memoryId> }`。
- * - `tags`: LLM が返した `tags` があればそれ（空文字・空白だけの要素は `dropBlankTags` で捨てる）、
- *   無ければ eligible の `tags` の和集合（重複は除く）。
+ * - `tags`: LLM が `tags` の欄を返せばそれ（空文字・空白だけの要素は `dropBlankTags` で捨てる。
+ *   `[]` や、捨てて空になったときも `[]` のままで、和集合へ倒さない）、
+ *   欄が無ければ eligible の `tags` の和集合（重複は除く）。
  * - `attributes`: eligible 全件の積集合（`intersectAttributes`）。
  * - `occurredAt`: eligible の `occurredAt` のうち最も新しいもの。全部 `null` なら `null`。
  * - `validFrom` / `validUntil`: eligible 全件の区間の積（`intersectValidity`、ADR 0368）。
