@@ -20,7 +20,7 @@ export type MalformedIdentifierReason = "lone_surrogate" | "nul";
  */
 export class MalformedIdentifierError extends Error {
   /** 判別子。クラスが2つの版に分かれても読める値（ADR 0418）。 */
-  readonly kind = "malformed_identifier" as const;
+  readonly kind = "malformed_id" as const;
   constructor(
     /** 断った欄の名前（例: `ctx.tenantId`、`input.externalId`）。 */
     readonly field: string,
