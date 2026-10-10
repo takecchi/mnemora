@@ -26,6 +26,7 @@ const KIND_BY_NAME: Record<string, string> = {
   MemoryPurgeConflictError: "memory_purge_conflict",
   ContestedWithoutCompanionError: "contested_without_companion",
   RecallOutputValidationError: "recall_output_validation",
+  MalformedIdentifierError: "malformed_identifier",
 };
 
 /** 別の realm で定義したクラスの、コンストラクタ引数をそのまま欄に写したインスタンスを返す。 */
