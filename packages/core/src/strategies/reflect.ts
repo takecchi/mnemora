@@ -108,8 +108,9 @@ export interface BuildReflectedMemoryParams {
  * `halfLifeHours`・`decayFloorAt`・`embeddingStatus`・`sourceObservationId`/`extractorVersion` の扱いは
  * そのまま踏襲する（どちらも Observation に由来しない、複数の既存 Memory から新しい Memory を組み立てる操作）。
  *
- * - `tags`: LLM が返した `tags` があればそれ（空文字・空白だけの要素は `dropBlankTags` で捨てる）、
- *   無ければ eligible の `tags` の和集合（重複は除く）。
+ * - `tags`: LLM が `tags` の欄を返せばそれ（空文字・空白だけの要素は `dropBlankTags` で捨てる。
+ *   `[]` や、捨てて空になったときも `[]` のままで、和集合へ倒さない）、
+ *   欄が無ければ eligible の `tags` の和集合（重複は除く）。
  * - `attributes`: eligible 全件の積集合（`intersectAttributes`、ADR 0312）。
  * - `validFrom` / `validUntil`: eligible 全件の区間の積（`intersectValidity`、ADR 0368）。`consolidate` と違い、
  *   `reflect` は材料を `superseded` にしないので、材料が期限切れになっても材料自身の行は `active` で残る
