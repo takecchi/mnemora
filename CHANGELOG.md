@@ -114,6 +114,8 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 
 - **`@mnemora/testkit` の `InMemoryMemoryStore.supersedeWithNewMemories` が、CAS に弾かれた対象のイベントを確かめなくなった**（[ADR 0689](./docs/decisions/0689-recheck-0928-followups-cas-skipped-event-and-fake-provenance.md)。[Issue #1827](https://github.com/takecchi/mnemora/issues/1827)。クローンの判断で、オーナーの判断ではない）。
   以前は、CAS に弾かれる対象に書けないイベント（`kind` が列挙に無い・`at` が Invalid Date・`actor` に NUL・`meta` に BigInt・`sizeBeforeBytes` が整数でない）を渡すと例外になった。いまは `conflicted` に積んで返す（`MemoryStore.supersedeWithNewMemories` の TSDoc の約束。`@mnemora/postgres` は元からこの形）。CAS を通る対象は、いままでどおり状態を書き換える前に投げる。**投げる入力が減る向きだけの変更で、型・シグネチャは変わらない。**
+- **`@mnemora/testkit` の `SeededEmbeddingProvider.usage.real` が、委譲先の `embed` が失敗した呼び出しでも、渡した件数を数えるようになった**（[Issue #1999](https://github.com/takecchi/mnemora/issues/1999)。クローンの判断で、オーナーの判断ではない）。
+  以前は、委譲先が reject したときと、種に無かった入力と違う件数を返して落ちたときは `real` に入らなかった。`SeedUsageCounts.real` の TSDoc は「委譲先へ渡した件数」で、`SeededLLMProvider`（`complete`・`completeStructured`）は委譲先を呼ぶ前に数えていたので、左右が食い違っていた。いまは `SeededEmbeddingProvider` も委譲先の `embed` を呼ぶ直前に数える。失敗した呼び出しも実 API には届いており、`real` から落とすと実 API の件数が少なく見えるため。`seeded` は種から返した件数のままで、型・シグネチャは変わらない。**失敗を挟む使い方では `real` が増える向きの変更。**
 
 ## [1.3.0] - 2026-10-07
 

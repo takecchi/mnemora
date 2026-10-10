@@ -25,7 +25,7 @@ import { embeddingCassetteKey, llmCassetteKey } from "./cassette.js";
 export interface SeedUsageCounts {
   /** 種カセットから返した件数（LLM は1呼び出し1件、埋め込みは入力テキスト1件で1件）。 */
   seeded: number;
-  /** 委譲先へ渡した件数（LLM は1呼び出し1件、埋め込みは種に無かった入力テキスト1件で1件。委譲先の `embed` を呼んだ回数ではない）。 */
+  /** 委譲先へ渡した件数（LLM は1呼び出し1件、埋め込みは種に無かった入力テキスト1件で1件。委譲先の `embed` を呼んだ回数ではない）。委譲先が失敗しても数える（渡した時点で数える）。 */
   real: number;
 }
 
@@ -160,7 +160,7 @@ export class SeededEmbeddingProvider implements EmbeddingProvider {
     this.space = delegate.space;
   }
 
-  /** 種から返したテキスト件数・委譲先へ渡したテキスト件数（`embed` の呼び出し回数ではない。呼び出す時点の実測。ライブに変わる）。 */
+  /** 種から返したテキスト件数・委譲先へ渡したテキスト件数（`embed` の呼び出し回数ではない。委譲先が失敗しても、渡した時点で数える。呼び出す時点の実測。ライブに変わる）。 */
   get usage(): SeedUsageCounts {
     return { seeded: this.seededCalls, real: this.realCalls };
   }
@@ -189,6 +189,7 @@ export class SeededEmbeddingProvider implements EmbeddingProvider {
     });
 
     if (missingTexts.length > 0) {
+      this.realCalls += missingTexts.length;
       const vectors = await this.delegate.embed(ctx, missingTexts, opts);
       if (vectors.length !== missingTexts.length) {
         throw new Error(
@@ -196,7 +197,6 @@ export class SeededEmbeddingProvider implements EmbeddingProvider {
             `（入力 ${missingTexts.length} 件 / 出力 ${vectors.length} 件）。記録できない。`,
         );
       }
-      this.realCalls += missingTexts.length;
       missingIndices.forEach((idx, j) => {
         const vector = vectors[j];
         if (vector !== undefined) {
