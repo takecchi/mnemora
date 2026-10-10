@@ -135,7 +135,7 @@ export function buildConsolidatedMemory(params: BuildConsolidatedMemoryParams): 
   );
 
   const tagUnion = Array.from(new Set(eligible.flatMap((m) => m.tags)));
-  const tags = llmResult.tags !== undefined ? dropBlankTags(llmResult.tags) : tagUnion;
+  const tags = llmResult.tags !== undefined ? dropBlankTags(llmResult.tags) : [];
 
   const occurredAtCandidates = eligible
     .map((m) => m.occurredAt ?? null)
