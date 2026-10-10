@@ -15,6 +15,7 @@ import {
   isSourceMemoryForgottenError,
   isSourceMemoryStatusChangedError,
 } from "../interfaces/memory-store.js";
+import { MalformedIdentifierError, isMalformedIdentifierError } from "../identifier.js";
 import {
   EmbeddingSpaceNotRegisteredError,
   isEmbeddingSpaceNotRegisteredError,
@@ -101,6 +102,13 @@ const cases = [
     guard: isClaimKeyIndexLimitError,
     make: () => new ClaimKeyIndexLimitError("createMemory"),
   },
+  {
+    // `isMalformedIdentifierError` は kind が無いとき name を読むので、name は実質の約束（ADR 0418）。
+    name: "MalformedIdentifierError",
+    kind: "malformed_identifier",
+    guard: isMalformedIdentifierError,
+    make: () => new MalformedIdentifierError("ctx.tenantId", "nul", 0),
+  },
 ] as const;
 
 describe.each(cases)("$name の判定関数", ({ name, kind, guard, make }) => {
@@ -143,7 +151,7 @@ describe.each(cases)("$name の判定関数", ({ name, kind, guard, make }) => {
 
 /**
  * 別の realm（`vm`）で定義し直したクラスでも通る（`kind` 無し・有りの両方）。
- * 全8クラスを対象にする。陽性対照として、本物のクラスの `instanceof` は false になることも見る。
+ * 下の表のクラスを対象にする。陽性対照として、本物のクラスの `instanceof` は false になることも見る。
  */
 const foreignCases = [
   {
@@ -185,6 +193,11 @@ const foreignCases = [
     name: "RecallOutputValidationError",
     real: RecallOutputValidationError,
     guard: isRecallOutputValidationError,
+  },
+  {
+    name: "MalformedIdentifierError",
+    real: MalformedIdentifierError,
+    guard: isMalformedIdentifierError,
   },
 ] as const;
 
