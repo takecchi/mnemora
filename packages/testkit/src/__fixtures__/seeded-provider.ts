@@ -189,7 +189,6 @@ export class SeededEmbeddingProvider implements EmbeddingProvider {
     });
 
     if (missingTexts.length > 0) {
-      this.realCalls += missingTexts.length;
       const vectors = await this.delegate.embed(ctx, missingTexts, opts);
       if (vectors.length !== missingTexts.length) {
         throw new Error(
@@ -197,6 +196,7 @@ export class SeededEmbeddingProvider implements EmbeddingProvider {
             `（入力 ${missingTexts.length} 件 / 出力 ${vectors.length} 件）。記録できない。`,
         );
       }
+      this.realCalls += missingTexts.length;
       missingIndices.forEach((idx, j) => {
         const vector = vectors[j];
         if (vector !== undefined) {
