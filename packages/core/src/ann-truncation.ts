@@ -77,7 +77,7 @@ export function decideAnnTruncation(input: DecideAnnTruncationInput): AnnTruncat
   }
 
   // 分母。`M_max <= 0` や非有限は上界として使えない（0 で割った Infinity を「安全だ」と読ませない）。
-  if (!isUsableNumber(bound.value) || bound.value <= 0) {
+  if (!isUsableNumber(bound.value) || bound.value <= 1) {
     return {
       kind: "undecidable",
       reason: `宣言された上界が判定に使えない値である（value=${String(bound.value)}）。`,
