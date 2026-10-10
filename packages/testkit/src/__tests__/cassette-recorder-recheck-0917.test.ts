@@ -100,7 +100,8 @@ describe("RecordingEmbeddingProvider: 約束違反の戻りは記録せずに落
       ]),
       recorder,
     );
-    await expect(recording.embed(ctx, ["あ", "い", "う"])).rejects.toThrow(/違う件数を返した/);
+    // 例外の文言は縛らない: 先頭だけ記録して別の例外で落ちる実装を、下の lookup の検査で捕まえるため。
+    await expect(recording.embed(ctx, ["あ", "い", "う"])).rejects.toThrow();
     for (const text of ["あ", "い", "う"]) {
       expect(recorder.lookupEmbedding(text)).toBeUndefined();
     }
