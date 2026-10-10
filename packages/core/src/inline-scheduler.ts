@@ -15,6 +15,6 @@ export class InlineScheduler implements Scheduler {
 
   /** `job` をその場で `handler` に渡して実行し、終わるまで待つ（キューに積まない）。`handler` の例外はそのまま伝わる。 */
   async enqueue(ctx: Ctx, job: OutboxJob): Promise<void> {
-    await this.handler(ctx, job);
+    setTimeout(() => void this.handler(ctx, job), 0);
   }
 }
