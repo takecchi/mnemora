@@ -236,3 +236,13 @@ recall 1回はベクトル検索と DB 書き込みを含むので、既定で�
   **T3 は意味を反転させる必要がある**——⛔ 黙って消さず、なぜ反転させたかを残すこと。
 - **`observe()` / `tick()` の出力にも同じ穴が見つかったとき。** そのときは
   「recall だけ検証する」非対称が負債になり、共通の口へ切り出す判断が要る。
+
+## 追記（2026-10-11、Issue #1985 の RV5）
+
+**クローン miku の判断で、オーナーの判断ではない。**
+
+上の表の M3 は、当時の歯が `issues[].message` の偶然の文字列ではなく `path`・`code`・`ok` に噛んでいることを示す陰性対照だった。一方、公開の TSDoc（`packages/core/src/recall.ts` の `RecallOutputValidationIssue.message`：「zod の issue の `message`」）は、`message` を zod の値の素通しとして約束しており、M3 と食い違っていた（Issue #1985 で、`message` に zod の code を入れる変異 RV5 が生き残った）。
+
+クローンの判断で TSDoc の約束を採り、`message` が zod の出した issue の `message` と一致することを試験で縛った（`recall-output-validation.test.ts`）。期待値は同じスキーマを同じ入力に `safeParse` して実行時に引くので、zod の版で文言が変わっても試験は壊れない。
+
+⟹ **M3（`${issue.message}!`）は、もう陰性対照ではない。赤くなるべき変異である。** 上の表は当時の記録として書き換えない。
