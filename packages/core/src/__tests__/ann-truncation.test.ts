@@ -181,6 +181,53 @@ describe("decideAnnTruncation — 端の入力は黙って握り潰さず undeci
   });
 });
 
+/** 上界を `value` で宣言する戦略。`value` の値域の検査だけを測るため、他は何も宣言しない。 */
+function declaring(value: number): ScoringStrategy {
+  return Object.assign(((input) => undeclaredStrategy(input)) as ScoringStrategy, {
+    nonSimilarityUpperBound: () => ({
+      kind: "declared" as const,
+      value,
+      assumptions: [] as readonly string[],
+    }),
+  });
+}
+
+describe("decideAnnTruncation — 宣言された上界 value は正の有限値（NonSimilarityUpperBound の TSDoc）", () => {
+  // 他の入力は、上界がまともなら provably_safe か loss_possible に決まる値（sim 0.5、bar 0.2）。
+  it.each([
+    ["0", 0],
+    ["負（-1）", -1],
+    ["NaN", Number.NaN],
+    ["Infinity", Number.POSITIVE_INFINITY],
+    ["-Infinity", Number.NEGATIVE_INFINITY],
+  ])("value が %s なら undecidable（安全とも損失とも言わない）", (_label, value) => {
+    const v = decideAnnTruncation({
+      ...base,
+      strategy: declaring(value),
+      lastAnnSimilarity: 0.5,
+      lastReturnedTotal: 0.2,
+    });
+    expect(v.kind).toBe("undecidable");
+  });
+
+  it.each([
+    ["0.5", 0.5, 0.5, 0.2, "loss_possible"],
+    ["1e-300", 1e-300, 0.5, 1e-300, "provably_safe"],
+    ["1e-300（bar が小さければ損失）", 1e-300, 0.5, 1e-301, "loss_possible"],
+    // Number.MIN_VALUE は sim を掛けても 0 に潰れないよう sim = 1 にし、bar も MIN_VALUE にして比を 1 に保つ。
+    ["Number.MIN_VALUE", Number.MIN_VALUE, 1, Number.MIN_VALUE, "provably_safe"],
+    ["Number.MIN_VALUE（bar が 0 なら損失）", Number.MIN_VALUE, 1, 0, "loss_possible"],
+  ])("value が %s なら undecidable にせず判定する", (_label, value, sim, bar, kind) => {
+    const v = decideAnnTruncation({
+      ...base,
+      strategy: declaring(value),
+      lastAnnSimilarity: sim,
+      lastReturnedTotal: bar,
+    });
+    expect(v.kind).toBe(kind);
+  });
+});
+
 describe("decideAnnTruncation — 前提を戻り値で名乗る（ADR 0069 §6）", () => {
   // 🔴 **コメントは検査されない。**だから前提は戻り値に載せ、その中身をここで測る。
   it.each([
