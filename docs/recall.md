@@ -198,6 +198,8 @@ throw するので `embedding_provider_unavailable`）。**呼び出し側が `R
 
 最後の2行のとおり、見た目が同じ本文でも、どの正規化形で保存されたかで引ける語が変わる。NFD の結合文字(U+0301)は、Postgres では ASCII 境界の分割(`mnemora_lexical_normalize`)で、testkit では `\p{L}\p{N}` 以外の文字として区切られ、どちらも `cafe` という語だけが残るためである。opt-in の `PostgresTrigramLexicalStore` も `lower()` や正規化を通さない。NFD と NFC の `café` が当たるのは、閾値とトライグラムの重なり方でたまたま当たっているだけで、正規化として設計したものではない(`word_similarity` は 0.6、全角と半角の `ABC` は 0)。**どの正規化形に揃えるか(NFC か NFKC か、本文に掛けるか索引式に掛けるか)は決めていない。**索引式に掛けるなら `idx_memories_lexical` の作り直しが要り、書き込み時に本文へ掛けるなら保存済みの本文の意味が変わる。
 
+**⚠ 2026-10-11 追記(出所の訂正。[Issue #1940](https://github.com/takecchi/mnemora/issues/1940) の L17。クローン miku の判断で、オーナーの判断ではない)**: 上の追記は2つの約束をまとめて「(ADR 0084)」に帰しているが、ADR 0084 が書いているのは「ASCII と非 ASCII の境界で分割する」(§1.1)のほうだけで、**「ASCII の大文字小文字を区別しない」は ADR 0084 に書かれていない。**後者の出所は、PostgreSQL の `to_tsvector('simple', …)` が語を小文字にする振る舞いと、それを縛る次の試験である。`packages/postgres/src/__tests__/lexical-coverage-scale-0553.postgres.test.ts` の「大文字小文字は区別しない」(testkit の `InMemoryLexicalStore`・`PostgresLexicalStore`・`PostgresTrigramLexicalStore` の3つに、本物の Postgres で同じ入力を当てる)と、`packages/testkit/src/__tests__/in-memory-lexical-store-postgres-alignment.test.ts` の「PROJ-1234 は大文字小文字を区別せず引ける」である。
+
 ### 段2: 再スコア（索引が要らない。O(k')）
 
 入力: 段1の候補 k' 件。
