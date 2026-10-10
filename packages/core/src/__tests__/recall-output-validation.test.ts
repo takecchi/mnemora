@@ -63,6 +63,33 @@ describe('validateRecallOutput — "off" / "report" / "throw" の3状態', () =>
     );
   });
 
+  it("各項目の message は zod の issue の message そのもの（加工しない）", () => {
+    const draft = validDraft({
+      recallId: "", // min(1) 違反
+      usage: {
+        chars: 0,
+        estimatedTokens: 2.5, // int() 違反
+        counter: "heuristic",
+        byTier: { full: 0, digest: 0, index: 0 },
+        indexChars: 0,
+      },
+    });
+    const zodIssues = RecallResultSchema.safeParse(draft).error?.issues ?? [];
+    // 前提: 2箇所以上（path で対応づけるので、path が重ならないことも要る）。
+    expect(zodIssues.length).toBeGreaterThanOrEqual(2);
+    const zodPaths = zodIssues.map((issue) => issue.path.join("."));
+    expect(new Set(zodPaths).size).toBe(zodPaths.length);
+    const expectedMessageByPath = new Map(
+      zodIssues.map((issue) => [issue.path.join("."), issue.message]),
+    );
+
+    const report = validateRecallOutput(draft, "report", "rcl-1");
+
+    expect(report?.issues.map(({ path, message }) => [path, message])).toEqual([
+      ...expectedMessageByPath.entries(),
+    ]);
+  });
+
   it('"report" は正しい draft に対して { ok: true, issues: [] } を返す', () => {
     expect(validateRecallOutput(validDraft(), "report", "rcl-1")).toEqual({
       ok: true,
