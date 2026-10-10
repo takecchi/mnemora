@@ -55,6 +55,7 @@ function isUsableNumber(v: number): boolean {
 /**
  * over-fetch の窓の外に、本来 top-k に入るべき候補が残っていたかを判定する純関数（ADR 0069 案A）。
  * 判定できないときは `undecidable`（「損しなかった」ではない）を返す。例外は投げない。
+ * 宣言された上界の `value` が正の有限値でなければ、それも `undecidable` である。
  */
 export function decideAnnTruncation(input: DecideAnnTruncationInput): AnnTruncationVerdict {
   if (!isBoundedScoringStrategy(input.strategy)) {

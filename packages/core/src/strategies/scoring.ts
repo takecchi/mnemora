@@ -179,6 +179,10 @@ export interface NonSimilarityBoundInput {
 export type NonSimilarityUpperBound =
   | {
       kind: "declared";
+      /**
+       * 上界の値。**正の有限値で宣言すること。** 0 以下・`NaN`・`±Infinity` を宣言すると、
+       * `decideAnnTruncation` は判定に使わず `undecidable` を返す（「安全」とも「損しうる」とも言わない）。
+       */
       value: number;
       /**
        * この上界が成り立つために立てた前提。**歯にできていないものを含む**（ADR 0069）。
