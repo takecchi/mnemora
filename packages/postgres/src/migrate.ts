@@ -653,8 +653,8 @@ export async function runMigrations(
       }
     }
 
-    await handOverLegacyMigrationsTable(lockClient, schema);
     await ensureMigrationsTable(lockClient, schema);
+    await handOverLegacyMigrationsTable(lockClient, schema);
 
     const { rows } = await lockClient.query<AppliedMigration>(
       `SELECT name FROM ${qualify(schema, "_mnemora_migrations")}`,
