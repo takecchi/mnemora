@@ -312,7 +312,7 @@ export const MemorySchema = z.object({
   // この schema は書き込み経路では走らない（`.parse()` している箇所は無く、型の導出元として使われている）。
   // 実際に値域を強制するのは store の層（`packages/postgres` の CHECK 制約と、in-memory 実装の検査）。
   // ここを締めるのは公開された型の契約としてで、防波堤ではない。以下の `halfLifeHours`・活動時計の3つ組も同じ。
-  strength: z.number().gt(0).max(MAX_STRENGTH),
+  strength: z.number().min(0).max(MAX_STRENGTH),
   // `z.number().positive()` は `0`・負・`NaN`・`±Infinity` をすべて拒む（zod は NaN を `invalid_type` として扱う）。
   halfLifeHours: z.number().positive(),
   decayFloorAt: z.date(),
