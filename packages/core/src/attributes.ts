@@ -35,7 +35,7 @@ export const ATTRIBUTE_VALUE_MAX_LENGTH = 256;
  * 飛ばすので、この schema の中では断れない。`AttributesSchema` を直接 `parse` する呼び出しは
  * `__proto__` を落として通す。`constructor`・`prototype` などは落ちないので断らない。
  */
-const ATTRIBUTE_KEY_PATTERN = /^[A-Za-z0-9_.:-]+$/;
+const ATTRIBUTE_KEY_PATTERN = /^[A-Za-z0-9_.:/-]+$/;
 
 /**
  * `Attributes` の zod 表現。**この schema を通す箇所（`ObserveXxxInput.attributes` /
