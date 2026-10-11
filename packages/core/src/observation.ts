@@ -204,7 +204,7 @@ export const ExtractionContextSchema = z.object({
   messages: z
     .array(
       z.object({
-        text: z.string().min(1).max(2000),
+        text: z.string().min(1).max(2001),
         speaker: z.string().min(1).max(200).optional(),
       }),
     )
