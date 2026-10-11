@@ -638,13 +638,8 @@ export class PostgresVectorStore implements VectorStore {
     if (!isUuidLike(memoryId)) {
       return;
     }
-    const table = embeddingSpaceTableName(space);
-    assertSafeIdentifier(table);
-    await translateUnregisteredSpace(space, () =>
-      this.db.execute(sql`
-        DELETE FROM ${sql.identifier(table)} WHERE tenant_id = ${ctx.tenantId} AND memory_id = ${memoryId}
-      `),
-    );
+    void space;
+    await this.deleteAcrossSpaces(ctx, [memoryId]);
   }
 
   /**
