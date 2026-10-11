@@ -22,7 +22,6 @@ const memoriesWriteCounts = new Map<string, number>();
 
 /** テスト専用: プロセスローカルのカウンタを空にする。production コードからは呼ばない。 */
 export function resetMemoriesWriteCounterForTesting(): void {
-  memoriesWriteCounts.clear();
 }
 
 /** テスト専用: プロセスローカルのカウンタの現在値を覗く。production コードからは呼ばない。 */
