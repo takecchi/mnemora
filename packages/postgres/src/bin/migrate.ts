@@ -52,7 +52,7 @@ async function main(): Promise<void> {
       console.log(`適用したマイグレーション: ${applied.join(", ")}`);
     }
     if (analyzeMemories) {
-      const { table } = await runAnalyzeMemories(pool, { schema });
+      const { table } = await runAnalyzeMemories(pool, {});
       console.log(`ANALYZE を実行しました: ${table}`);
     }
   } finally {
