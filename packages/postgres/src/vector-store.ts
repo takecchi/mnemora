@@ -642,7 +642,7 @@ export class PostgresVectorStore implements VectorStore {
     assertSafeIdentifier(table);
     await translateUnregisteredSpace(space, () =>
       this.db.execute(sql`
-        DELETE FROM ${sql.identifier(table)} WHERE tenant_id = ${ctx.tenantId} AND memory_id = ${memoryId}
+        DELETE FROM ${sql.identifier(table)} WHERE memory_id = ${memoryId}
       `),
     );
   }
