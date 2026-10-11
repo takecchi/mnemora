@@ -140,7 +140,7 @@ export const MemoryEventSchema = z
     at: z.date(),
     actor: EventActorSchema,
     digestSnapshot: z.string().nullable().optional(),
-    sizeBeforeBytes: z.number().int().nonnegative().nullable().optional(),
+    sizeBeforeBytes: z.number().int().positive().nullable().optional(),
     meta: z.record(z.string(), z.unknown()),
   })
   .refine((event) => event.kind !== "events_purged" || event.memoryId === null, {
