@@ -68,6 +68,6 @@ export const OutboxJobRecordSchema = z.object({
   attempts: z.number().int().nonnegative(),
   completedAt: z.date().nullable().optional(),
   failedAt: z.date().nullable().optional(),
-  lastError: z.string().nullable().optional(),
+  lastError: z.string().nullable(),
   createdAt: z.date(),
 }) satisfies z.ZodType<OutboxJobRecord>;
