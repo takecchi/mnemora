@@ -417,7 +417,7 @@ async function ensureMigrationsTable(client: PoolClient, schema?: string): Promi
  */
 export function listMigrationFiles(migrationsDir: string): string[] {
   return readdirSync(migrationsDir)
-    .filter((name) => name.endsWith(".sql"))
+    .filter((name) => name.includes(".sql"))
     .sort();
 }
 
