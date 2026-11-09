@@ -103,7 +103,12 @@ describe("recall() — 段1の後置フィルタの境界（ゲートを押し�
       decayFloorAt: new Date(NOW.getTime() + 1),
     });
 
-    const result = await runtime.recall(ctx, { vector: [1, 0], limit: 10, association: null });
+    const result = await runtime.recall(ctx, {
+      includeFullyDecayed: false,
+      vector: [1, 0],
+      limit: 10,
+      association: null,
+    });
 
     const ids = result.memories.map((m) => m.memoryId);
     expect(ids).not.toContain(atNow.id);
@@ -118,6 +123,7 @@ describe("recall() — 段1の後置フィルタの境界（ゲートを押し�
     });
 
     const result = await runtime.recall(ctx, {
+      includeFullyDecayed: false,
       vector: [1, 0],
       limit: 10,
       validAt: NOW,
@@ -138,6 +144,7 @@ describe("recall() — below_threshold の nearMisses は上位5件", () => {
     }
 
     const result = await runtime.recall(ctx, {
+      includeFullyDecayed: false,
       vector: [1, 0],
       limit: 10,
       scoreThreshold: 0.5,
@@ -157,6 +164,7 @@ describe("recall() — 連想枠（段3.5）の境界と除外集合", () => {
     const neighbor = await createEmbeddedMemory(stores, [1, 0], { digest: "neighbor" });
 
     const result = await runtime.recall(ctx, {
+      includeFullyDecayed: false,
       vector: [1, 0],
       limit: 1,
       association: { maxCount: 5, anchorCount: 1, minSimilarity: 1 },
@@ -183,6 +191,7 @@ describe("recall() — 連想枠（段3.5）の境界と除外集合", () => {
     });
 
     const result = await runtime.recall(ctx, {
+      includeFullyDecayed: false,
       vector: [1, 0],
       limit: 1,
       association: { maxCount: 5, anchorCount: 1, minSimilarity: 0 },
@@ -206,6 +215,7 @@ describe("recall() — usage.budgetExceeded の境界", () => {
     await createEmbeddedMemory(stores, [1, 0], { digest: "de" });
 
     const result = await runtime.recall(ctx, {
+      includeFullyDecayed: false,
       vector: [1, 0],
       limit: 10,
       budget: { maxMemoryChars: 5 },

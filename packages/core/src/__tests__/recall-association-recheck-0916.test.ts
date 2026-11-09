@@ -139,6 +139,7 @@ describe("recall() — 連想枠のアンカー順（複数アンカーが同じ
       const c = await createEmbeddedMemory(stores, unit(90), { digest: "C" });
 
       const result = await runtime.recall(tenantCtx, {
+        includeFullyDecayed: false,
         vector: unit(0),
         association: { maxCount: 5, anchorCount: 2 },
       });
@@ -158,6 +159,7 @@ describe("recall() — 連想用 search() の filter が活動時計の欄も段
     const filters = captureFilters(stores);
 
     await runtime.recall(tenantCtx, {
+      includeFullyDecayed: false,
       vector: unit(0),
       association: { maxCount: 5, anchorCount: 1 },
     });
@@ -176,6 +178,7 @@ describe("recall() — 連想用 search() の filter が活動時計の欄も段
     const filters = captureFilters(stores);
 
     await runtime.recall(tenantCtx, {
+      includeFullyDecayed: false,
       vector: unit(0),
       association: { maxCount: 5, anchorCount: 1 },
     });
@@ -201,11 +204,16 @@ describe("recall() — 連想用 search() の filter が活動時計の欄も段
       },
       aliceCtx,
     );
-    await runtime.recall(aliceCtx, { vector: unit(0), activityCounting: "subject" });
+    await runtime.recall(aliceCtx, {
+      includeFullyDecayed: false,
+      vector: unit(0),
+      activityCounting: "subject",
+    });
     expect(await stores.tenantSettingsStore.hasSubjectActivityCounters(tenantCtx)).toBe(true);
     const filters = captureFilters(stores);
 
     await runtime.recall(aliceCtx, {
+      includeFullyDecayed: false,
       vector: unit(0),
       association: { maxCount: 5, anchorCount: 1 },
     });
@@ -226,6 +234,7 @@ describe("recall() — 後置の再検査で落ちた忘却ゲートの件数は
     });
 
     const result = await runtime.recall(tenantCtx, {
+      includeFullyDecayed: false,
       vector: unit(0),
       association: { maxCount: 5, anchorCount: 1 },
     });
@@ -250,7 +259,11 @@ describe("recall() — 後置の再検査で落ちた忘却ゲートの件数は
     });
     await createEmbeddedMemory(stores, unit(10), { decayFloorAt: FAR_FUTURE });
 
-    const result = await runtime.recall(tenantCtx, { vector: unit(0), association: null });
+    const result = await runtime.recall(tenantCtx, {
+      includeFullyDecayed: false,
+      vector: unit(0),
+      association: null,
+    });
 
     expect(result.memories.map((m) => m.memoryId)).not.toContain(decayed.id);
     expect(decayedOmissions(result.omitted)).toEqual([
@@ -281,7 +294,11 @@ describe("recall() — ann_unreached は1回だけ名乗る", () => {
       await createEmbeddedMemory(stores, unit(d), { decayFloorAt: FAR_FUTURE });
     }
 
-    const result = await runtime.recall(tenantCtx, { vector: unit(0), association: null });
+    const result = await runtime.recall(tenantCtx, {
+      includeFullyDecayed: false,
+      vector: unit(0),
+      association: null,
+    });
 
     expect(result.omitted.filter((o) => o.kind === "ann_unreached")).toHaveLength(1);
   });

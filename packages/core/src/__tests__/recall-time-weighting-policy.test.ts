@@ -203,6 +203,7 @@ describe("recall() — ⭐ 期限切れの予定は timeWeighting に関係な�
 
     for (const timeWeighting of ["legacy", "eventAwareFreshness"] as const) {
       const result = await runtime.recall(ctx, {
+        includeFullyDecayed: false,
         timeWeightFloor: 0,
         vector: [1, 0],
         limit: 10,

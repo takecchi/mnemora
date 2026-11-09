@@ -90,7 +90,11 @@ describe("recall() — ⭐ 使用報告した記憶だけが居残り、報告�
     const unused = await createEmbeddedMemory(stores, [1, 0], { digest: "unused" });
 
     setNow(T1);
-    const first = await runtime.recall(ctx, { vector: [1, 0], limit: 10 });
+    const first = await runtime.recall(ctx, {
+      includeFullyDecayed: false,
+      vector: [1, 0],
+      limit: 10,
+    });
     const firstIds = first.memories.map((m) => m.memoryId);
     expect(firstIds).toContain(used.id);
     expect(firstIds).toContain(unused.id);
@@ -121,7 +125,11 @@ describe("recall() — ⭐ 使用報告した記憶だけが居残り、報告�
     expect(unusedAfterReport!.decayFloorAt.getTime()).toBeLessThan(T2.getTime());
 
     setNow(T2);
-    const second = await runtime.recall(ctx, { vector: [1, 0], limit: 10 });
+    const second = await runtime.recall(ctx, {
+      includeFullyDecayed: false,
+      vector: [1, 0],
+      limit: 10,
+    });
     const secondIds = second.memories.map((m) => m.memoryId);
 
     expect(secondIds).toContain(used.id);
@@ -143,7 +151,11 @@ describe("recall() — ⭐ 使用報告した記憶だけが居残り、報告�
     const second = await createEmbeddedMemory(stores, [1, 0], { digest: "two" });
 
     setNow(T1);
-    const before = await runtime.recall(ctx, { vector: [1, 0], limit: 10 });
+    const before = await runtime.recall(ctx, {
+      includeFullyDecayed: false,
+      vector: [1, 0],
+      limit: 10,
+    });
     expect(before.memories.map((m) => m.memoryId)).toEqual(
       expect.arrayContaining([first.id, second.id]),
     );
@@ -151,7 +163,11 @@ describe("recall() — ⭐ 使用報告した記憶だけが居残り、報告�
     // ⛔ ここで `observe({ kind: 'memory_usage' })` を呼ばない——それがこの対照条件である。
 
     setNow(T2);
-    const after = await runtime.recall(ctx, { vector: [1, 0], limit: 10 });
+    const after = await runtime.recall(ctx, {
+      includeFullyDecayed: false,
+      vector: [1, 0],
+      limit: 10,
+    });
     const ids = after.memories.map((m) => m.memoryId);
     expect(ids).not.toContain(first.id);
     expect(ids).not.toContain(second.id);

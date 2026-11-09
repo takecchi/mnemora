@@ -495,7 +495,7 @@ describe("runtime.restoreArchived — 往復（sweepArchive → archived → res
     await stores.vectorStore.upsert(ctx, stores.embeddingProvider.space, memory.id, [1, 0]);
 
     // 段0（復帰前）: 既定（忘却ゲート有効）では返らないので、includeFullyDecayed:true が要る。
-    const before = await runtime.recall(ctx, { vector: [1, 0] });
+    const before = await runtime.recall(ctx, { includeFullyDecayed: false, vector: [1, 0] });
     expect(before.memories.map((m) => m.memoryId)).not.toContain(memory.id);
 
     await runtime.sweepArchive(ctx, { now: NOW, limit: 10 });
@@ -510,7 +510,7 @@ describe("runtime.restoreArchived — 往復（sweepArchive → archived → res
 
     // 段2（復帰後）: includeFullyDecayed を渡していないのに現れる。これが「reinforce を挟んだことで decayFloorAt が先へ進んだ」
     // ことの、recall() 経由での直接証拠になる。
-    const after = await runtime.recall(ctx, { vector: [1, 0] });
+    const after = await runtime.recall(ctx, { includeFullyDecayed: false, vector: [1, 0] });
     expect(after.memories.map((m) => m.memoryId)).toContain(memory.id);
   });
 });

@@ -86,7 +86,11 @@ async function buildGroup(size: number) {
 
 async function recallGroup(size: number, extra: Partial<RecallQuery> = {}) {
   const { runtime, stores, ids } = await buildGroup(size);
-  const result = await runtime.recall(ctx, { vector: [1, 0], ...extra });
+  const result = await runtime.recall(ctx, {
+    includeFullyDecayed: false,
+    vector: [1, 0],
+    ...extra,
+  });
   const companions = result.memories.filter((m) => m.retrievedVia === "mandatory_companion");
   const relationOverLimit = result.omitted.filter(
     (o) => o.kind === "over_limit" && o.stage === "relation",
@@ -101,8 +105,12 @@ describe("RecallQuery.relationMaxCount — 省略時は既定値10を明示し�
   for (const size of [3, 4, 11, 16, 30, 120]) {
     it(`群が${size}件: 省略と relationMaxCount: 10 で recall の結果（recallId 以外）が完全に同一`, async () => {
       const { runtime } = await buildGroup(size);
-      const omitted = await runtime.recall(ctx, { vector: [1, 0] });
-      const explicit = await runtime.recall(ctx, { vector: [1, 0], relationMaxCount: 10 });
+      const omitted = await runtime.recall(ctx, { includeFullyDecayed: false, vector: [1, 0] });
+      const explicit = await runtime.recall(ctx, {
+        includeFullyDecayed: false,
+        vector: [1, 0],
+        relationMaxCount: 10,
+      });
       const { recallId: _a, ...omittedRest } = omitted;
       const { recallId: _b, ...explicitRest } = explicit;
       expect(explicitRest).toEqual(omittedRest);
@@ -190,6 +198,8 @@ describe("RecallQuery.relationMaxCount — 検証", () => {
 
   it("不正な値は recall() が ZodError で拒む", async () => {
     const { runtime } = await buildGroup(3);
-    await expect(runtime.recall(ctx, { vector: [1, 0], relationMaxCount: 0 })).rejects.toThrow();
+    await expect(
+      runtime.recall(ctx, { includeFullyDecayed: false, vector: [1, 0], relationMaxCount: 0 }),
+    ).rejects.toThrow();
   });
 });

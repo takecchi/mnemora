@@ -521,7 +521,7 @@ describe("recall() — explain.stages[candidate_generation(ann)].detail.annRetur
       });
     }
 
-    const result = await runtime.recall(ctx, { vector: [1, 0] });
+    const result = await runtime.recall(ctx, { includeFullyDecayed: false, vector: [1, 0] });
     const detail = findAnnDetail(result);
     expect(detail).toMatchObject({
       hits: 2,
@@ -539,7 +539,7 @@ describe("recall() — explain.stages[candidate_generation(ann)].detail.annRetur
       });
     }
 
-    const result = await runtime.recall(ctx, { vector: [1, 0] });
+    const result = await runtime.recall(ctx, { includeFullyDecayed: false, vector: [1, 0] });
     expect(result.memories).toEqual([]);
     const detail = findAnnDetail(result);
     expect(Object.keys(detail ?? {})).not.toContain("annReturnedFewerThanReachable");
@@ -560,7 +560,7 @@ describe("recall() — explain.stages[candidate_generation(ann)].detail.annRetur
       decayFloorAt: new Date("2020-01-01T00:00:00.000Z"),
     });
 
-    const result = await runtime.recall(ctx, { vector: [1, 0] });
+    const result = await runtime.recall(ctx, { includeFullyDecayed: false, vector: [1, 0] });
     const detail = findAnnDetail(result);
     expect(detail).toMatchObject({ hits: 2 });
     expect(Object.keys(detail ?? {})).not.toContain("annReturnedFewerThanReachable");

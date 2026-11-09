@@ -3438,6 +3438,10 @@ on に変わる（[ADR 0337](./decisions/0337-recall-association-default-on.md)�
   古い記憶の `total` は以前より高くなり、閾値を割らなくなる・新しい記憶に順位で負けにくくなる。`consolidate`・`reflect` が選ぶ記憶も変わりうる。型は任意の欄（`RecallQuery.timeWeightFloor`・`ScoreBreakdown.timeWeightFloor`）が増えるだけ。
   影響が出るのは、古い記憶が沈むこと（順位・`below_threshold`・`total` の値）に頼っていた呼び出し側と、`ScoreBreakdown` を完全一致で比べていた呼び出し側である。従来どおりにするには `timeWeightFloor: 0` を渡す。
 
+- **`@mnemora/core` の `recall()`: `includeFullyDecayed` を渡さないと、忘却ゲートが掛からない**（[ADR 0707](./decisions/0707-recall-decay-gate-default-off.md)）。
+  減衰しきった記憶も候補に残り、`omitted` の `filtered(decayed)` は積まれず、`explain` の `decayGate` は `"disabled"` になる。型は変わらない。
+  影響が出るのは、減衰しきった記憶が既定で返らないこと・`filtered(decayed)` の件数に頼っていた呼び出し側である。従来どおりにするには `includeFullyDecayed: false` を渡す。`sweepArchive`（減衰しきった記憶を `archived` にする掃引）は変わらないので、明示的に掃引している運用では、archive された記憶は今までどおり返らない。
+
 ## この文書が確かめていないこと
 
 - **DB マイグレーション（`0013`/`0014`/`0015`）を実際に Postgres へ適用した結果**

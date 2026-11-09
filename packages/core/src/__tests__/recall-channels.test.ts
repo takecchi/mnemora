@@ -337,7 +337,7 @@ describe("recall() — 歯②: 既定(channels 未指定)は ADR 0084 以前と1
               channel: "ann",
               kPrime: 40,
               hits: 1,
-              decayGate: "pushed_down",
+              decayGate: "disabled" /* 既定では忘却ゲートを掛けない（ADR 0707） */,
               clock: "wall",
               validityGate: "pushed_down",
             },
@@ -396,7 +396,7 @@ describe("recall() — 歯②: 既定(channels 未指定)は ADR 0084 以前と1
       channel: "ann",
       kPrime: 40,
       hits: 2,
-      decayGate: "pushed_down",
+      decayGate: "disabled" /* 既定では忘却ゲートを掛けない（ADR 0707） */,
       clock: "wall",
       validityGate: "pushed_down",
     });

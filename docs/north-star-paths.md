@@ -55,11 +55,12 @@ ADR 0216 決定7）である。この一覧は、それを置き換えない。
 - 実装: `packages/core/src/strategies/decay.ts`
 - 実装: `packages/core/src/recall-runtime.ts`
 - テスト: `packages/postgres/src/__tests__/north-star-item1-next-day.postgres.test.ts` 「注入した時計で observe し、1日と1時間進めてから recall しても、その記憶が返る（既定のテナント設定、includeFullyDecayed なし）」
-- テスト: `packages/postgres/src/__tests__/north-star-item1-next-day.postgres.test.ts` 「陽性対照: 同じ時計を1年進めると、その記憶は返らず filtered(decayed) に数えられる（時計が減衰ゲートまで届いている）」
+- テスト: `packages/postgres/src/__tests__/north-star-item1-next-day.postgres.test.ts` 「陽性対照: 同じ時計を1年進めると、忘却ゲートを掛けた recall ではその記憶は返らず filtered(decayed) に数えられる（時計が減衰ゲートまで届いている）」
 - テスト: `packages/core/src/__tests__/decay.test.ts` 「threshold 省略時の floorAt が 0.05 由来の絶対時刻になる」
-- テスト: `packages/core/src/__tests__/recall-decay-gate.test.ts` 「既定（includeFullyDecayed 未指定）では VectorStore.search の opts.filter.decayFloorAtAfter に「いま」が渡る」
+- テスト: `packages/core/src/__tests__/recall-decay-gate.test.ts` 「includeFullyDecayed: false では VectorStore.search の opts.filter.decayFloorAtAfter に「いま」が渡る」
+- テスト: `packages/postgres/src/__tests__/north-star-item1-next-day.postgres.test.ts` 「既定（ゲートを掛けない、ADR 0707）では、1年後でも同じ言葉で問えばその記憶が返る（消えずに薄れる）」
 
-最初の2本は、Postgres と testkit の fixture の両方で走る。
+最初の2本と最後の1本は、Postgres と testkit の fixture の両方で走る。（2026-11 追記: 忘却ゲートは既定では掛けなくなった。ADR 0707）
 ⚠ 活動時計（`decayClock: 'activity'`）のテナントでは、`recall()` の回数が多いと破れうる。境界は本物の Postgres で実測済みである
 （#338、[ADR 0311](./decisions/0311-activity-clock-boundary-measured-soft-and-hard.md)。数はここに写さない）。Issue は閉じており、
 活動を数える単位は呼び出しの引数 `activityCounting` で選べる（[ADR 0353](./decisions/0353-activity-counting-per-call.md)。既定は変わらない）

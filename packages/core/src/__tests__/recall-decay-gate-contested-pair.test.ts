@@ -100,7 +100,12 @@ describe("recall() — 忘却ゲートは contested の記憶にも掛かる", (
       const { runtime, stores } = build({ adapterIgnoresDecayPushDown });
       const [a, b] = await createContestedPair(stores, runtime, new Date(NOW.getTime() - 1_000));
 
-      const result = await runtime.recall(ctx, { vector: [1, 0], limit: 10, association: null });
+      const result = await runtime.recall(ctx, {
+        includeFullyDecayed: false,
+        vector: [1, 0],
+        limit: 10,
+        association: null,
+      });
 
       const returned = result.memories.map((m) => m.memoryId);
       expect(returned).not.toContain(a.id);
@@ -140,7 +145,12 @@ describe("recall() — 忘却ゲートは contested の記憶にも掛かる", (
       new Date(NOW.getTime() + ONE_YEAR_MS),
     );
 
-    const result = await runtime.recall(ctx, { vector: [1, 0], limit: 10, association: null });
+    const result = await runtime.recall(ctx, {
+      includeFullyDecayed: false,
+      vector: [1, 0],
+      limit: 10,
+      association: null,
+    });
 
     expect(result.memories.map((m) => m.memoryId).sort()).toEqual([a.id, b.id].sort());
   });

@@ -443,6 +443,7 @@ describe("recall() — over_limit(association) は席を競り負けた分だけ
     };
     setNow(T2);
     const result = await runtime.recall(ctx, {
+      includeFullyDecayed: false,
       vector: QUERY_VECTOR,
       association: { anchorCount: 1, maxCount: 1 },
     });

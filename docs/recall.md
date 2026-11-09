@@ -327,6 +327,8 @@ LIMIT $3;  -- k' = k × over-fetch 係数
 2. **`m.decay_floor_at > now()` の行を Phase 1 のクエリから外した。** roadmap.md の Phase 1 範囲の記述（「`decay_floor_at` 列は Phase 1 では書き込むだけ」「Phase 2 で `WHERE decay_floor_at > now()` を使い始めるだけ」）が一次資料であり、本書の当初案がこの行を最初から含めていたのは Phase 分けと矛盾していた。Phase 1 はこの行を持たない。索引の3列目としては最初から `decay_floor_at` を持つため、Phase 2 で読み取りに使い始める際に索引の作り直しは不要。
 3. **`count(*) OVER ()` を段1のクエリから外した。** 当初案は「追加のクエリ無しに候補件数を正確に取得でき、`omitted.countKind = 'exact'` を安く出すための実務上の要である」としていたが、これは HNSW 索引の上では成立しないことが実測で分かった（PostgreSQL 18.6 + pgvector 0.8.6、50万行）。索引スキャンを使うプランでは `count(*) OVER ()` の値は真の候補件数ではなく `hnsw.ef_search` に依存する値になり（データと無関係な定数）、正しい件数を出すプランでは索引が捨てられ Seq Scan に落ちる（本書冒頭が禁じる「索引が効かない形」そのもの）。**代わりに §5（目次帯）が既にスコープ全体の群カウント集約を走らせており、その総和が「フィルタ条件下に何件あったか」そのものである。** 追加コスト無しに exact な件数を得られる経路は、段1のクエリではなく段5の集約から得る。詳細は ADR 0011（`docs/decisions/0011-no-window-count-in-ann-stage.md`）を参照。
 
+**⚠ 2026-11 追記（[ADR 0707](./decisions/0707-recall-decay-gate-default-off.md)）: 下の ADR 0153 の追記の「既定でこの行を含める」は、もう今の振る舞いではない。** `recall()` は既定では忘却ゲートを掛けない（`DEFAULT_INCLUDE_FULLY_DECAYED = true`）。ゲートを掛けるのは `includeFullyDecayed: false` を渡したときだけである。
+
 **⚠ 2026-09 追記（[ADR 0153](./decisions/0153-recall-decay-floor-gate.md)、Issue #196）: 上の2番目の訂正（`m.decay_floor_at > now()` を Phase 1 のクエリから外す）は、その後 ADR 0153 が明示的に上書きした。** `recall()` は既定でこの行を段1のクエリに含める（コメントアウトしていたクエリ骨格の1行が、既定で有効になったと読み替えること）。`RecallQuery.includeFullyDecayed: true` を渡すと、この節が書いていた Phase 1 の挙動（この行を含めない）に戻る。理由・引き受けた負債・語彙チャンネル側の扱いは ADR 0153 を参照。**この節の本文・上の3点の記述自体は書き換えない**（履歴を書き換えない）。
 
 **⚠ 2026-09-27 追記（文書と実装の照合、main 6dd4787）**: 上の骨格は、HNSW 索引が取りこぼす候補を含んでいない。pgvector の cosine の HNSW 索引は、ノルムが0のベクトル（ゼロベクトル）を索引に入れない。そのため `PostgresVectorStore.search()`/`searchMany()` は、いまは1本の SQL の中で「ノルムが0でない枝（上の骨格と同じ、HNSW の ORDER BY と LIMIT）」と「ノルムが0の枝（部分索引 `idx_memory_embeddings_zero_norm_<space>` を使い、`recorded_at DESC, memory_id` で LIMIT）」を `UNION ALL` で合わせ、外側で同じタイブレーク（距離 → `recorded_at` DESC → `memory_id`）をかけ直して LIMIT をもう一度かける（[ADR 0343](./decisions/0343-vector-store-search-returns-zero-norm-candidates.md)、Issue #956）。ゼロベクトルの候補は距離が `NaN` になり、段2で `score_not_comparable` に数えられる（ADR 0040・ADR 0044）。ORDER BY に距離演算子の結果をそのまま置くという上の原則は、ノルムが0でない枝でそのまま守られている。
@@ -1384,7 +1386,7 @@ Math.pow(0.5, 1075) === 0                  // 真——ここから先は厳密�
 
 - **既定は 0.5**（`DEFAULT_TIME_WEIGHT_FLOOR`）。`0` を渡すと従来の式（`affinity × decay × tagMatch × freshness × strength`）をビット単位で同じに通す。
 - φ を使ったとき、`ScoreBreakdown.timeWeightFloor` にその値が入る（`total` を内訳から組み立て直せるようにするため）。
-- 忘却ゲート（`includeFullyDecayed`）・閾値（`scoreThreshold`）とは独立。⚠ ゲートは既定で効いたままなので、減衰が閾値（`DEFAULT_DECAY_THRESHOLD`）を割った記憶は、この欄に関係なく候補から外れる。
+- 忘却ゲート（`includeFullyDecayed`）・閾値（`scoreThreshold`）とは独立。忘却ゲートは、[ADR 0707](./decisions/0707-recall-decay-gate-default-off.md) で既定では掛けないことにした（時間だけで候補から外すのは「薄れる」と両立しないため）。`includeFullyDecayed: false` を渡せば、従来どおり減衰しきった記憶を外す。
 - **⚠ 取り引き**: 時間で古い値を沈める力が弱まるので、訂正の古い側（`active` のまま残っている誤った値）が新しい側より上に来ることがある（実測: 120日目以降、6件中1件）。訂正は `contested`・`superseded` の状態で扱うこと（`superseded` は返らず、`contested` は対で返る）。
 
 ## 8. 矛盾がある場合の提示

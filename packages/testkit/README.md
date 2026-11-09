@@ -158,7 +158,8 @@ const embeddingProvider = new DeterministicEmbeddingProvider(); // 既定で 8�
   `expectedModel`・`expectedSpace`（必須）と食い違えば構築時に落ちる（埋め込みは `delegate.space` とも照合する。ADR 0452）。
 - **テストデータのひな型**: `buildNewMemoryFixture`・`buildNewObservationFixture`・`buildNewMemoryEventFixture`・
   `buildProvenanceFixture`。⚠ 実時計で `recall()` を通すなら、`recordedAt`（必要なら `decayFloorAt`）を明示して
-  渡すこと（既定値のままだと減衰の床を越えて0件になる。`buildNewMemoryFixture` の TSDoc）。
+  渡すこと（既定値のままだと減衰の床を越えていて、忘却ゲートを掛けた `recall()`（`includeFullyDecayed: false`）では0件になる。
+  既定の `recall()` はゲートを掛けないので返るが、時間の重みは下限まで沈んでいる。`buildNewMemoryFixture` の TSDoc）。
 - **適合スイートの各 options の型**（`MemoryStoreConformanceOptions` など）は、対応する `describe*Conformance` の引数。
 
 ## `@mnemora/testkit/fixtures`（インメモリの store。適合スイートの入力にしない）

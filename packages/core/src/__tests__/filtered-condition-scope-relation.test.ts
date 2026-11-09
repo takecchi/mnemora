@@ -135,6 +135,7 @@ describe("recall() が返す omitted.filtered の scopeRelation（本番の生�
     await stores.memoryStore.createMemory(ctx, newMemory({}));
 
     const result = await runtime.recall(ctx, {
+      includeFullyDecayed: false,
       occurredAfter: new Date("2026-01-01T00:00:00.000Z"),
     });
 

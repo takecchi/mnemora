@@ -106,10 +106,18 @@ describe("recall() — activityCounting（ADR 0353、Issue #338）", () => {
     });
 
     for (let i = 0; i < DECAY_FLOOR_SEQ + 2; i += 1) {
-      await runtime.recall(bobCtx, { vector: [0, 1], scoreThreshold: 0 });
+      await runtime.recall(bobCtx, {
+        includeFullyDecayed: false,
+        vector: [0, 1],
+        scoreThreshold: 0,
+      });
     }
 
-    const aliceResult = await runtime.recall(aliceCtx, { vector: [1, 0], scoreThreshold: 0 });
+    const aliceResult = await runtime.recall(aliceCtx, {
+      includeFullyDecayed: false,
+      vector: [1, 0],
+      scoreThreshold: 0,
+    });
     expect(aliceResult.memories.map((m) => m.memoryId)).toEqual([]);
   });
 
@@ -136,6 +144,7 @@ describe("recall() — activityCounting（ADR 0353、Issue #338）", () => {
 
     for (let i = 0; i < DECAY_FLOOR_SEQ + 2; i += 1) {
       await runtime.recall(bobCtx, {
+        includeFullyDecayed: false,
         vector: [0, 1],
         scoreThreshold: 0,
         activityCounting: "subject",
@@ -143,16 +152,22 @@ describe("recall() — activityCounting（ADR 0353、Issue #338）", () => {
     }
 
     const bobResult = await runtime.recall(bobCtx, {
+      includeFullyDecayed: false,
       vector: [0, 1],
       scoreThreshold: 0,
       activityCounting: "subject",
     });
     expect(bobResult.memories.map((m) => m.memoryId)).not.toContain(bob.id);
 
-    const aliceResult = await runtime.recall(aliceCtx, { vector: [1, 0], scoreThreshold: 0 });
+    const aliceResult = await runtime.recall(aliceCtx, {
+      includeFullyDecayed: false,
+      vector: [1, 0],
+      scoreThreshold: 0,
+    });
     expect(aliceResult.memories.map((m) => m.memoryId)).toContain(alice.id);
 
     const tenantWideResult = await runtime.recall(tenantCtx, {
+      includeFullyDecayed: false,
       text: undefined,
       vector: [1, 1],
       scoreThreshold: 0,
@@ -178,13 +193,18 @@ describe("recall() — activityCounting（ADR 0353、Issue #338）", () => {
 
     for (let i = 0; i < DECAY_FLOOR_SEQ + 2; i += 1) {
       await runtime.recall(tenantCtx, {
+        includeFullyDecayed: false,
         vector: [1, 1],
         scoreThreshold: 0,
         activityCounting: "subject",
       });
     }
 
-    const aliceResult = await runtime.recall(aliceCtx, { vector: [1, 0], scoreThreshold: 0 });
+    const aliceResult = await runtime.recall(aliceCtx, {
+      includeFullyDecayed: false,
+      vector: [1, 0],
+      scoreThreshold: 0,
+    });
     expect(aliceResult.memories.map((m) => m.memoryId)).not.toContain(alice.id);
   });
 

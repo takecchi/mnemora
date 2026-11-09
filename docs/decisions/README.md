@@ -701,5 +701,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0704](./0704-recall-time-weight-floor.md) | 時間の重みに下限を置く（`timeWeightFloor`、既定 0.5）——使われない記憶は「消える」のではなく「薄れる」 | 採用 (2026-11) |
 | [0705](./0705-consolidated-reflected-provenance-model.md) | `consolidated`・`reflected` の provenance にも、設定したモデルと応答を実際に返したモデルを残す | 採用 (2026-11) |
 | [0706](./0706-set-default-half-life-hours.md) | テナントの既定の半減期（時間）を設定する口 `setDefaultHalfLifeHours` を足す | 採用 (2026-11) |
+| [0707](./0707-recall-decay-gate-default-off.md) | `recall()` の忘却ゲートを既定では掛けない（`includeFullyDecayed` の既定を `true` にする）——ADR 0153 の既定を覆す | 採用 (2026-11) |
 
 <!-- ADR-INDEX:GENERATED:END -->

@@ -14,7 +14,8 @@ import type {
  *
  * ⚠ 既定の `recordedAt`（`2026-01-01T00:00:00.000Z` 固定）は、既定の `halfLifeHours`（720h）・`strength`（1）と組むと
  * `decayFloorAt` が `2026-05-10T15:47Z` になる。実時計（または今日付の偽時計）で `recall()` を通すフィクスチャは、
- * `recordedAt`（必要なら `decayFloorAt` も）を明示すること。渡さないと忘却ゲートで候補が黙って0件になる。
+ * `recordedAt`（必要なら `decayFloorAt` も）を明示すること。渡さないと、忘却ゲートを掛けた `recall()`（`includeFullyDecayed: false`）では
+ * 候補が黙って0件になる（既定の `recall()` はゲートを掛けないので返るが、時間の重みは下限まで沈んでいる。ADR 0704・0707）。
  */
 export function buildNewMemoryFixture(overrides: Partial<NewMemory> = {}): NewMemory {
   const recordedAt = overrides.recordedAt ?? new Date("2026-01-01T00:00:00.000Z");
