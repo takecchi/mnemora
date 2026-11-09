@@ -37,3 +37,7 @@ export function assertNewMemoryHalfLivesFitFloat4(label: string, input: NewMemor
 export function assertHalfLifeRecallsFitsFloat4(label: string, recalls: number): void {
   assertFitsFloat4(label, "recalls", recalls);
 }
+
+export function assertHalfLifeHoursFitsFloat4(label: string, hours: number): void {
+  assertFitsFloat4(label, "hours", hours);
+}

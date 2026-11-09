@@ -2,6 +2,7 @@ import {
   assertValidDecayClock,
   assertValidEventRetentionDays,
   assertValidEventRetentionKind,
+  assertValidHalfLifeHours,
   assertValidHalfLifeRecalls,
   assertValidTaxonomyMode,
   DEFAULT_DECAY_CLOCK,
@@ -88,10 +89,25 @@ export class InMemoryTenantSettingsStore implements TenantSettingsStore {
   }
 
   /**
-   * 設定行を作る（テスト用フック）。既存の行があれば half-life だけ上書きする。
+   * テナントの既定の半減期を設定する（`TenantSettingsStore.setDefaultHalfLifeHours`。ADR 0706）。既存の行があれば half-life だけ上書きする。
    * 値域は Postgres の CHECK 制約と同じ検査を置く: 放置すると、本番では落ちる書き込みが手元では黙って成功する。
+   *
+   * 第1引数に `Ctx` を渡すと interface の口として動き、不正な値は reject する。**テナント id の文字列を渡す従来のテスト用フックの形も残す**
+   * ——その形では、不正な値を同期的に投げる（以前の `void` を返すフックと同じ）。どちらの形でも、返る前に値は書き終わっている。
    */
-  setDefaultHalfLifeHours(tenantId: string, hours: number): void {
+  setDefaultHalfLifeHours(target: Ctx | string, hours: number): Promise<void> {
+    if (typeof target === "string") {
+      this.writeDefaultHalfLifeHours(target, hours);
+      return Promise.resolve();
+    }
+    return (async () => {
+      assertWellFormedCtx(target);
+      assertValidHalfLifeHours(hours);
+      this.writeDefaultHalfLifeHours(target.tenantId, hours);
+    })();
+  }
+
+  private writeDefaultHalfLifeHours(tenantId: string, hours: number): void {
     if (!isHalfLifeHoursInRange(hours)) {
       throw new Error(`InMemoryTenantSettingsStore: halfLifeHours out of range (0, ∞): ${hours}`);
     }

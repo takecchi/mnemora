@@ -77,7 +77,7 @@ describeMemoryStoreConformance({
 class MinimalTenantSettingsStore implements TenantSettingsStore {
   private readonly retention = new Map<string, EventRetentionSetting>();
   private readonly halfLifeHours = new Map<string, number>();
-  setDefaultHalfLifeHours(ctx: Ctx, hours: number): void {
+  async setDefaultHalfLifeHours(ctx: Ctx, hours: number): Promise<void> {
     if (!isHalfLifeHoursInRange(hours)) throw new Error(`half life hours out of range: ${hours}`);
     this.halfLifeHours.set(ctx.tenantId, hours);
   }

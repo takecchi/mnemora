@@ -2369,6 +2369,7 @@ export declare class PostgresTenantSettingsStore implements TenantSettingsStore 
     setEventRetention(ctx: Ctx, retention: EventRetentionSetting): Promise<void>;
     getDecayClock(ctx: Ctx): Promise<DecayClock>;
     setDecayClock(ctx: Ctx, clock: DecayClock): Promise<void>;
+    setDefaultHalfLifeHours(ctx: Ctx, hours: number): Promise<void>;
     getDefaultHalfLifeRecalls(ctx: Ctx): Promise<number>;
     setDefaultHalfLifeRecalls(ctx: Ctx, recalls: number): Promise<void>;
     getActivitySeq(ctx: Ctx): Promise<number>;

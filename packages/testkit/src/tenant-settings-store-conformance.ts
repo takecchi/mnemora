@@ -41,9 +41,9 @@ export interface TenantSettingsStoreConformanceOptions {
   /** 新しい store を返す関数。各 `it` の中で1回ずつ呼ぶので、テストケースごとに独立した状態を持つ store を返すこと。 */
   createStore: () => TenantSettingsStore | Promise<TenantSettingsStore>;
   /**
-   * テナントの `default_half_life_hours` を明示的に設定するためのフック。
-   * 省略時はこのケースをスキップする（in-memory 実装は簡易な setter を持つ想定だが、
-   * 将来 setter を持たない読み取り専用 adapter が来た場合にも壊れないようにする）。
+   * テナントの `default_half_life_hours` を明示的に設定するためのフック。省略時はこのケースをスキップする。
+   * [ADR 0706](../../../docs/decisions/0706-set-default-half-life-hours.md) 以降は、`TenantSettingsStore.setDefaultHalfLifeHours`
+   * （interface 上は `?` 付き）をそのまま呼ぶことを想定する（この repo の2つの wiring はどちらもそうしている）。
    */
   setDefaultHalfLifeHours?: ((ctx: Ctx, hours: number) => Promise<void> | void) | undefined;
 
@@ -70,8 +70,7 @@ export interface TenantSettingsStoreConformanceOptions {
    * 明示的に設定するためのフック。省略時はこのケースをスキップする。
    *
    * ⭐ [ADR 0197](../../../docs/decisions/0197-set-default-half-life-recalls.md) 以降、
-   * `setDefaultHalfLifeHours`（本番の書き込み口を持たないため、呼び出し側は生 SQL の
-   * UPSERT で行を作る）とは違い、**このフックは `TenantSettingsStore.setDefaultHalfLifeRecalls`
+   * **このフックは `TenantSettingsStore.setDefaultHalfLifeRecalls`
    * （interface 上は `?` 付きだが production の口そのもの）をそのまま呼ぶことを想定する**
    * ——この repo の2つの wiring（`packages/postgres`/`packages/testkit` それぞれの
    * conformance テストファイル）はどちらもそうしている。⟹ 下のテスト群は

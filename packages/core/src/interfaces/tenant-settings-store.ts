@@ -23,6 +23,22 @@ export function isHalfLifeHoursInRange(value: number): boolean {
 }
 
 /**
+ * `setDefaultHalfLifeHours` に不正な値（`isHalfLifeHoursInRange` の値域外）を渡したときに投げる `Error` のメッセージに必ず含める文字列。
+ */
+export const HALF_LIFE_HOURS_INVALID_MESSAGE =
+  "half life hours must be a finite number greater than 0";
+
+/**
+ * `value` が `isHalfLifeHoursInRange` の値域の内側であることを検査する。不正なら `HALF_LIFE_HOURS_INVALID_MESSAGE` を含む `Error` を投げる。
+ * `packages/postgres`・`packages/testkit` の両方の `setDefaultHalfLifeHours` 実装がこの関数を呼ぶ（ADR 0706）。
+ */
+export function assertValidHalfLifeHours(value: number): void {
+  if (!isHalfLifeHoursInRange(value)) {
+    throw new Error(HALF_LIFE_HOURS_INVALID_MESSAGE);
+  }
+}
+
+/**
  * `tenant_settings.event_retention_days` が取りうる3つの状態（`docs/memory-model.md` §9「保持方針」）。
  *
  * ⚠ この3つを2つに潰さないこと:
@@ -211,7 +227,7 @@ export function assertValidTaxonomyMode(value: string): asserts value is Taxonom
  * `setDecayClock` を持たない adapter へ書こうとした場合は `DECAY_CLOCK_UNSUPPORTED_MESSAGE` を含む `Error` で**明示的に失敗する**
  * （黙って無視しない）。
  *
- * **`setDefaultHalfLifeHours`（壁時計側の対称なメソッド）は足していない**（`setDefaultHalfLifeRecalls` の doc、ADR 0197）。
+ * `setDefaultHalfLifeHours`（壁時計側の既定の半減期の書き込み）は、ADR 0197 が見送った後、[ADR 0706](../../../../docs/decisions/0706-set-default-half-life-hours.md) で足した。
  *
  * ⚠ **`bumpActivitySeq`（activity_seq を+1する書き込み）はここに無い。** カウンタの前進は `MemoryStore.createRecall` が
  * `recalls` への INSERT と**同一トランザクション**で行う（`NewRecallRecord.advanceActivityClock`）。`TenantSettingsStore` と
@@ -235,6 +251,17 @@ export interface TenantSettingsStore {
    * テナントの既定の半減期（時間）。書き込む記憶の `halfLifeHours` の既定になる。設定の行が無ければ `DEFAULT_HALF_LIFE_HOURS` を返す（`@mnemora/postgres` と testkit の fixture で同じ）。
    */
   getDefaultHalfLifeHours(ctx: Ctx): Promise<number>;
+
+  /**
+   * `tenant_settings.default_half_life_hours` を設定する（UPSERT。行が無ければ作る。[ADR 0706](../../../../docs/decisions/0706-set-default-half-life-hours.md)）。
+   * `hours` が `isHalfLifeHoursInRange` の値域 `(0, ∞)` の外なら、`HALF_LIFE_HOURS_INVALID_MESSAGE` を含む `Error` で失敗する
+   * （`assertValidHalfLifeHours`）。Postgres の列は `real`（float4）なので、float4 に収まらない値（`Math.fround(x)` が `Infinity` か 0）は、
+   * `@mnemora/postgres` も testkit の fixture も `does not fit in a Postgres "real" (float4) column` を含む `Error` で拒む。
+   *
+   * ⭐ **この値は新規作成時の初期値としてのみ使う。**既存 Memory の `halfLifeHours`・`decayFloorAt` は1件も書き換えない。
+   * 効くのは呼び出し後に作られる Memory だけである（`setDefaultHalfLifeRecalls` と同じ。ADR 0165 決めたこと3）。
+   */
+  setDefaultHalfLifeHours?(ctx: Ctx, hours: number): Promise<void>;
 
   /**
    * `tenant_settings.event_retention_days` の現在の状態を、3状態を保ったまま返す。
@@ -296,7 +323,7 @@ export interface TenantSettingsStore {
    * ⭐ **この値は新規作成時の初期値としてのみ使う**（ADR 0165 決めたこと3）。この呼び出しは
    * **既存 Memory の `halfLifeRecalls`/`decayFloorSeq` を1件も書き換えない**。効くのは呼び出し後に新規作成される Memory だけである。
    *
-   * ⚠ **`setDefaultHalfLifeHours`（壁時計側の対称なメソッド）は意図的に足していない**（ADR 0197「採らなかった案」1）。
+   * 壁時計側の対称なメソッド `setDefaultHalfLifeHours` は、ADR 0197 では見送り、ADR 0706 で足した。
    */
   setDefaultHalfLifeRecalls?(ctx: Ctx, recalls: number): Promise<void>;
 
