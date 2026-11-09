@@ -24,6 +24,14 @@ import { createProviders } from "./providers.js";
  */
 class OracleLLMProvider implements LLMProvider {
   turn: ContestedTurn | null = null;
+  /** このケースで claim key の要求に返った鍵（本物の LLM に付けさせたときの記録用）。 */
+  derivedKeys: unknown[] = [];
+
+  /**
+   * `claimKeyProvider` を渡すと、claim key の要求だけをそちらへ回す（抽出は oracle のまま）。
+   * LLM の鍵の付け方の揺れだけを足して測るため（ADR 0703 の追記）。
+   */
+  constructor(private readonly claimKeyProvider?: LLMProvider) {}
 
   async complete(): Promise<never> {
     throw new Error("OracleLLMProvider: complete は使わない");
@@ -40,6 +48,11 @@ class OracleLLMProvider implements LLMProvider {
     if (extraction.success) {
       return extraction.data;
     }
+    if (this.claimKeyProvider !== undefined) {
+      const derived = await this.claimKeyProvider.completeStructured(_ctx, req);
+      this.derivedKeys.push(derived);
+      return derived;
+    }
     return req.schema.parse({ claims: turn.keys });
   }
 }
@@ -55,7 +68,12 @@ function reportsConflict(kind: string): boolean {
  */
 export async function runContestedDetection(
   databaseUrl: string,
-  options: { tenantPrefix: string; cases?: readonly ContestedCase[] },
+  options: {
+    tenantPrefix: string;
+    cases?: readonly ContestedCase[];
+    /** 渡すと claim key だけを本物の LLM に付けさせる（抽出は oracle のまま）。 */
+    claimKeyProvider?: LLMProvider;
+  },
 ): Promise<ContestedCaseResult[]> {
   const client = createPostgresClient(databaseUrl);
   try {
@@ -65,7 +83,7 @@ export async function runContestedDetection(
       MNEMORA_EMBEDDING: "deterministic",
     });
     await registerEmbeddingSpace(client.pool, embeddingProvider.space);
-    const llm = new OracleLLMProvider();
+    const llm = new OracleLLMProvider(options.claimKeyProvider);
     const runtime = createRuntime({
       memoryStore: new PostgresMemoryStore(client.db),
       outboxStore: new PostgresOutboxStore(client.db),
@@ -81,6 +99,7 @@ export async function runContestedDetection(
     const results: ContestedCaseResult[] = [];
     for (const c of options.cases ?? CONTESTED_CASES) {
       const ctx: Ctx = { tenantId: `${options.tenantPrefix}-${c.id}` };
+      llm.derivedKeys = [];
       let detected = false;
       for (const [index, turn] of c.turns.entries()) {
         llm.turn = turn;
@@ -96,7 +115,12 @@ export async function runContestedDetection(
           detected = true;
         }
       }
-      results.push({ id: c.id, category: c.category, detected });
+      results.push({
+        id: c.id,
+        category: c.category,
+        detected,
+        ...(options.claimKeyProvider !== undefined ? { derivedKeys: llm.derivedKeys } : {}),
+      });
     }
     return results;
   } finally {

@@ -9,6 +9,8 @@ export interface ContestedCaseResult {
   id: string;
   category: ContestedCategory;
   detected: boolean;
+  /** claim key を本物の LLM に付けさせたときだけ入る、発話ごとの鍵の応答。 */
+  derivedKeys?: unknown[];
 }
 
 export interface Confusion {
