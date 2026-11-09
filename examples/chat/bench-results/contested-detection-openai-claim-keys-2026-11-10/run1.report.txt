@@ -1,0 +1,24 @@
+## claim key の矛盾検出（決定的な段・oracle 鍵）
+
+⚠ 抽出と claim key を理想どおりの値に固定し、検出段だけを測った。LLM の鍵の揺れは含まない。合成データで、件数は少ない。
+
+| カテゴリ | 検出されるべきか | 件数 | 検出した | TP | FP | FN | TN |
+|---|---|---|---|---|---|---|---|
+| true_conflict | される | 4 | 3 | 3 | 0 | 1 | 0 |
+| explicit_correction | される | 4 | 2 | 2 | 0 | 2 | 0 |
+| paraphrase | されない | 4 | 2 | 0 | 2 | 0 | 2 |
+| temporal_compatible | されない | 4 | 1 | 0 | 1 | 0 | 3 |
+| non_conflict | されない | 4 | 1 | 0 | 1 | 0 | 3 |
+
+全体: TP=5 FP=4 FN=3 TN=8 / Precision=0.556 Recall=0.625 F1=0.588
+
+外れたケース:
+- conflict-employer（true_conflict）: 見逃し（FN）
+- correction-same-utterance（explicit_correction）: 見逃し（FN）
+- correction-allergy（explicit_correction）: 見逃し（FN）
+- paraphrase-color（paraphrase）: 誤検出（FP）
+- paraphrase-residence（paraphrase）: 誤検出（FP）
+- temporal-in-text-age（temporal_compatible）: 誤検出（FP）
+- non-conflict-multi-valued（non_conflict）: 誤検出（FP）
+
+[contested-detection] 機械可読な結果を書き出した: /private/tmp/claude-501/-Users-takecchi-RustroverProjects-mnemora/8016ea6f-1dd4-42d8-a3ad-ef4816f380e5/scratchpad/contested-llm-1.json

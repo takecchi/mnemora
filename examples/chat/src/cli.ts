@@ -1178,8 +1178,28 @@ async function runLongHorizon(): Promise<void> {
  * LLM も実 API も使わない。`MNEMORA_CONTESTED_DETECTION_JSON` を渡すと、ケースごとの判定と指標を JSON で書く。
  */
 async function runContestedDetectionCommand(): Promise<void> {
+  // `MNEMORA_CONTESTED_CLAIM_KEYS=openai` で claim key だけを本物の LLM に付けさせる（抽出は oracle のまま。実 API を叩く）。
+  const claimKeysMode = process.env.MNEMORA_CONTESTED_CLAIM_KEYS;
+  if (claimKeysMode !== undefined && claimKeysMode !== "" && claimKeysMode !== "openai") {
+    throw new Error(
+      `MNEMORA_CONTESTED_CLAIM_KEYS には "openai" だけを指定できる（受け取った値: ${claimKeysMode}）`,
+    );
+  }
+  const { createProviders } = await import("./providers.js");
+  const claimKeyProvider =
+    claimKeysMode === "openai"
+      ? createProviders({
+          ...process.env,
+          MNEMORA_LLM: "openai",
+          MNEMORA_EMBEDDING: "deterministic",
+        }).llmProvider
+      : undefined;
+  console.log(
+    `[contested-detection] claim key: ${claimKeyProvider === undefined ? "oracle" : "OpenAI"}`,
+  );
   const results = await runContestedDetection(requireDatabaseUrl(), {
     tenantPrefix: `contested-detection-${newRunToken()}`,
+    ...(claimKeyProvider !== undefined ? { claimKeyProvider } : {}),
   });
   console.log(formatContestedReport(results));
   const jsonPath = process.env.MNEMORA_CONTESTED_DETECTION_JSON;
