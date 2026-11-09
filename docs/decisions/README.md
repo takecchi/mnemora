@@ -697,5 +697,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0700](./0700-default-time-weighting-event-aware-freshness.md) | `recall()` の `timeWeighting` の既定を `eventAwareFreshness` にする——ADR 0300 §7 のオーナー判断（Issue #2106） | 採用 (2026-11) |
 | [0701](./0701-provenance-records-responded-model.md) | `inferred` の provenance に、応答を実際に返したモデル `respondedModel` を残す——設定値の `model` とは分け、確かめられないときは書かない | 採用 (2026-11) |
 | [0702](./0702-memory-event-seq.md) | `memory_events` に記録した順の番号 `seq` を足す——時計のずれたワーカーが混ざっても、同じ記憶の履歴を遷移の順に読めるようにする | 採用 (2026-11) |
+| [0703](./0703-contested-detection-eval.md) | 矛盾検出の精度を、カテゴリごとの Precision/Recall/F1 で測る評価を足す——決定的な段を oracle 鍵で測り、アルゴリズムは変えない | 採用 (2026-11) |
 
 <!-- ADR-INDEX:GENERATED:END -->

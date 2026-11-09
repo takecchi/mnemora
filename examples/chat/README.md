@@ -1763,6 +1763,18 @@ CI の `long-horizon` ジョブ（`ci.yml`）がこれを実行し、表を Job 
 
 ---
 
+## `contested-detection`: claim key の矛盾検出の決定的な段を、カテゴリごとに測る
+
+```bash
+DATABASE_URL=... pnpm --filter @mnemora/example-chat run contested-detection
+```
+
+- `claimKey: { enabled: true, detectContested: true }` で発話を `observe()` し、矛盾として報告されたか（`contested`・`contested_group`・`unresolved_conflict`）をケースごとに見る。
+- 抽出と claim key は、理想どおりの値に固定する（oracle）。⟹ **測っているのは決定的な検出段だけ**で、LLM の鍵の付け方の揺れは測らない。LLM も API キーも要らない。
+- カテゴリ: 同時点の矛盾・明示的な訂正（検出されるべき）、言い換え・時間的に両立・別の情報（検出されるべきでない）。Precision・Recall・F1 と、カテゴリごとの TP/FP/FN/TN を出す。`MNEMORA_CONTESTED_DETECTION_JSON` で JSON も書く。
+- いまの判定は `src/__tests__/contested-detection.postgres.test.ts` がケースごとに固定している（既知の誤検出・見逃しを含む）。
+- ⚠ 合成データで、カテゴリごとに4件しかない。実運用の誤検出率は主張しない。測った数字と、アルゴリズムを変えなかった理由は [ADR 0703](../../docs/decisions/0703-contested-detection-eval.md)。
+
 ## `consolidation-cost`: `Runtime.consolidate()` が「載る量」に効くかの実測（Issue #136）
 
 `Runtime.consolidate()`（ADR 0089）は入ったが、`examples/chat` に配線が無く、北極星の物差し
