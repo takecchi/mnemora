@@ -91,6 +91,8 @@ export const memoryEvents = pgTable("memory_events", {
   memoryId: uuid("memory_id"),
   kind: text("kind").notNull(),
   at: timestamp("at", { withTimezone: true, mode: "date" }).notNull(),
+  // 0035（ADR 0702）。IDENTITY（GENERATED ALWAYS）なので書き込み側は渡さない。
+  seq: bigint("seq", { mode: "number" }).generatedAlwaysAsIdentity(),
   actor: jsonb("actor").notNull(),
   digestSnapshot: text("digest_snapshot"),
   sizeBeforeBytes: integer("size_before_bytes"),

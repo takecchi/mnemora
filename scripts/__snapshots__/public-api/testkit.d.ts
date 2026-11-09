@@ -533,6 +533,7 @@ export interface EventStoreConformanceOptions {
     name: string;
     createStore: () => EventStore | Promise<EventStore>;
     prepareMemoryId: (ctx: Ctx) => Promise<MemoryId> | MemoryId;
+    supportsSeq?: boolean;
 }
 export declare function describeEventStoreConformance(options: EventStoreConformanceOptions): void;
 

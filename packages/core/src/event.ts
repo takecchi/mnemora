@@ -88,8 +88,22 @@ export interface MemoryEvent {
   memoryId: MemoryId | null;
   /** 何が起きたか（{@link MemoryEventKind}）。 */
   kind: MemoryEventKind;
-  /** 起きた時刻。 */
+  /**
+   * 起きた時刻。**呼び出し側（runtime）の時計の値**で、DB の時刻ではない。複数のプロセスで時計がずれていると、
+   * 同じ記憶のイベントでも `at` の順が実際の遷移の順と食い違いうる。遷移の順は {@link MemoryEvent.seq} で読むこと。
+   */
   at: Date;
+  /**
+   * store がイベントを**記録した順**の番号（[ADR 0702](../../../docs/decisions/0702-memory-event-seq.md)）。
+   *
+   * - **同じ記憶のイベントでは、`seq` の昇順は遷移が実際に起きた順と一致する。**`at`（呼び出し側の時計）が逆行していても一致する。
+   *   状態の履歴を組み立てるときは、`at` ではなく `seq` で並べること。
+   * - 違う記憶どうしの `seq` の大小は、意味を持たない（並行する別のトランザクションの記録順でしかない）。
+   * - 連番である保証は無い（欠番がありうる）。比べてよいのは大小だけ。
+   * - **任意の欄**: 番号を振らない adapter では省かれる（`@mnemora/postgres`・testkit の fixture は振る）。
+   *   `@mnemora/postgres` で、migration `0035` より前に記録したイベントの `seq` は、適用時に物理的な並びで振ったもので、遷移の順とは限らない。
+   */
+  seq?: number;
   /** 誰が行ったか（{@link EventActor}）。 */
   actor: EventActor;
   /** 記録した時点の Memory の `digest` の写し（本文は写さない）。purge の後も、何が消えたかを digest で読める。 */
@@ -138,6 +152,7 @@ export const MemoryEventSchema = z
     memoryId: z.string().min(1).nullable(),
     kind: MemoryEventKindSchema,
     at: z.date(),
+    seq: z.number().int().nonnegative().optional(),
     actor: EventActorSchema,
     digestSnapshot: z.string().nullable().optional(),
     sizeBeforeBytes: z.number().int().nonnegative().nullable().optional(),
@@ -149,7 +164,7 @@ export const MemoryEventSchema = z
   }) satisfies z.ZodType<MemoryEvent>;
 
 /** `EventStore.append` に渡す新しいイベント。`id` は store が付け、`at` は省略すると store が今の時刻を入れる。 */
-export type NewMemoryEvent = Omit<MemoryEvent, "id" | "at"> & { at?: Date | undefined };
+export type NewMemoryEvent = Omit<MemoryEvent, "id" | "at" | "seq"> & { at?: Date | undefined };
 
 /** `NewMemoryEvent` の zod スキーマ。値を実行時に検査するときに使う（型 `NewMemoryEvent` と揃えてある）。 */
 export const NewMemoryEventSchema = z

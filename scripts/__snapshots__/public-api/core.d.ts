@@ -296,6 +296,7 @@ export interface MemoryEvent {
     memoryId: MemoryId | null;
     kind: MemoryEventKind;
     at: Date;
+    seq?: number;
     actor: EventActor;
     digestSnapshot?: string | null;
     sizeBeforeBytes?: number | null;
@@ -317,6 +318,7 @@ export declare const MemoryEventSchema: z.ZodObject<{
         unsuperseded: "unsuperseded";
     }>;
     at: z.ZodDate;
+    seq: z.ZodOptional<z.ZodNumber>;
     actor: z.ZodObject<{
         type: z.ZodEnum<{
             system: "system";
@@ -329,7 +331,7 @@ export declare const MemoryEventSchema: z.ZodObject<{
     sizeBeforeBytes: z.ZodOptional<z.ZodNullable<z.ZodNumber>>;
     meta: z.ZodRecord<z.ZodString, z.ZodUnknown>;
 }, z.core.$strip>;
-export type NewMemoryEvent = Omit<MemoryEvent, "id" | "at"> & {
+export type NewMemoryEvent = Omit<MemoryEvent, "id" | "at" | "seq"> & {
     at?: Date | undefined;
 };
 export declare const NewMemoryEventSchema: z.ZodObject<{

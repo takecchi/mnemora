@@ -151,6 +151,7 @@ describeRelationStoreConformance({
 
 describeEventStoreConformance({
   name: "postgres",
+  supportsSeq: true,
   createStore: async () => {
     await resetTestDatabase();
     const { db } = await getTestClient();

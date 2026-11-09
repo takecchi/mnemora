@@ -1356,6 +1356,23 @@ export declare const memoryEvents: import("drizzle-orm/pg-core").PgTableWithColu
             identity: undefined;
             generated: undefined;
         }, {}, {}>;
+        seq: import("drizzle-orm/pg-core").PgColumn<{
+            name: "seq";
+            tableName: "memory_events";
+            dataType: "number";
+            columnType: "PgBigInt53";
+            data: number;
+            driverParam: string | number;
+            notNull: true;
+            hasDefault: true;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: undefined;
+            baseColumn: never;
+            identity: "always";
+            generated: undefined;
+        }, {}, {}>;
         actor: import("drizzle-orm/pg-core").PgColumn<{
             name: "actor";
             tableName: "memory_events";

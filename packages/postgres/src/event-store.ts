@@ -140,7 +140,7 @@ export class PostgresEventStore implements EventStore {
     const limitClause = filter.limit !== undefined ? sql`LIMIT ${filter.limit}` : sql``;
 
     const result = await this.db.execute(sql`
-      SELECT * FROM memory_events WHERE ${whereClause} ORDER BY at ASC ${limitClause}
+      SELECT * FROM memory_events WHERE ${whereClause} ORDER BY at ASC, seq ASC ${limitClause}
     `);
     return result.rows.map((row) => rowToMemoryEvent(row as unknown as MemoryEventRow));
   }

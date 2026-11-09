@@ -300,6 +300,8 @@ export interface MemoryEventRow {
   memory_id: string | null;
   kind: string;
   at: string;
+  /** bigint は pg から文字列で届く（ADR 0702）。 */
+  seq: string | number;
   actor: EventActor;
   digest_snapshot: string | null;
   size_before_bytes: number | null;
@@ -313,6 +315,7 @@ export function rowToMemoryEvent(row: MemoryEventRow): MemoryEvent {
     memoryId: row.memory_id,
     kind: row.kind as MemoryEventKind,
     at: parsePgTimestamp(row.at),
+    seq: Number(row.seq),
     actor: row.actor,
     digestSnapshot: row.digest_snapshot,
     sizeBeforeBytes: row.size_before_bytes,

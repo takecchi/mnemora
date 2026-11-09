@@ -4376,7 +4376,12 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
             at: clock.now(),
             actor,
             digestSnapshot: current.digest,
-            meta: opts?.reason === undefined ? {} : { reason: opts.reason },
+            // 直前の status を残す（ADR 0702）。`forgotten` は active・archived・contested・superseded のどこからでも来るので、
+            // kind だけでは遷移元が読めない。保持期間内に残っているイベントだけで、遷移の前後を読めるようにする。
+            meta: {
+              previousStatus: observedStatus,
+              ...(opts?.reason === undefined ? {} : { reason: opts.reason }),
+            },
           },
         );
         byId.set(lookupKey(id), memory);

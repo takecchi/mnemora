@@ -251,12 +251,25 @@ describe("runtime.forget — reason / actor", () => {
     await runtime.forget(ctx, { memoryId: withoutReason.id });
 
     const [reasonEvent] = forgottenEvents(stores, withReason.id);
-    expect(reasonEvent?.meta).toEqual({ reason: "ユーザーの訂正" });
+    expect(reasonEvent?.meta).toEqual({ previousStatus: "active", reason: "ユーザーの訂正" });
 
     const [noReasonEvent] = forgottenEvents(stores, withoutReason.id);
-    expect(noReasonEvent?.meta).toEqual({});
+    expect(noReasonEvent?.meta).toEqual({ previousStatus: "active" });
     expect(Object.hasOwn(noReasonEvent?.meta ?? {}, "reason")).toBe(false);
   });
+
+  it.each(["active", "archived", "contested", "superseded"] as const)(
+    "forgotten のイベントの meta.previousStatus は、直前の status（%s）を持つ（ADR 0702: kind だけでは遷移元が読めない）",
+    async (status) => {
+      const { runtime, stores } = buildRuntime();
+      const memory = await stores.memoryStore.createMemory(ctx, newMemory({ status }));
+
+      await runtime.forget(ctx, { memoryId: memory.id });
+
+      const [event] = forgottenEvents(stores, memory.id);
+      expect(event?.meta).toMatchObject({ previousStatus: status });
+    },
+  );
 
   it("actor を渡すとイベントの actor がそれになり、省略時は { type: 'system' }", async () => {
     const { runtime, stores } = buildRuntime();
