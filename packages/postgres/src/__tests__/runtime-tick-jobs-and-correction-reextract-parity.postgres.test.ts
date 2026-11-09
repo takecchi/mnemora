@@ -360,10 +360,18 @@ const EXPECTED: Result = {
         last_error: null,
         claimed: true,
       },
+      {
+        kind: "embed",
+        attempts: 0,
+        done: false,
+        failed: false,
+        last_error: null,
+        claimed: false,
+      },
     ],
     {
-      status: ["active", "active"],
-      events: [],
+      status: ["superseded", "superseded"],
+      events: ["created", "superseded", "superseded"],
     },
   ],
   "tick consolidate: seed active, neighbor active": [
@@ -377,10 +385,18 @@ const EXPECTED: Result = {
         last_error: null,
         claimed: true,
       },
+      {
+        kind: "embed",
+        attempts: 0,
+        done: false,
+        failed: false,
+        last_error: null,
+        claimed: false,
+      },
     ],
     {
-      status: ["active", "active"],
-      events: [],
+      status: ["superseded", "superseded"],
+      events: ["created", "superseded", "superseded"],
     },
   ],
   "tick consolidate: seed forgotten": [
@@ -462,10 +478,18 @@ const EXPECTED: Result = {
         last_error: null,
         claimed: true,
       },
+      {
+        kind: "embed",
+        attempts: 0,
+        done: false,
+        failed: false,
+        last_error: null,
+        claimed: false,
+      },
     ],
     {
-      status: ["superseded", "active"],
-      events: [],
+      status: ["superseded", "superseded"],
+      events: ["created", "superseded", "superseded"],
     },
   ],
   "tick consolidate: seed active, neighbor superseded": [
@@ -479,10 +503,18 @@ const EXPECTED: Result = {
         last_error: null,
         claimed: true,
       },
+      {
+        kind: "embed",
+        attempts: 0,
+        done: false,
+        failed: false,
+        last_error: null,
+        claimed: false,
+      },
     ],
     {
-      status: ["active", "superseded"],
-      events: [],
+      status: ["superseded", "superseded"],
+      events: ["created", "superseded", "superseded"],
     },
   ],
   "tick consolidate: seed purged": [
@@ -545,18 +577,27 @@ const EXPECTED: Result = {
         last_error: null,
         claimed: true,
       },
+      {
+        kind: "embed",
+        attempts: 0,
+        done: false,
+        failed: false,
+        last_error: null,
+        claimed: false,
+      },
     ],
   ],
   "tick consolidate: LLM outage (two ticks)": [
-    [1, 0, 0],
+    [0, 1, 0],
     [0, 0, 0],
     [
       {
         kind: "consolidate",
         attempts: 1,
-        done: true,
-        failed: false,
-        last_error: null,
+        done: false,
+        failed: true,
+        last_error:
+          "runtime.tick: consolidate job failed because the llm call failed: simulated LLM outage",
         claimed: true,
       },
     ],
@@ -657,6 +698,14 @@ const EXPECTED: Result = {
     [1, 0, 0],
     [
       {
+        kind: "embed",
+        attempts: 0,
+        done: false,
+        failed: false,
+        last_error: null,
+        claimed: false,
+      },
+      {
         kind: "reflect",
         attempts: 1,
         done: true,
@@ -667,7 +716,7 @@ const EXPECTED: Result = {
     ],
     {
       status: ["archived", "active"],
-      events: [],
+      events: ["created"],
     },
   ],
   "tick reflect: seed active, neighbor archived": [
@@ -699,6 +748,14 @@ const EXPECTED: Result = {
     [1, 0, 0],
     [
       {
+        kind: "embed",
+        attempts: 0,
+        done: false,
+        failed: false,
+        last_error: null,
+        claimed: false,
+      },
+      {
         kind: "reflect",
         attempts: 1,
         done: true,
@@ -709,7 +766,7 @@ const EXPECTED: Result = {
     ],
     {
       status: ["superseded", "active"],
-      events: [],
+      events: ["created"],
     },
   ],
   "tick reflect: seed active, neighbor superseded": [
@@ -928,12 +985,12 @@ const EXPECTED: Result = {
     [],
     [
       {
+        kind: "consolidate",
         attempts: 2,
-        claimed: true,
         done: false,
         failed: true,
-        kind: "consolidate",
         last_error: "boom",
+        claimed: true,
       },
     ],
   ],

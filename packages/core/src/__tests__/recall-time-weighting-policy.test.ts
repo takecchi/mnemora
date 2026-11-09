@@ -98,8 +98,13 @@ describe("recall() — RecallQuery.timeWeighting 省略時は 'eventAwareFreshne
       decayFloorAt: new Date(NOW.getTime() + 1_000 * DAY_MS), // 忘却ゲートには掛からない
     });
 
-    const omitted = await runtime.recall(ctx, { vector: [1, 0], limit: 10 });
+    const omitted = await runtime.recall(ctx, {
+      timeWeightFloor: 0,
+      vector: [1, 0],
+      limit: 10,
+    });
     const legacy = await runtime.recall(ctx, {
+      timeWeightFloor: 0,
       vector: [1, 0],
       limit: 10,
       timeWeighting: "legacy",
@@ -123,6 +128,7 @@ describe("recall() — RecallQuery.timeWeighting: 'eventAwareFreshness' を渡�
     });
 
     const result = await runtime.recall(ctx, {
+      timeWeightFloor: 0,
       vector: [1, 0],
       limit: 10,
       timeWeighting: "eventAwareFreshness",
@@ -144,11 +150,13 @@ describe("recall() — RecallQuery.timeWeighting: 'eventAwareFreshness' を渡�
     });
 
     const legacyResult = await runtime.recall(ctx, {
+      timeWeightFloor: 0,
       vector: [1, 0],
       limit: 10,
       timeWeighting: "legacy",
     });
     const newPolicyResult = await runtime.recall(ctx, {
+      timeWeightFloor: 0,
       vector: [1, 0],
       limit: 10,
       timeWeighting: "eventAwareFreshness",
@@ -174,6 +182,7 @@ describe("recall() — ⭐ 期限切れの予定は timeWeighting に関係な�
 
     for (const timeWeighting of ["legacy", "eventAwareFreshness"] as const) {
       const result = await runtime.recall(ctx, {
+        timeWeightFloor: 0,
         vector: [1, 0],
         limit: 10,
         timeWeighting,
@@ -194,6 +203,7 @@ describe("recall() — ⭐ 期限切れの予定は timeWeighting に関係な�
 
     for (const timeWeighting of ["legacy", "eventAwareFreshness"] as const) {
       const result = await runtime.recall(ctx, {
+        timeWeightFloor: 0,
         vector: [1, 0],
         limit: 10,
         timeWeighting,
@@ -218,11 +228,13 @@ describe("recall() — 活動時計テナント（decayClock: 'activity'）で�
     });
 
     const legacyResult = await runtime.recall(ctx, {
+      timeWeightFloor: 0,
       vector: [1, 0],
       limit: 10,
       timeWeighting: "legacy",
     });
     const newPolicyResult = await runtime.recall(ctx, {
+      timeWeightFloor: 0,
       vector: [1, 0],
       limit: 10,
       timeWeighting: "eventAwareFreshness",

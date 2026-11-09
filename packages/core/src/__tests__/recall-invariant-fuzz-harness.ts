@@ -528,7 +528,12 @@ export async function runOps(
           : s.similarity === undefined
             ? s.lexicalMatch
             : Math.max(s.similarity, s.lexicalMatch);
-      const product = affinity * s.decay * s.tagMatch * s.freshness * s.strength;
+      // 時間の重みの下限 φ を使ったときは、内訳の `timeWeightFloor` から式を組み立て直す（ADR 0704）。
+      const phi = s.timeWeightFloor;
+      const product =
+        phi === undefined
+          ? affinity * s.decay * s.tagMatch * s.freshness * s.strength
+          : affinity * (phi + (1 - phi) * s.decay * s.freshness) * s.tagMatch * s.strength;
       if (!(Number.isNaN(product) && Number.isNaN(s.total)) && product !== s.total) {
         v("I5-product", `${rm.memoryId} ${product} vs ${s.total}`);
       }

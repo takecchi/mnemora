@@ -2440,6 +2440,7 @@ export interface ScoreBreakdown {
     freshness: number;
     strength: number;
     total: number;
+    timeWeightFloor?: number;
     affinityMeasured?: boolean;
 }
 export declare const ScoreBreakdownSchema: z.ZodObject<{
@@ -2450,6 +2451,7 @@ export declare const ScoreBreakdownSchema: z.ZodObject<{
     freshness: z.ZodNumber;
     strength: z.ZodNumber;
     total: z.ZodNumber;
+    timeWeightFloor: z.ZodOptional<z.ZodNumber>;
     affinityMeasured: z.ZodOptional<z.ZodBoolean>;
 }, z.core.$strip>;
 export interface AffinityUnmeasuredScore {
@@ -2476,6 +2478,7 @@ export declare const RecalledScoreSchema: z.ZodUnion<readonly [
         freshness: z.ZodNumber;
         strength: z.ZodNumber;
         total: z.ZodNumber;
+        timeWeightFloor: z.ZodOptional<z.ZodNumber>;
         affinityMeasured: z.ZodOptional<z.ZodBoolean>;
     }, z.core.$strip>,
     z.ZodObject<{
@@ -2530,6 +2533,7 @@ export declare const RecalledMemorySchema: z.ZodObject<{
             freshness: z.ZodNumber;
             strength: z.ZodNumber;
             total: z.ZodNumber;
+            timeWeightFloor: z.ZodOptional<z.ZodNumber>;
             affinityMeasured: z.ZodOptional<z.ZodBoolean>;
         }, z.core.$strip>,
         z.ZodObject<{
@@ -2592,6 +2596,7 @@ export interface RecallQuery {
     includeSubjectless?: boolean | undefined;
     activityCounting?: "tenant" | "subject" | undefined;
     timeWeighting?: TimeWeightingPolicy | undefined;
+    timeWeightFloor?: number | undefined;
 }
 export declare const RECALL_CHANNELS: readonly [
     "ann",
@@ -2601,6 +2606,7 @@ export type RecallChannel = (typeof RECALL_CHANNELS)[number];
 export declare const DEFAULT_RECALL_CHANNELS: readonly RecallChannel[];
 export declare const ANN_TRUNCATION_UNDECIDABLE_LEXICAL_ACTIVE: string;
 export declare const LEXICAL_STORE_UNAVAILABLE_ERROR_PREFIX = "recall: channels included 'lexical' but no LexicalStore is wired: ";
+export declare const DEFAULT_INCLUDE_FULLY_DECAYED = false;
 export declare const DEFAULT_SCORE_THRESHOLD = 0.1;
 export interface RecallAssociationQuery {
     maxCount: number;
@@ -2665,6 +2671,7 @@ export declare const RecallQuerySchema: z.ZodObject<{
         legacy: "legacy";
         eventAwareFreshness: "eventAwareFreshness";
     }>>;
+    timeWeightFloor: z.ZodOptional<z.ZodNumber>;
     labels: z.ZodOptional<z.ZodArray<z.ZodString>>;
     taxonomyGroups: z.ZodOptional<z.ZodBoolean>;
     relationMaxCount: z.ZodOptional<z.ZodNumber>;
@@ -2760,6 +2767,7 @@ export declare const RecallResultSchema: z.ZodObject<{
                 freshness: z.ZodNumber;
                 strength: z.ZodNumber;
                 total: z.ZodNumber;
+                timeWeightFloor: z.ZodOptional<z.ZodNumber>;
                 affinityMeasured: z.ZodOptional<z.ZodBoolean>;
             }, z.core.$strip>,
             z.ZodObject<{
@@ -3835,6 +3843,7 @@ export interface ScoringInput {
     decayBaseSeq?: number | null | undefined;
     halfLifeRecalls?: number | null | undefined;
     timeWeighting?: TimeWeightingPolicy | undefined;
+    timeWeightFloor?: number | undefined;
 }
 export type ScoringStrategy = (input: ScoringInput) => ScoreBreakdown;
 export declare const TIME_WEIGHTING_POLICIES: readonly [
@@ -3843,6 +3852,7 @@ export declare const TIME_WEIGHTING_POLICIES: readonly [
 ];
 export type TimeWeightingPolicy = (typeof TIME_WEIGHTING_POLICIES)[number];
 export declare const DEFAULT_TIME_WEIGHTING_POLICY: TimeWeightingPolicy;
+export declare const DEFAULT_TIME_WEIGHT_FLOOR = 0.5;
 export declare const MAX_FRESHNESS = 1;
 export interface NonSimilarityBoundInput {
     queryTags: readonly string[];

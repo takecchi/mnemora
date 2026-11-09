@@ -32,6 +32,7 @@ import {
   DEFAULT_OVER_FETCH_FACTOR,
   DEFAULT_RECALL_CHANNELS,
   DEFAULT_RECALL_LIMIT,
+  DEFAULT_INCLUDE_FULLY_DECAYED,
   DEFAULT_SCORE_THRESHOLD,
   LEXICAL_STORE_UNAVAILABLE_ERROR_PREFIX,
   DIGEST_BAND_MAX_CHARS,
@@ -417,6 +418,7 @@ async function fetchMandatoryCompanions(
     nowSeq: number | undefined;
     decayBaseSeq: number | null | undefined;
     halfLifeRecalls: number | null | undefined;
+    timeWeightFloor: number | undefined;
   },
   survivesAttributesFilter: (memory: Memory) => boolean,
   // companion の subjectId ぶんの `S_x` を先に読む（`decayScoringExtras` が同期的に `effectiveNowSeqFor` を呼ぶため。ADR 0353）。
@@ -505,7 +507,7 @@ async function runRecallBody(
   const validityGateActive = validatedQuery.includeOutsideValidity !== true;
   const validAt = validatedQuery.validAt ?? now;
 
-  const decayGateActive = validatedQuery.includeFullyDecayed !== true;
+  const decayGateActive = !(validatedQuery.includeFullyDecayed ?? DEFAULT_INCLUDE_FULLY_DECAYED);
 
   // ゲートが無効（`includeFullyDecayed: true`）でも常に読む: 'wall' 以外の時計は段2の再スコアでも使う（ADR 0165）。
   const decayClock: DecayClock =
@@ -767,11 +769,14 @@ async function runRecallBody(
     nowSeq: number | undefined;
     decayBaseSeq: number | null | undefined;
     halfLifeRecalls: number | null | undefined;
+    timeWeightFloor: number | undefined;
   } => ({
     decayClock,
     nowSeq: effectiveNowSeqFor(memory),
     decayBaseSeq: memory.decayBaseSeq,
     halfLifeRecalls: memory.halfLifeRecalls,
+    // 時間の項はどの経路（本体・同伴・連想枠）でも同じに掛ける。経路ごとに渡し忘れないよう、ここに相乗りさせる。
+    timeWeightFloor: validatedQuery.timeWeightFloor,
   });
 
   // 配線されていない語彙チャンネルを明示的に要求されたら投げる（ADR 0084）。黙って0件を返さない:

@@ -209,6 +209,8 @@ async function collectContextDiagnostics(
   const diagnosticRecall = await runtime.recall(ctx, {
     text: question,
     timeWeighting: policy,
+    // 時間の方針（ADR 0300）だけを比べる測定で、記録した応答（カセット）もこの条件で録った。時間の重みの下限（ADR 0704）は掛けない。
+    timeWeightFloor: 0,
     scoreThreshold: DIAGNOSTIC_SCORE_THRESHOLD,
     association,
   });
@@ -253,6 +255,8 @@ async function runTimeWeightingPolicy(
   const recall = await runtime.recall(ctx, {
     text: question,
     timeWeighting: policy,
+    // 時間の方針（ADR 0300）だけを比べる測定で、記録した応答（カセット）もこの条件で録った。時間の重みの下限（ADR 0704）は掛けない。
+    timeWeightFloor: 0,
     association,
   });
   const prompt = `${buildMnemoraPrompt(recall)}${buildQuestionSuffix(question)}`;

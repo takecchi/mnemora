@@ -898,8 +898,16 @@ export interface ScoreBreakdown {
   freshness: number;
   /** 候補の Memory の `strength`。 */
   strength: number;
-  /** 順位と閾値の比較に使う合計のスコア。 */
+  /**
+   * 順位と閾値の比較に使う合計のスコア。既定の戦略では `affinity × 時間の重み × tagMatch × strength`。
+   * 時間の重みは、下の `timeWeightFloor` が無ければ `decay × freshness`、在れば `φ + (1 − φ) × decay × freshness`（φ = その値）。
+   */
   total: number;
+  /**
+   * 時間の重みの下限 φ（[ADR 0704](../../../docs/decisions/0704-recall-time-weight-floor.md)）。**0 より大きい φ を使ったときだけ入る。**
+   * `total` をこの内訳から組み立て直すために持つ（入っていなければ、時間の重みは `decay × freshness` そのもの）。
+   */
+  timeWeightFloor?: number;
   /**
    * `total` の比較可能性を名乗る欄（[ADR 0282](../../../docs/decisions/0282-score-breakdown-affinity-measured.md)）。
    *
@@ -923,6 +931,7 @@ export const ScoreBreakdownSchema = z.object({
   freshness: z.number(),
   strength: z.number(),
   total: z.number(),
+  timeWeightFloor: z.number().optional(),
   affinityMeasured: z.boolean().optional(),
 }) satisfies z.ZodType<ScoreBreakdown>;
 
@@ -1451,6 +1460,17 @@ export interface RecallQuery {
    * 期限切れ・減衰しきった記憶は今までどおり除外される。
    */
   timeWeighting?: TimeWeightingPolicy | undefined;
+  /**
+   * 段2（再スコア）の**時間の重みの下限** φ（0 以上 1 以下。[ADR 0704](../../../docs/decisions/0704-recall-time-weight-floor.md)）。
+   * 省略時は `DEFAULT_TIME_WEIGHT_FLOOR`（`ScoringInput.timeWeightFloor` と同じ既定）。
+   *
+   * 時間の重みを `φ + (1 − φ) × decay × freshness` にする。`φ = 0` なら従来どおり `decay × freshness` で、時間が経つほど
+   * 際限なく沈む——関連の薄い新しい記憶が、関連の強い古い記憶を上回る。`φ > 0` なら、どれだけ古くても時間の重みは φ を割らず、
+   * 時間は「関連が近い候補どうしの順を決める」ことにだけ効く（使われない記憶は想起されにくくなるが、まっすぐ指す問いには返る）。
+   *
+   * 忘却ゲート（`includeFullyDecayed`）・閾値（`scoreThreshold`）とは独立。この欄は順位の付け方だけを変える。
+   */
+  timeWeightFloor?: number | undefined;
 }
 
 /**
@@ -1485,6 +1505,13 @@ export const ANN_TRUNCATION_UNDECIDABLE_LEXICAL_ACTIVE =
  */
 export const LEXICAL_STORE_UNAVAILABLE_ERROR_PREFIX =
   "recall: channels included 'lexical' but no LexicalStore is wired: ";
+
+/**
+ * `RecallQuery.includeFullyDecayed` の既定値（[ADR 0704](../../../docs/decisions/0704-recall-time-weight-floor.md)）。**`true`**:
+ * 忘却ゲート（減衰しきった記憶を時間だけで候補から外す）を既定では掛けない。時間は順位を下げることにだけ使う
+ * （`RecallQuery.timeWeightFloor`）。以前は `false`（ゲートが既定で効く。ADR 0153）。
+ */
+export const DEFAULT_INCLUDE_FULLY_DECAYED = false;
 
 /** RecallQuery.scoreThreshold の既定値。強い根拠のない裁量値。 */
 export const DEFAULT_SCORE_THRESHOLD = 0.1;
@@ -1603,6 +1630,7 @@ export const RecallQuerySchema = z.object({
   includeSubjectless: z.boolean().optional(),
   // 一覧を書き写さない。TIME_WEIGHTING_POLICIES から導く（ADR 0300）。
   timeWeighting: z.enum(TIME_WEIGHTING_POLICIES).optional(),
+  timeWeightFloor: z.number().min(0).max(1).optional(),
   labels: z.array(z.string()).optional(),
   taxonomyGroups: z.boolean().optional(),
   // 上限1000の理由は `RecallQuery.relationMaxCount` の doc。

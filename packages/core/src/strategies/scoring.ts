@@ -75,6 +75,12 @@ export interface ScoringInput {
    * ゲートはこの欄を一切参照しない。
    */
   timeWeighting?: TimeWeightingPolicy | undefined;
+  /**
+   * **時間の重みの下限** φ（0 以上 1 以下。[ADR 0704](../../../../docs/decisions/0704-recall-time-weight-floor.md)）。
+   * 省略時は {@link DEFAULT_TIME_WEIGHT_FLOOR}。時間の重みを `φ + (1 − φ) × decay × freshness` にする。
+   * `φ = 0` のときは従来の式 `affinity × decay × tagMatch × freshness × strength` をそのまま通す（ビット単位で同じ）。
+   */
+  timeWeightFloor?: number | undefined;
 }
 
 /** 候補1件のスコアの内訳を計算する純関数（上の doc）。上界を宣言する戦略は {@link BoundedScoringStrategy}。 */
@@ -107,6 +113,12 @@ export type TimeWeightingPolicy = (typeof TIME_WEIGHTING_POLICIES)[number];
  * 既定の `recall()` に返らなくなる（ADR 0699 / ADR 0700 の実測）。
  */
 export const DEFAULT_TIME_WEIGHTING_POLICY: TimeWeightingPolicy = "eventAwareFreshness";
+
+/**
+ * `ScoringInput.timeWeightFloor` の既定値（[ADR 0704](../../../../docs/decisions/0704-recall-time-weight-floor.md)）。
+ * **この定数を書き換える PR は既定の順位付けを変える。**
+ */
+export const DEFAULT_TIME_WEIGHT_FLOOR = 0.5;
 
 /**
  * `freshness` の上限（[ADR 0036](../../../../docs/decisions/0036-clamp-freshness-at-one.md)）。
@@ -300,7 +312,16 @@ const scoreWithDefaultStrategy: ScoringStrategy = (input) => {
         ? lexicalMatch
         : Math.max(similarity, lexicalMatch);
 
-  const total = affinity * decay * tagMatch * freshness * input.strength;
+  const timeWeightFloor = input.timeWeightFloor ?? DEFAULT_TIME_WEIGHT_FLOOR;
+  // φ = 0 で一般式に寄せない: `affinity * (0 + 1 * decay * freshness) * …` は掛ける順が変わり、従来の total と
+  // ビット単位で一致しなくなる（順位の同点の崩れ方まで変わりうる）。
+  const total =
+    timeWeightFloor === 0
+      ? affinity * decay * tagMatch * freshness * input.strength
+      : affinity *
+        (timeWeightFloor + (1 - timeWeightFloor) * decay * freshness) *
+        tagMatch *
+        input.strength;
 
   // affinity が中立の1に退化したか（関連度を測っていないか）を名乗る欄（ADR 0282）。値がある場合だけ足す形にはしない
   // （欄が無いことを「defaultScoringStrategy を経由していない」の専用の合図として残すため。`ScoreBreakdown.affinityMeasured`）。
@@ -314,6 +335,9 @@ const scoreWithDefaultStrategy: ScoringStrategy = (input) => {
     total,
     affinityMeasured,
   };
+  if (timeWeightFloor !== 0) {
+    score.timeWeightFloor = timeWeightFloor;
+  }
   if (similarity !== undefined) {
     score.similarity = similarity;
   }

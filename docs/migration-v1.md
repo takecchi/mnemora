@@ -3434,6 +3434,9 @@ on に変わる（[ADR 0337](./decisions/0337-recall-association-default-on.md)�
 
 - **`@mnemora/core` の `TenantSettingsStore` に任意のメソッド `setDefaultHalfLifeHours?(ctx, hours): Promise<void>` が増えた**（[ADR 0706](./decisions/0706-set-default-half-life-hours.md)）。
   任意のメソッドなので、実装していない adapter はそのまま適合する。⚠ ただし、自前の `TenantSettingsStore` が**同じ名前で別の形のメソッド**（例: 戻り値が `void`）をたまたま持っていると、型が合わずにコンパイルが通らなくなる（この repo の中にも1件あった。テスト用の最小の store）。その場合は `async` にして `Promise<void>` を返す形にそろえる。
+- **`@mnemora/core` の `recall()`: `timeWeightFloor` を渡さないと、時間の重みの下限 0.5 が掛かる**（[ADR 0704](./decisions/0704-recall-time-weight-floor.md)）。
+  古い記憶の `total` は以前より高くなり、閾値を割らなくなる・新しい記憶に順位で負けにくくなる。`consolidate`・`reflect` が選ぶ記憶も変わりうる。型は任意の欄（`RecallQuery.timeWeightFloor`・`ScoreBreakdown.timeWeightFloor`）が増えるだけ。
+  影響が出るのは、古い記憶が沈むこと（順位・`below_threshold`・`total` の値）に頼っていた呼び出し側と、`ScoreBreakdown` を完全一致で比べていた呼び出し側である。従来どおりにするには `timeWeightFloor: 0` を渡す。
 
 ## この文書が確かめていないこと
 

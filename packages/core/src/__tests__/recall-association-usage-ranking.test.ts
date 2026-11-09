@@ -281,7 +281,7 @@ type Spec = { digest: string; vector: number[]; overrides?: Partial<NewMemory> }
 async function associationDigests(
   specs: [Spec, Spec],
   association: { maxCount: number; minSimilarity?: number },
-  extra: { tags?: string[]; overFetchFactor?: number } = {},
+  extra: { tags?: string[]; overFetchFactor?: number; timeWeightFloor?: number } = {},
 ): Promise<string[]> {
   const { runtime, stores, setNow } = buildRuntime();
   await createEmbeddedMemory(stores, ANCHOR_VECTOR, { digest: "アンカー" });
@@ -319,6 +319,9 @@ describe("recall() — 連想枠の席の順位キーは、アンカー類似度
         { digest: "B", vector: FAR_VECTOR, overrides: { halfLifeHours: 3000 } },
       ],
       { maxCount: 1, minSimilarity: LOW_MIN_SIMILARITY },
+      // 順位キーに decay が効くことの対照なので、時間の重みの下限は掛けない（ADR 0704）。下限 0.5 の既定では、
+      // A = 0.6 × (0.5 + 0.5 × 0.12) ≒ 0.34 > B = 0.3 × (0.5 + 0.5 × 0.90) ≒ 0.29 で A が勝つ（時間が関連の強さを覆さない）。
+      { timeWeightFloor: 0 },
     );
     expect(digests).toEqual(["B"]);
   });

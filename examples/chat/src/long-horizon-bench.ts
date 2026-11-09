@@ -208,6 +208,10 @@ export interface LongHorizonOptions {
   arms?: readonly LongHorizonArm[];
   tenantPrefix: string;
   log?: (line: string) => void;
+  /** どの arm の `recall()` にも渡す、時間の重みの下限（ADR 0704）。省略時は渡さない（core の既定）。 */
+  timeWeightFloor?: number;
+  /** どの arm の既定の `recall()` でも忘却ゲートを外す（`includeFullyDecayed: true`）。省略時は外さない。 */
+  includeFullyDecayed?: boolean;
 }
 
 export interface LongHorizonReport {
@@ -331,6 +335,10 @@ export async function runLongHorizonBench(
   const log = options.log ?? (() => {});
   const allSeeds = buildLongHorizonMemorySeeds(facts, days, fillersPerDay);
   const habitualFacts = facts.filter((f) => f.factClass === "habitual");
+  const recallExtras = {
+    ...(options.timeWeightFloor !== undefined ? { timeWeightFloor: options.timeWeightFloor } : {}),
+    ...(options.includeFullyDecayed === true ? { includeFullyDecayed: true } : {}),
+  };
 
   const probes: LongHorizonProbeRecord[] = [];
   const quantities: LongHorizonQuantityRecord[] = [];
@@ -372,6 +380,7 @@ export async function runLongHorizonBench(
           const recall = await handle.runtime.recall(ctx, {
             text: fact.question,
             timeWeighting: mentionPolicy,
+            ...recallExtras,
           });
           const report = await reportMemoryUsage(handle.runtime, ctx, recall);
           if (report.reported) {
@@ -389,11 +398,13 @@ export async function runLongHorizonBench(
           const recall = await handle.runtime.recall(ctx, {
             text: fact.question,
             timeWeighting: policy,
+            ...recallExtras,
           });
           promptCharsSum += buildMnemoraPrompt(recall).length + fact.question.length;
           const diagnosticRecall = await handle.runtime.recall(ctx, {
             text: fact.question,
             timeWeighting: policy,
+            ...recallExtras,
             scoreThreshold: DIAGNOSTIC_SCORE_THRESHOLD,
             includeFullyDecayed: true,
             limit: diagnosticRecallLimit(seedCursor),
