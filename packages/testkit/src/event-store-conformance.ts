@@ -35,6 +35,12 @@ export interface EventStoreConformanceOptions {
    * ——`vector-store-conformance.ts` の `prepareMemoryId`（ADR 0034）と同じ理由。
    */
   prepareMemoryId: (ctx: Ctx) => Promise<MemoryId> | MemoryId;
+  /**
+   * `MemoryEvent.seq`（記録した順の番号。ADR 0702）を振る adapter か。**既定は `false`**（任意の欄なので、振らない adapter も適合する）。
+   * `true` のとき、`seq` の歯（記録した順に増える・`at` が逆行しても増える・同じ `at` の `list` の並びは `seq` 順）が当たる。
+   * `false` のとき、その歯は消えずに `it.skip` として名前だけ残る（「測っていない」を名乗る）。
+   */
+  supportsSeq?: boolean;
 }
 
 /**
@@ -73,7 +79,10 @@ const _eventStoreShapeCheck: _EventStoreHasNoUpdateOrDelete = true;
  * - `ctx.tenantId`・`ctx.subjectId` の形式不正な識別子の拒否（ADR 0423）
  */
 export function describeEventStoreConformance(options: EventStoreConformanceOptions): void {
-  const { name, createStore, prepareMemoryId } = options;
+  const { name, createStore, prepareMemoryId, supportsSeq = false } = options;
+  const maybeSeqIt = supportsSeq ? it : it.skip;
+  const seqName = (title: string) =>
+    supportsSeq ? title : `（測っていない: supportsSeq が false）${title}`;
 
   describe(`EventStore conformance (${name})`, () => {
     it("append した実装オブジェクトに update/delete メソッドが生えていない（実装側の実行時の念のための確認）", async () => {
@@ -81,6 +90,78 @@ export function describeEventStoreConformance(options: EventStoreConformanceOpti
       expect((store as unknown as Record<string, unknown>).update).toBeUndefined();
       expect((store as unknown as Record<string, unknown>).delete).toBeUndefined();
     });
+
+    // -------------------------------------------------------------------
+    // seq（ADR 0702）: 記録した順の番号。`at` は呼び出し側の時計なので、遷移の順は `seq` で読む。
+    // -------------------------------------------------------------------
+
+    maybeSeqIt(
+      seqName(
+        "seq: 同じ記憶へ append した順に seq が増える（at が逆行していても）。get も同じ seq を返す",
+      ),
+      async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-seq" };
+        const memoryId = await prepareMemoryId(ctx);
+        const later = new Date("2026-01-01T00:00:10.000Z");
+        const earlier = new Date("2026-01-01T00:00:01.000Z");
+
+        // 時計の進んだプロセスが先に記録し、遅れたプロセスが後で記録した、という並び。
+        const first = await store.append(
+          ctx,
+          buildNewMemoryEventFixture({
+            tenantId: ctx.tenantId,
+            memoryId,
+            kind: "archived",
+            at: later,
+          }),
+        );
+        const second = await store.append(
+          ctx,
+          buildNewMemoryEventFixture({
+            tenantId: ctx.tenantId,
+            memoryId,
+            kind: "restored",
+            at: earlier,
+          }),
+        );
+
+        expect(Number.isInteger(first.seq)).toBe(true);
+        expect(second.seq!).toBeGreaterThan(first.seq!);
+        expect((await store.get(ctx, second.id))?.seq).toBe(second.seq);
+        // list は at の昇順のまま（restored が先）。履歴は seq で並べ直すと記録した順に戻る。
+        const listed = await store.list(ctx, { memoryId });
+        expect(listed.map((e) => e.kind)).toEqual(["restored", "archived"]);
+        expect([...listed].sort((a, b) => a.seq! - b.seq!).map((e) => e.kind)).toEqual([
+          "archived",
+          "restored",
+        ]);
+      },
+    );
+
+    maybeSeqIt(
+      seqName("seq: 同じ at のイベントは、list で seq の昇順（記録した順）に並ぶ"),
+      async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-seq-tie" };
+        const memoryId = await prepareMemoryId(ctx);
+        const at = new Date("2026-01-01T00:00:00.000Z");
+        const kinds = ["updated", "superseded", "unsuperseded", "updated"] as const;
+
+        for (const kind of kinds) {
+          await store.append(
+            ctx,
+            buildNewMemoryEventFixture({ tenantId: ctx.tenantId, memoryId, kind, at }),
+          );
+        }
+
+        const listed = await store.list(ctx, { memoryId });
+        expect(listed.map((e) => e.kind)).toEqual([...kinds]);
+        expect(listed.map((e) => e.seq!)).toEqual(
+          [...listed.map((e) => e.seq!)].sort((a, b) => a - b),
+        );
+      },
+    );
 
     it("append した event が get で取得できる", async () => {
       const store = await createStore();

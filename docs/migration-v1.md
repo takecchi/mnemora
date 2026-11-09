@@ -3428,6 +3428,9 @@ on に変わる（[ADR 0337](./decisions/0337-recall-association-default-on.md)�
   `occurredAt` を持たない記憶（恒常的な事実・好み）の `freshness` が、`recordedAt` の古さで沈まず 1 に固定される。`occurredAt` を持つ記憶の式は変わらない。忘却ゲート・`validAt` ゲートは変わらない。型・シグネチャは変わらず、新しく断る入力も無い。
   影響が出るのは、`timeWeighting` を渡さずに `recall()` を呼び、古く記録した `occurredAt` の無い記憶が沈むこと（順位・`below_threshold`・`score.freshness`）に頼っていた呼び出し側である。従来どおりにするには `timeWeighting: "legacy"` を渡す——既定を変える前の省略時と1バイトも変わらない。
   ⚠ 取り引き: `occurredAt`・`validFrom`・`validUntil` のどれも持たない古い予定も持ち上がる（[docs/recall.md](./recall.md) §7.1）。
+- **`@mnemora/postgres`: migration `0035` が `memory_events` に列 `seq` を足す。`EventStore.list` の同じ `at` の行は `seq` の順に並ぶ。`forgotten` のイベントの `meta` に `previousStatus` が増える**（[ADR 0702](./decisions/0702-memory-event-seq.md)）。
+  手順は、いつもどおり migration を適用するだけ（列の追加で、既存の行も書き込みも拒まない。既存の行の `seq` は適用時の物理的な並びで振られ、遷移の順とは限らない）。型は任意の欄 `MemoryEvent.seq?` が増えるだけ。
+  影響が出るのは、`forgotten` のイベントの `meta` を `{}`・`{ reason }` と完全一致で比べていた呼び出し側と、同じ `at` の行の並びに頼っていた呼び出し側である。状態の履歴を組み立てるなら、`at` ではなく `seq` で並べ直すこと。
 
 ## この文書が確かめていないこと
 

@@ -1092,7 +1092,8 @@ CREATE TABLE memory_events (
                        ('created','updated','superseded','archived','forgotten','purged',
                         'events_purged','restored','unsuperseded')),
                     -- 実物の制約は packages/postgres/migrations/（最新は 0018_memory_events_kind_unsuperseded.sql）
-  at                timestamptz NOT NULL DEFAULT now(),
+  at                timestamptz NOT NULL DEFAULT now(),  -- 呼び出し側（runtime）の時計の値。DB の時刻ではない
+  seq               bigint      NOT NULL GENERATED ALWAYS AS IDENTITY, -- 記録した順（0035。ADR 0702）。同じ記憶では遷移の順と一致する
   actor             jsonb       NOT NULL,   -- { type: 'human'|'system'|'clone', id?: string }
   digest_snapshot   text        NULL,       -- 記録時点の digest。本文(content)は写さない
   size_before_bytes integer     NULL,       -- 削除・置換の直前サイズ
@@ -1103,6 +1104,12 @@ CREATE TABLE memory_events (
 CREATE INDEX idx_memory_events_by_memory ON memory_events (tenant_id, memory_id, at);
 CREATE INDEX idx_memory_events_by_kind   ON memory_events (tenant_id, kind, at);
 ```
+
+**⚠ 2026-11 追記（[ADR 0702](./decisions/0702-memory-event-seq.md)）: 状態の履歴は `at` ではなく `seq` で並べること。**
+`at` は各プロセスの時計の値なので、時計のずれたワーカーが混ざると、同じ記憶のイベントでも `at` の順が実際の遷移の順と
+逆になりうる（実測: 10秒進んだワーカーの archive の後に、1秒進んだワーカーが restore すると、`at` の順では `restored` が先に来る）。
+`seq` は store が記録した順の番号で、同じ記憶への遷移は行ロックでコミット順に直列化されるので、`seq` の順は遷移の順と一致する。
+`EventStore.list` の並びは `at` の昇順のまま（同じ `at` は `seq` 順）。`forgotten` のイベントは `meta.previousStatus` に直前の status を持つ。
 
 記録項目は tenant_id / memory_id / kind / at / actor / digest のスナップショット / 直前の
 サイズに限る。**本文（`content`）は残さない。** 監査ログ自体が情報漏洩の経路にならないための
@@ -1156,7 +1163,7 @@ UPDATE するようなショートカット）を作らない。
 
 | 経路（`kind`） | `meta.reason` | 利用者の `opts.reason` |
 |---|---|---|
-| `forget`（`forgotten`）・`purge`（`purged`）・`restoreArchived`（`restored`） | 利用者の文。**省略すると `reason` キー自体が無い**（`meta` は `{}`） | `meta.reason` に入る |
+| `forget`（`forgotten`）・`purge`（`purged`）・`restoreArchived`（`restored`） | 利用者の文。**省略すると `reason` キー自体が無い**（`meta` は `{}`。ただし `forgotten` は ADR 0702 から `meta.previousStatus` を必ず持つ） | `meta.reason` に入る |
 | `restoreSuperseded`（`unsuperseded`） | 利用者の文。**省略すると固定タグ `'unsuperseded'`**（`@mnemora/postgres` は `event.reason ?? "unsuperseded"`、`@mnemora/testkit` の fixture も同じ）。`meta.supersededById` も付く | `meta.reason` に入る |
 | `observe()` の抽出（`created`） | 固定タグ `'extracted'`、または全件失敗の代替経路の `'extraction_failed_whole_observation_fallback'` | 受け口が無い |
 | `reextract`（旧い行の `superseded`） | 固定タグ `'reextract_superseded'` | 受け口が無い |

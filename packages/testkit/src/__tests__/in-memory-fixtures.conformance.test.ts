@@ -127,6 +127,7 @@ let eventFixtureContentHashCounter = 0;
 
 describeEventStoreConformance({
   name: "in-memory placeholder",
+  supportsSeq: true,
   createStore: () => {
     const memoryStore = new InMemoryMemoryStore();
     latestMemoryStoreForEventFixtures = memoryStore;

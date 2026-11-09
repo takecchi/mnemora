@@ -13,6 +13,12 @@ import { assertStorableMemoryEvent } from "./memory-event-check.js";
 import { replaceLoneSurrogates } from "./well-formed-text.js";
 import type { InMemoryMemoryStore } from "./in-memory-memory-store.js";
 
+/**
+ * 記録した順の番号（ADR 0702）。プロセスの中で単調に増える。fixture の store は同期的に検査を済ませてから積むので、
+ * ここで振った順が積んだ順になる。
+ */
+let lastSeq = 0;
+
 /** `NewMemoryEvent` から永続化済みの `MemoryEvent` を組み立てる。イベントを積むすべての口がここを通る。 */
 export function buildStoredMemoryEvent(ctx: Ctx, event: NewMemoryEvent): MemoryEvent {
   // 検査はここに置く: イベントを積むすべての口が通る合流点なので、1か所で全部を覆える。`event.at` の省略（`undefined`）は検査しない。
@@ -25,6 +31,7 @@ export function buildStoredMemoryEvent(ctx: Ctx, event: NewMemoryEvent): MemoryE
     memoryId: event.memoryId === null ? null : event.memoryId.toLowerCase(),
     kind: event.kind,
     at: event.at ?? new Date(),
+    seq: (lastSeq += 1),
     actor: event.actor,
     // `text` 列なので、孤立サロゲートは U+FFFD に置き換える。
     digestSnapshot: replaceLoneSurrogates(event.digestSnapshot) ?? null,
@@ -114,7 +121,8 @@ export class InMemoryEventStore implements EventStore {
       return true;
     });
     // `at` 昇順に並べてから `limit` を適用する。`this.events`（`InMemoryMemoryStore` と共有されうる）を in-place で壊さないよう、`filter()` の新しい配列を並べる。
-    const sorted = matched.sort((a, b) => a.at.getTime() - b.at.getTime());
+    // 同じ `at` は `seq`（記録した順）で並べる（`@mnemora/postgres` の `ORDER BY at, seq` と同じ。ADR 0702）。
+    const sorted = matched.sort((a, b) => a.at.getTime() - b.at.getTime() || a.seq! - b.seq!);
     return structuredClone(filter.limit !== undefined ? sorted.slice(0, filter.limit) : sorted);
   }
 }

@@ -44,10 +44,10 @@ export interface EventStore {
   /**
    * `filter` に一致する `MemoryEvent` を返す（ADR 0042）。
    *
-   * - **並び順**: `at` の昇順。**`at` が同値の行同士の順序は規定しない。**
-   *   ⚠ **この順序を当てにしてはいけない**（ADR 0422）。同じ操作が積む `created` と `superseded`
-   *   （`consolidate`・`reextract`）は同じ `at` を持つので、その並びは挿入順とも限らない。
-   *   順が要るときは `kind` と `meta`（例: `superseded` の `meta.supersededById`）で関係を読むこと。
+   * - **並び順**: `at` の昇順。`at` が同値の行同士は、{@link MemoryEvent.seq} を振る adapter では `seq` の昇順
+   *   （[ADR 0702](../../../../docs/decisions/0702-memory-event-seq.md)）。振らない adapter では規定しない（ADR 0422）。
+   *   ⚠ **`at` は呼び出し側の時計の値なので、時計のずれたプロセスが混ざると、同じ記憶でも `at` の順は遷移の順と食い違いうる。**
+   *   状態の履歴を組み立てるときは、返った配列を `seq` で並べ直すこと。
    * - **`limit`**: 並べ替えた後に適用する。「`at` が最も古い n 件」を返す。挿入順の先頭 n 件ではない
    *   （`append` は任意の `at` を渡せる）。
    * - **`since` / `until`**: 両端を含む（`at >= since` かつ `at <= until`）。
