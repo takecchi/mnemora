@@ -165,6 +165,11 @@ export const MALFORMED_NEW_MEMORY_CASES: ReadonlyArray<NewMemoryCase> = [
     over: (obs) => inferred(obs, { model: "" }),
   },
   {
+    label: "provenance: inferred で respondedModel が空文字（ADR 0701）",
+    field: /provenance\.respondedModel/,
+    over: (obs) => inferred(obs, { respondedModel: "" }),
+  },
+  {
     label: "provenance: inferred で promptVersion が無い",
     field: /provenance\.promptVersion/,
     over: (obs) => inferred(obs, { promptVersion: undefined }),

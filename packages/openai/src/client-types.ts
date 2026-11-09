@@ -30,6 +30,8 @@ export interface OpenAIChatCompletionChoice {
 
 export interface OpenAIChatCompletionResult {
   choices: OpenAIChatCompletionChoice[];
+  /** 応答を実際に返したモデル（例: 要求 `gpt-4o-mini` に対する `gpt-4o-mini-2024-07-18`）。任意: 持たないクライアントも渡せる。 */
+  model?: string | null;
 }
 
 /** `OpenAILLMProviderOptions.client` に渡せる最小のクライアント型。 */

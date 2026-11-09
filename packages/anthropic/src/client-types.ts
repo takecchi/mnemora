@@ -42,6 +42,8 @@ export interface AnthropicMessageResult {
   content: AnthropicContentBlock[];
   stop_reason?: string | null;
   stop_details?: AnthropicStopDetails | null;
+  /** 応答を実際に返したモデル。任意: 持たないクライアントも渡せる。 */
+  model?: string | null;
 }
 
 /** `AnthropicLLMProviderOptions.client` に渡せる最小のクライアント型。 */
