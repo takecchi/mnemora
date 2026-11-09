@@ -48,8 +48,8 @@ type Provenance =
   | { kind: 'stated';       sourceObservationId: string; speaker?: string; at: string }
   | { kind: 'inferred';     model: string; respondedModel?: string; promptVersion: string;
       basis: { memoryIds: string[]; observationIds: string[] }; confidence: number }
-  | { kind: 'consolidated'; sources: string[] /* memoryIds */ }
-  | { kind: 'reflected';    sources?: string[] /* memoryIds, 省略可 */ }
+  | { kind: 'consolidated'; sources: string[] /* memoryIds */; model?: string; respondedModel?: string }
+  | { kind: 'reflected';    sources?: string[] /* memoryIds, 省略可 */; model?: string; respondedModel?: string }
   | { kind: 'imported';     batchId: string }
 ```
 
@@ -57,6 +57,7 @@ type Provenance =
 （[ADR 0701](./decisions/0701-provenance-records-responded-model.md)）。`respondedModel` は、provider が
 `LLMProvider.completeStructuredWithMeta` を実装し、応答がモデル名を持っていたときだけ入る。**無いことは「確かめていない」を
 意味し、`model` と同じだったことを意味しない。**設定値・既定値・推測で埋めない（フォールバックでは、実際に応答した側の値が入る）。
+`consolidated`・`reflected` も同じ2つの欄を任意で持つ（[ADR 0705](./decisions/0705-consolidated-reflected-provenance-model.md)）。欄が入る前に作られた記憶には `model` も無い。
 
 DB では `provenance_kind` を**列**にし、`stated | inferred | consolidated | reflected | imported`
 以外の値を受け付けない。判別に使うキーだけを列に上げ、残りのペイロード（`model` や `basis` など

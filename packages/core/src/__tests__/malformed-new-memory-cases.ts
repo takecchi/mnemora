@@ -165,6 +165,26 @@ export const MALFORMED_NEW_MEMORY_CASES: ReadonlyArray<NewMemoryCase> = [
     over: (obs) => inferred(obs, { model: "" }),
   },
   {
+    label: "provenance: consolidated で model が空文字（ADR 0705）",
+    field: /provenance\.model/,
+    over: () => ({ provenance: { kind: "consolidated", sources: ["m1"], model: "" } }),
+  },
+  {
+    label: "provenance: consolidated で respondedModel が空文字（ADR 0705）",
+    field: /provenance\.respondedModel/,
+    over: () => ({ provenance: { kind: "consolidated", sources: ["m1"], respondedModel: "" } }),
+  },
+  {
+    label: "provenance: reflected で model が空文字（ADR 0705）",
+    field: /provenance\.model/,
+    over: () => ({ provenance: { kind: "reflected", sources: ["m1"], model: "" } }),
+  },
+  {
+    label: "provenance: reflected で respondedModel が空文字（ADR 0705）",
+    field: /provenance\.respondedModel/,
+    over: () => ({ provenance: { kind: "reflected", sources: ["m1"], respondedModel: "" } }),
+  },
+  {
     label: "provenance: inferred で respondedModel が空文字（ADR 0701）",
     field: /provenance\.respondedModel/,
     over: (obs) => inferred(obs, { respondedModel: "" }),

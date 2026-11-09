@@ -92,6 +92,10 @@ export interface BuildReflectedMemoryParams {
   halfLifeHours: number;
   /** 内省の結果の `recordedAt` にする時刻（減衰の起点にもなる）。 */
   now: Date;
+  /** provenance に書く、設定したモデル名（ADR 0705）。省けば書かない。 */
+  llmModelId?: string | undefined;
+  /** provenance に書く、応答を実際に返したモデル名（ADR 0701・0705）。省けば書かない。 */
+  respondedModel?: string | undefined;
   /**
    * `extraction.ts` の `BuildNewMemoryParams.activitySeq`/`halfLifeRecalls`・`consolidate.ts` の
    * `BuildConsolidatedMemoryParams` と同じ形（[ADR 0165](../../../../docs/decisions/0165-decay-activity-clock.md)）。
@@ -170,7 +174,12 @@ export function buildReflectedMemory(params: BuildReflectedMemoryParams): NewMem
     contentHash: params.hashContent(llmResult.content),
     digest,
     digestSource,
-    provenance: { kind: "reflected", sources: eligible.map((m) => m.id) },
+    provenance: {
+      kind: "reflected",
+      sources: eligible.map((m) => m.id),
+      ...(params.llmModelId !== undefined ? { model: params.llmModelId } : {}),
+      ...(params.respondedModel !== undefined ? { respondedModel: params.respondedModel } : {}),
+    },
     tags,
     attributes: intersectAttributes(eligible),
     occurredAt,

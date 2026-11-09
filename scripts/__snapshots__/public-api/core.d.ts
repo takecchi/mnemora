@@ -1320,10 +1320,14 @@ export declare const MemorySchema: z.ZodObject<{
         z.ZodObject<{
             kind: z.ZodLiteral<"consolidated">;
             sources: z.ZodArray<z.ZodString>;
+            model: z.ZodOptional<z.ZodString>;
+            respondedModel: z.ZodOptional<z.ZodString>;
         }, z.core.$strip>,
         z.ZodObject<{
             kind: z.ZodLiteral<"reflected">;
             sources: z.ZodOptional<z.ZodArray<z.ZodString>>;
+            model: z.ZodOptional<z.ZodString>;
+            respondedModel: z.ZodOptional<z.ZodString>;
         }, z.core.$strip>,
         z.ZodObject<{
             kind: z.ZodLiteral<"imported">;
@@ -1404,10 +1408,14 @@ export declare const NewMemorySchema: z.ZodObject<{
         z.ZodObject<{
             kind: z.ZodLiteral<"consolidated">;
             sources: z.ZodArray<z.ZodString>;
+            model: z.ZodOptional<z.ZodString>;
+            respondedModel: z.ZodOptional<z.ZodString>;
         }, z.core.$strip>,
         z.ZodObject<{
             kind: z.ZodLiteral<"reflected">;
             sources: z.ZodOptional<z.ZodArray<z.ZodString>>;
+            model: z.ZodOptional<z.ZodString>;
+            respondedModel: z.ZodOptional<z.ZodString>;
         }, z.core.$strip>,
         z.ZodObject<{
             kind: z.ZodLiteral<"imported">;
@@ -1750,10 +1758,14 @@ export interface InferredProvenance {
 export interface ConsolidatedProvenance {
     kind: "consolidated";
     sources: string[];
+    model?: string;
+    respondedModel?: string;
 }
 export interface ReflectedProvenance {
     kind: "reflected";
     sources?: string[];
+    model?: string;
+    respondedModel?: string;
 }
 export interface ImportedProvenance {
     kind: "imported";
@@ -1781,10 +1793,14 @@ export declare const ProvenanceSchema: z.ZodDiscriminatedUnion<[
     z.ZodObject<{
         kind: z.ZodLiteral<"consolidated">;
         sources: z.ZodArray<z.ZodString>;
+        model: z.ZodOptional<z.ZodString>;
+        respondedModel: z.ZodOptional<z.ZodString>;
     }, z.core.$strip>,
     z.ZodObject<{
         kind: z.ZodLiteral<"reflected">;
         sources: z.ZodOptional<z.ZodArray<z.ZodString>>;
+        model: z.ZodOptional<z.ZodString>;
+        respondedModel: z.ZodOptional<z.ZodString>;
     }, z.core.$strip>,
     z.ZodObject<{
         kind: z.ZodLiteral<"imported">;
@@ -3703,6 +3719,8 @@ export interface BuildConsolidatedMemoryParams {
     digestFallbackLength: number;
     halfLifeHours: number;
     now: Date;
+    llmModelId?: string | undefined;
+    respondedModel?: string | undefined;
     activitySeq?: number | undefined;
     halfLifeRecalls?: number | undefined;
 }
@@ -3788,6 +3806,8 @@ export interface BuildReflectedMemoryParams {
     digestFallbackLength: number;
     halfLifeHours: number;
     now: Date;
+    llmModelId?: string | undefined;
+    respondedModel?: string | undefined;
     activitySeq?: number | undefined;
     halfLifeRecalls?: number | undefined;
 }
