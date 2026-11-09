@@ -242,11 +242,14 @@ const TIME_KEYS = new Set([
 ]);
 const GENERATED_ID = /^(mem|obs|evt|rec|rcl|job|recall|ev)-\d+$|^[0-9a-f]{8}-[0-9a-f]{4}-/;
 
-/** id・テナント・時刻を別名に伏せ、鍵を並べ替えた形にする（2実装で同じになるべき形）。 */
+/** id・テナント・時刻・イベントの記録順の番号を別名に伏せ、鍵を並べ替えた形にする（2実装で同じになるべき形）。 */
 function normalize(value: unknown, h: Kit): unknown {
   const masked: unknown = JSON.parse(
     JSON.stringify(value ?? null, (key, x: unknown) => {
       if (TIME_KEYS.has(key)) return x == null ? x : "<t>";
+      // `MemoryEvent.seq` は adapter が振る記録順の番号で、比べてよいのは同じ store の中の大小だけ（ADR 0702）。
+      // Postgres の IDENTITY は DB を空にしても戻らないので、値そのものは2実装で揃わない。欄が在ることだけを残す。
+      if (key === "seq" && typeof x === "number") return "<seq>";
       if (typeof x === "string" && h.alias.has(x)) return h.alias.get(x);
       if (typeof x === "string" && GENERATED_ID.test(x)) return "<new>";
       return x;
