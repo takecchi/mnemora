@@ -57,6 +57,10 @@ export interface ConsolidatedProvenance {
   kind: "consolidated";
   /** 統合元の Memory の id。 */
   sources: string[]; // memoryIds
+  /** 統合を行った LLM の**設定した**モデル名（`RuntimeConfig.llmModelId`。[ADR 0705](../../../docs/decisions/0705-consolidated-reflected-provenance-model.md)）。この欄が入る前に作られた記憶には無い。 */
+  model?: string;
+  /** 統合の応答を**実際に返した**モデル名（ADR 0701 と同じ契約）。確かめられないときは無い。 */
+  respondedModel?: string;
 }
 
 /** `reflect` が作った Memory の出所。 */
@@ -65,6 +69,10 @@ export interface ReflectedProvenance {
   kind: "reflected";
   /** 土台になった Memory の id（省略できる）。 */
   sources?: string[]; // memoryIds, 省略可
+  /** 内省を行った LLM の**設定した**モデル名（`RuntimeConfig.llmModelId`。[ADR 0705](../../../docs/decisions/0705-consolidated-reflected-provenance-model.md)）。この欄が入る前に作られた記憶には無い。 */
+  model?: string;
+  /** 内省の応答を**実際に返した**モデル名（ADR 0701 と同じ契約）。確かめられないときは無い。 */
+  respondedModel?: string;
 }
 
 /** 外部から取り込んだ Memory の出所。 */
@@ -105,11 +113,15 @@ const InferredProvenanceSchema = z.object({
 const ConsolidatedProvenanceSchema = z.object({
   kind: z.literal("consolidated"),
   sources: z.array(z.string().min(1)).min(1),
+  model: z.string().min(1).optional(),
+  respondedModel: z.string().min(1).optional(),
 }) satisfies z.ZodType<ConsolidatedProvenance>;
 
 const ReflectedProvenanceSchema = z.object({
   kind: z.literal("reflected"),
   sources: z.array(z.string().min(1)).optional(),
+  model: z.string().min(1).optional(),
+  respondedModel: z.string().min(1).optional(),
 }) satisfies z.ZodType<ReflectedProvenance>;
 
 const ImportedProvenanceSchema = z.object({

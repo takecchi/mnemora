@@ -164,7 +164,11 @@ describe("runtime.consolidate — 基本の統合", () => {
     const result = await runtime.consolidate(ctx, { target: { memoryIds: [a.id, b.id] } });
 
     const created = await stores.memoryStore.get(ctx, result.consolidatedMemoryId!);
-    expect(created?.provenance).toEqual({ kind: "consolidated", sources: [a.id, b.id] });
+    expect(created?.provenance).toEqual({
+      kind: "consolidated",
+      sources: [a.id, b.id],
+      model: "unknown",
+    });
   });
 
   it("superseded イベントの meta.reason === 'consolidated'、digestSnapshot が入り content は入らない", async () => {

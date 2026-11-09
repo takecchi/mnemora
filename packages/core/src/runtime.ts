@@ -1,3 +1,4 @@
+import { callStructuredWithMeta } from "./llm-structured.js";
 import { z } from "zod";
 import { abortReason, isAbort, runAbortable } from "./abort.js";
 import type { AbortOptions } from "./abort.js";
@@ -5465,9 +5466,11 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     let llmResult: ConsolidationLLMResult;
     // ADR 0456: LLM が返した補助の欄（digest・tags）のうち保存できない値（NUL）を落とした記録。
     let consolidateDroppedFields: DroppedAuxField[] = [];
+    let consolidateRespondedModel: string | undefined;
     try {
-      llmResult = await runAbortable(opts.signal, (raced) =>
-        deps.llmProvider.completeStructured(
+      const structured = await runAbortable(opts.signal, (raced) =>
+        callStructuredWithMeta(
+          deps.llmProvider,
           ctx,
           {
             prompt: buildConsolidationPrompt(eligibleMemories),
@@ -5476,6 +5479,8 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
           { signal: raced },
         ),
       );
+      llmResult = structured.value;
+      consolidateRespondedModel = structured.respondedModel;
       assertLLMContentNotBlank(llmResult.content, "consolidate");
       const aux = sanitizeCandidateAuxFields(llmResult);
       if (aux.dropped.length > 0) {
@@ -5587,6 +5592,8 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       digestFallbackLength,
       halfLifeHours,
       now,
+      llmModelId,
+      respondedModel: consolidateRespondedModel,
       ...activityClockInputs,
     });
     const actor = opts.actor ?? { type: "system" };
@@ -5976,9 +5983,11 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     let llmResult: ReflectionLLMResult;
     // ADR 0456: consolidate と同じ。落とした補助の欄の記録。
     let reflectDroppedFields: DroppedAuxField[] = [];
+    let reflectRespondedModel: string | undefined;
     try {
-      llmResult = await runAbortable(opts.signal, (raced) =>
-        deps.llmProvider.completeStructured(
+      const structured = await runAbortable(opts.signal, (raced) =>
+        callStructuredWithMeta(
+          deps.llmProvider,
           ctx,
           {
             prompt: buildReflectionPrompt(eligibleMemories),
@@ -5987,6 +5996,8 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
           { signal: raced },
         ),
       );
+      llmResult = structured.value;
+      reflectRespondedModel = structured.respondedModel;
       if (llmResult.outcome === "reflected") {
         assertLLMContentNotBlank(llmResult.content, "reflect");
         const aux = sanitizeCandidateAuxFields(llmResult);
@@ -6091,6 +6102,8 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       digestFallbackLength,
       halfLifeHours,
       now,
+      llmModelId,
+      respondedModel: reflectRespondedModel,
       ...activityClockInputs,
     });
     const buildReflectedCreatedEvent = (memory: Memory) =>

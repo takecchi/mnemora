@@ -161,7 +161,11 @@ describe("runtime.reflect — provenance は必ず sources を埋める（決定
     const result = await runtime.reflect(ctx, { target: { memoryIds: [a.id, b.id] } });
 
     const created = await stores.memoryStore.get(ctx, result.reflectedMemoryId!);
-    expect(created?.provenance).toEqual({ kind: "reflected", sources: [a.id, b.id] });
+    expect(created?.provenance).toEqual({
+      kind: "reflected",
+      sources: [a.id, b.id],
+      model: "unknown",
+    });
     // 型としては ReflectedProvenance.sources は省略可のままだが、実装は常に埋める。
     expect((created?.provenance as { sources?: string[] }).sources).toBeDefined();
     expect((created?.provenance as { sources?: string[] }).sources!.length).toBeGreaterThan(0);
@@ -174,7 +178,7 @@ describe("runtime.reflect — provenance は必ず sources を埋める（決定
     const result = await runtime.reflect(ctx, { target: { memoryIds: [a.id] } });
 
     const created = await stores.memoryStore.get(ctx, result.reflectedMemoryId!);
-    expect(created?.provenance).toEqual({ kind: "reflected", sources: [a.id] });
+    expect(created?.provenance).toEqual({ kind: "reflected", sources: [a.id], model: "unknown" });
   });
 });
 

@@ -183,7 +183,11 @@ describe("reflect・reextract の材料と引き継ぎ（今の振る舞い）",
         expect(reflected?.status).toBe("active");
         expect(reflected?.validUntil ?? null).toBeNull();
         expect(reflected?.subjectId).toBe("alice");
-        expect(reflected?.provenance).toEqual({ kind: "reflected", sources: [current] });
+        expect(reflected?.provenance).toEqual({
+          kind: "reflected",
+          sources: [current],
+          model: "unknown",
+        });
         expect((await kit.memoryStore.get(ctx, expired))?.status).toBe("active");
       });
 

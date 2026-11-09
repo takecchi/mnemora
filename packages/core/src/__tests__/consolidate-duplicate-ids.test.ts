@@ -88,6 +88,10 @@ describe("consolidate：材料は重複を除いて数える", () => {
 
     expect(result.outcome).toBe("consolidated");
     const consolidated = await stores.memoryStore.get(ctx, result.consolidatedMemoryId!);
-    expect(consolidated?.provenance).toEqual({ kind: "consolidated", sources: [a.id, b.id] });
+    expect(consolidated?.provenance).toEqual({
+      kind: "consolidated",
+      sources: [a.id, b.id],
+      model: "unknown",
+    });
   });
 });

@@ -116,7 +116,11 @@ describe("runtime.consolidate/reflect — 付随データの引き継ぎ（本�
     expect(new Set(created!.tags)).toEqual(new Set(["tag-a", "tag-shared", "tag-b"]));
     expect(created!.attributes).toEqual({ visibility: "internal" });
     expect(created!.occurredAt?.toISOString()).toBe(OCCURRED_AT_B.toISOString());
-    expect(created!.provenance).toEqual({ kind: "consolidated", sources: [a.id, b.id] });
+    expect(created!.provenance).toEqual({
+      kind: "consolidated",
+      sources: [a.id, b.id],
+      model: "unknown",
+    });
     expect(created!.sourceObservationId).toBeNull();
     expect(created!.extractorVersion).toBeNull();
     expect(created!.embeddingStatus).toBe("pending");
@@ -234,7 +238,11 @@ describe("runtime.consolidate/reflect — 付随データの引き継ぎ（本�
     const newId = result.reflectedMemoryId!;
 
     const created = await memoryStore.get(ctx, newId);
-    expect(created!.provenance).toEqual({ kind: "reflected", sources: [a.id, b.id] });
+    expect(created!.provenance).toEqual({
+      kind: "reflected",
+      sources: [a.id, b.id],
+      model: "unknown",
+    });
     expect(created!.subjectId).toBe("subject-shared");
     expect(created!.attributes).toEqual({ visibility: "internal" });
     expect(new Set(created!.tags)).toEqual(new Set(["tag-a", "tag-shared", "tag-b"]));

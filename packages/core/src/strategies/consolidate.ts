@@ -97,6 +97,10 @@ export interface BuildConsolidatedMemoryParams {
   halfLifeHours: number;
   /** 統合先の `recordedAt` にする時刻（減衰の起点にもなる）。 */
   now: Date;
+  /** provenance に書く、設定したモデル名（ADR 0705）。省けば書かない。 */
+  llmModelId?: string | undefined;
+  /** provenance に書く、応答を実際に返したモデル名（ADR 0701・0705）。省けば書かない。 */
+  respondedModel?: string | undefined;
   /**
    * `extraction.ts` の `BuildNewMemoryParams.activitySeq`/`halfLifeRecalls` と同じ形で、両方揃っているときだけ
    * 活動時計の3つ組を作る（[ADR 0165](../../../../docs/decisions/0165-decay-activity-clock.md)）。`'wall'` のテナントでは
@@ -173,7 +177,12 @@ export function buildConsolidatedMemory(params: BuildConsolidatedMemoryParams): 
     contentHash: params.hashContent(llmResult.content),
     digest,
     digestSource,
-    provenance: { kind: "consolidated", sources: eligible.map((m) => m.id) },
+    provenance: {
+      kind: "consolidated",
+      sources: eligible.map((m) => m.id),
+      ...(params.llmModelId !== undefined ? { model: params.llmModelId } : {}),
+      ...(params.respondedModel !== undefined ? { respondedModel: params.respondedModel } : {}),
+    },
     tags,
     attributes: intersectAttributes(eligible),
     occurredAt,
