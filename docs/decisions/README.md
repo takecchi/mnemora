@@ -693,5 +693,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0696](./0696-merged-1006-recheck-teeth.md) | 10/06 マージ分の確かめ直し（#1877）で見つかった穴に歯を足す | 採用 (2026-10) |
 | [0697](./0697-core-fake-scrub-purged.md) | core の Fake に `scrubPurged` を足し、InMemory・Postgres と同じ振る舞いを3者照合の歯で縛る（ADR 0538 の決定2と「`scrubPurged` の扱い」を覆す） | 採用 (2026-10) |
 | [0698](./0698-owner-decisions-purge-scope-retention-tick-limit-rule-name.md) | purge の約束の範囲・`recalls` と完了済みの `outbox` の保持期間・`tick` の `limit` とリース・言語の事後検査の `rule` の名前を、オーナーの回答どおりに文書へ落とす | 採用 (2026-10) |
+| [0699](./0699-long-horizon-recall-bench.md) | 長期（半年）の想起を測るベンチ `long-horizon` を足す——記憶を直接書き、`local` 埋め込みで、門にせずに測る（Issue #2104） | 採用 (2026-11) |
 
 <!-- ADR-INDEX:GENERATED:END -->

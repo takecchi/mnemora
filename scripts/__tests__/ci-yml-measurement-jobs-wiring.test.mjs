@@ -29,6 +29,7 @@ const MEASUREMENT_JOB_IDS = Object.freeze([
   "time-term",
   "validity",
   "retrieval-rank-listing",
+  "long-horizon",
 ]);
 
 /**

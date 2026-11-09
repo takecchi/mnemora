@@ -20,6 +20,7 @@
     "language-mismatch-measure": "tsx src/scripts/language-mismatch-false-positive-measure.ts",
     "time-term": "tsx src/cli.ts time-term",
     "validity": "tsx src/cli.ts validity",
+    "long-horizon": "tsx src/cli.ts long-horizon",
     "embedding-fingerprint": "tsx src/cli.ts embedding-fingerprint",
     "lexical-tie-density-bench": "tsx src/bench/lexical-tie-density-bench.ts",
     "association-scale-bench": "tsx src/bench/association-scale-bench.ts",

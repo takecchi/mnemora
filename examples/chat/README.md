@@ -1730,6 +1730,39 @@ artifact を、後続の PR で基準値にする）。
 
 ---
 
+## `long-horizon`: 半年分の時間軸で、植えた事実が `recall()` に返り続けるかを測る
+
+**何を測るか**と、設計の理由・採らなかった案・手元で測った値は
+[ADR 0699](../../docs/decisions/0699-long-horizon-recall-bench.md)（Issue #2104）を見ること。要約:
+
+- 180日分の時間軸に、雑談（1日あたりの件数は `src/long-horizon-case-set.ts` の
+  `LONG_HORIZON_FILLERS_PER_DAY`）と、3種類の事実（常用・休眠・訂正）を植える。
+  事実ごとに、同じ話題で値が違う紛らわしい記憶も1件ずつ混ぜる。
+- 4つの条件（`timeWeighting` が `legacy`/`eventAwareFreshness` × 使用報告の有無）で、
+  決まった時点（`LONG_HORIZON_CHECKPOINT_DAYS`）ごとに事実を問う。
+- gold が返らなかったときは、理由を `decayed`（忘却ゲート）/ `below_threshold` /
+  `outranked`（件数の上限の外）/ `not_reached` に分けて数える。
+- 使用報告なしの条件では、既定値から計算した「最初に返らなくなる日」の見立てを並べる。
+
+**記憶は抽出 LLM を通さず直接書き、回答も生成しない。**⟹ LLM は使わず、API キーも要らない。
+埋め込みは既定で `local`（`MNEMORA_EMBEDDING` を明示すればそれを尊重する）。
+
+```bash
+DATABASE_URL=... MNEMORA_LONG_HORIZON_JSON=<path> pnpm --filter @mnemora/example-chat run long-horizon
+```
+
+`MNEMORA_LONG_HORIZON_JSON` を設定すると、集計と全 probe の記録を機械可読な JSON
+（`src/long-horizon-format.ts` の `buildLongHorizonJson`）として書き出す。未設定なら書かない。
+
+🔴 **測っているのは「gold の記憶が返ったか」（出典への到達）であり、回答の正しさではない**
+（`docs/autonomy.md` §2.2 の2）。⚠ 事実・雑談は合成データで、実運用の会話の分布ではない。
+
+CI の `long-horizon` ジョブ（`ci.yml`）がこれを実行し、表を Job Summary に、JSON を成果物に残す。
+**⛔ 門ではない**——事実は種類ごとに数件しかなく、閾値判定に足る母数ではない。
+⚠ **基準値ファイルはまだ無い**（`validity` と同じ。CI の artifact から後続の PR で採る）。
+
+---
+
 ## `consolidation-cost`: `Runtime.consolidate()` が「載る量」に効くかの実測（Issue #136）
 
 `Runtime.consolidate()`（ADR 0089）は入ったが、`examples/chat` に配線が無く、北極星の物差し
