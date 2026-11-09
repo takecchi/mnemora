@@ -1723,3 +1723,94 @@ jobs:
           name: validity
           path: ${{ github.workspace }}/validity.json
           if-no-files-found: ignore
+
+  long-horizon:
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    name: 半年分の時間軸で、植えた事実が recall() に返り続けるかを実測し、値を残す
+    runs-on: ubuntu-latest
+    # ⚠ **なぜ閾値の門にしないか**: 植えた事実は種類ごとに数件しかない。ADR 0033 §3 の規律
+    # （この規模の標本からは失敗率も成功率も主張しない）と、AGENTS.md「⚠ 偽陽性率に上限を
+    # 置けない検査は門にしない」に従い、値を Job Summary と成果物に残すだけにする。
+    # ⚠ LLM は使わない（記憶を直接書き、回答も生成しない）。埋め込みは `local`。
+    # ⟹ API キーは要らない。重みを取得できなかったときは、identifier-probes と同じく
+    # このジョブ自体が赤くなる（メトリクスを出さずに落ちる）。
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: mnemora_ci
+          POSTGRES_INITDB_ARGS: "--encoding=UTF8"
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=10
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/mnemora_ci
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+
+      - name: Enable corepack
+        run: corepack enable
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Enable required extensions (vector / btree_gin / pgcrypto)
+        run: |
+          PGPASSWORD=postgres psql -h localhost -U postgres -d mnemora_ci -c "select 1;" \
+            && PGPASSWORD=postgres psql -h localhost -U postgres -d mnemora_ci \
+              -c "CREATE EXTENSION IF NOT EXISTS vector;" \
+              -c "CREATE EXTENSION IF NOT EXISTS btree_gin;" \
+              -c "CREATE EXTENSION IF NOT EXISTS pgcrypto;"
+
+      - name: Run migrations (packages/postgres の唯一のマイグレーション実行口)
+        run: pnpm --filter @mnemora/postgres run migrate
+
+      - name: "固定した revision から cache 鍵を決める（identifier-probes と同じ）"
+        id: local-embedding-cache-key
+        run: node scripts/print-local-embedding-cache-key.mjs >> "$GITHUB_OUTPUT"
+
+      - name: モデル重みをキャッシュする（identifier-probes と同じ鍵・同じ場所）
+        uses: actions/cache@v6
+        with:
+          path: ${{ github.workspace }}/.cache/local-embedding
+          key: local-embedding-${{steps.local-embedding-cache-key.outputs.key}}
+
+      - name: 半年分の時間軸で想起を実測する（local embedding・LLM 不使用）
+        env:
+          MNEMORA_LONG_HORIZON_JSON: ${{ github.workspace }}/long-horizon.json
+          MNEMORA_LOCAL_EMBEDDING_CACHE_DIR: ${{ github.workspace }}/.cache/local-embedding
+        run: |
+          set -o pipefail
+          pnpm --filter @mnemora/example-chat run long-horizon | tee "${{ github.workspace }}/long-horizon.txt"
+
+      - name: 結果の表を Job Summary に残す（⛔ 門ではない）
+        if: always()
+        run: |
+          {
+            echo "## long-horizon（⛔ 門ではない）"
+            echo
+            echo '```'
+            sed -n '/^模擬期間/,$p' "${{ github.workspace }}/long-horizon.txt" 2>/dev/null || echo "（結果が無い。上の測定ステップのログを見ること）"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 実測値そのもの（機械可読）を成果物として残す
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: long-horizon
+          path: ${{ github.workspace }}/long-horizon.json
+          if-no-files-found: ignore

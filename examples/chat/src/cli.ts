@@ -153,6 +153,8 @@ import {
 import { runAnswerTrialsCompareFromFiles } from "./answer-trials-compare.js";
 import { databaseErrorHint } from "./db-error-hint.js";
 import { formatAnswerTrialsReport, runAnswerTrials } from "./answer-trials.js";
+import { createLongHorizonRuntime, runLongHorizonBench } from "./long-horizon-bench.js";
+import { buildLongHorizonJson, formatLongHorizonReport } from "./long-horizon-format.js";
 
 const DEFAULT_CHAT_FILLER_PAIRS = 8;
 
@@ -1096,6 +1098,67 @@ async function runTimeTerm(): Promise<void> {
       const json = buildTimeTermJson({ report, measuredAt, commit });
       writeFileSync(jsonPath, `${JSON.stringify(json, null, 2)}\n`, "utf-8");
       console.log(`\n[time-term] 機械可読な結果を書き出した: ${jsonPath}`);
+    }
+  } finally {
+    await handle.close();
+  }
+}
+
+/**
+ * 半年分の時間軸で、植えた事実が既定の `recall()` に返り続けるかを測る（`long-horizon-bench.ts`）。
+ *
+ * 記憶は抽出 LLM を通さず直接書き、回答も生成しないので LLM は使わない。埋め込みは既定で `local` に倒す
+ * （意味を持たない `deterministic` では similarity が意味を持たず、時間項との兼ね合いを測れない）。
+ * `MNEMORA_EMBEDDING` が明示されていればそれを尊重する。
+ */
+async function runLongHorizon(): Promise<void> {
+  const databaseUrl = requireDatabaseUrl();
+  const measuredAt = new Date();
+  const commit = tryGitRevParseHead(process.cwd());
+  const handle = await createLongHorizonRuntime(databaseUrl, {
+    ...process.env,
+    MNEMORA_LLM: "deterministic",
+    MNEMORA_EMBEDDING: process.env.MNEMORA_EMBEDDING ?? "local",
+  });
+  printProviderMode({ ...handle, cassetteIgnored: false }, null);
+  try {
+    if (handle.embeddingMode === "local") {
+      const warmup = await warmupLocalEmbedding(handle.embeddingProvider);
+      if (!warmup.ok) {
+        console.error(`\n🔴 ${warmup.detail}`);
+        console.error("  メトリクスは1件も測っていない（前回の値・既定値・0 へは倒さない）。");
+        process.exitCode = 1;
+        return;
+      }
+      console.log(`  ${warmup.detail}`);
+    }
+    const started = Date.now();
+    const report = await runLongHorizonBench(handle, {
+      tenantPrefix: `long-horizon-${newRunToken()}`,
+      log: (line) => {
+        console.log(line);
+      },
+    });
+    console.log(`\n[long-horizon] 所要 ${String(Math.round((Date.now() - started) / 1000))}秒\n`);
+    console.log(formatLongHorizonReport(report));
+
+    const jsonPath = process.env.MNEMORA_LONG_HORIZON_JSON;
+    if (jsonPath) {
+      const space = handle.embeddingProvider.space;
+      const json = buildLongHorizonJson({
+        report,
+        measuredAt,
+        commit,
+        llmMode: handle.llmMode,
+        embeddingMode: handle.embeddingMode,
+        embeddingSpace: {
+          provider: space.provider,
+          model: space.model,
+          dimensions: space.dimensions,
+        },
+      });
+      writeFileSync(jsonPath, `${JSON.stringify(json, null, 2)}\n`, "utf-8");
+      console.log(`\n[long-horizon] 機械可読な結果を書き出した: ${jsonPath}`);
     }
   } finally {
     await handle.close();
@@ -2164,6 +2227,8 @@ function printHelp(write: (text: string) => void = console.log): void {
       "                                                                      #   既定は擬似 provider(similarity が構成上定数になるため provider に依らない)",
       "  DATABASE_URL=... pnpm --filter @mnemora/example-chat run validity  # validAt ゲート(Issue #280)が候補の有無をどう動かすかを測る",
       "                                                                      #   既定は擬似 provider。MNEMORA_VALIDITY_JSON で機械可読出力",
+      "  DATABASE_URL=... pnpm --filter @mnemora/example-chat run long-horizon # 半年分の時間軸で、植えた事実が recall() に返り続けるかを測る",
+      "                                                                      #   既定は local embedding・LLM 不使用。MNEMORA_LONG_HORIZON_JSON で機械可読出力",
       "  pnpm --filter @mnemora/example-chat run embedding-fingerprint",
       "                                                                      # 固定入力に対する embed() の結果を書き出す(DB 不要。Issue #565)",
       "                                                                      #   MNEMORA_EMBEDDING_FINGERPRINT_RAW_JSON で機械可読出力、MNEMORA_EMBEDDING_FINGERPRINT_NUM_THREADS=N で推論スレッド数(sha256/lscpuの合成は scripts/measure-embedding-output-fingerprint.mjs が別途行う)",
@@ -2254,6 +2319,8 @@ async function main(): Promise<void> {
     await runTimeTerm();
   } else if (command === "validity") {
     await runValidity();
+  } else if (command === "long-horizon") {
+    await runLongHorizon();
   } else if (command === "embedding-fingerprint") {
     await runEmbeddingFingerprint();
   } else if (command === "identifier-probes") {
