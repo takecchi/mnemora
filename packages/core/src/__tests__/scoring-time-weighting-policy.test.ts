@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { defaultScoringStrategy } from "../strategies/scoring.js";
 
 /**
- * `defaultScoringStrategy` を直接呼び、`ScoringInput.timeWeighting` を省略した場合（既定・"legacy"）と `"eventAwareFreshness"` を明示した場合を比較する。
+ * `defaultScoringStrategy` を直接呼び、`ScoringInput.timeWeighting` を省略した場合（既定・"eventAwareFreshness"。オーナー判断で既定を倒した——ADR 0300 §7 を閉じた ADR）と、各方針を明示した場合を比較する。
  * `validAt`/忘却ゲートの挙動と、`RecallQuery.timeWeighting` の配線は `recall-time-weighting-policy.test.ts` の管轄。
  */
 
@@ -23,8 +23,8 @@ function baseInput() {
   };
 }
 
-describe("defaultScoringStrategy — timeWeighting 省略時は legacy と1バイトも変わらない（既定不変の歯）", () => {
-  it("occurredAt が無い記憶で、省略時と明示的な 'legacy' の score が完全一致する", () => {
+describe("defaultScoringStrategy — timeWeighting 省略時は 'eventAwareFreshness' と1バイトも変わらない（既定の歯）", () => {
+  it("occurredAt が無い記憶で、省略時と明示的な 'eventAwareFreshness' の score が完全一致する", () => {
     const input = {
       ...baseInput(),
       occurredAt: null,
@@ -32,11 +32,11 @@ describe("defaultScoringStrategy — timeWeighting 省略時は legacy と1バ�
       lastReinforcedAt: new Date(NOW.getTime() - 1 * HOUR_MS),
     };
     const omitted = defaultScoringStrategy(input);
-    const explicit = defaultScoringStrategy({ ...input, timeWeighting: "legacy" });
+    const explicit = defaultScoringStrategy({ ...input, timeWeighting: "eventAwareFreshness" });
     expect(omitted).toEqual(explicit);
   });
 
-  it("省略時は 'eventAwareFreshness' とは一致しない（⟹ 既定は新方針に倒れていない、陰性対照）", () => {
+  it("省略時は 'legacy' とは一致しない（⟹ 既定は従来の方針に戻っていない、陰性対照）", () => {
     const input = {
       ...baseInput(),
       occurredAt: null,
@@ -44,8 +44,8 @@ describe("defaultScoringStrategy — timeWeighting 省略時は legacy と1バ�
       lastReinforcedAt: new Date(NOW.getTime() - 1 * HOUR_MS),
     };
     const omitted = defaultScoringStrategy(input);
-    const newPolicy = defaultScoringStrategy({ ...input, timeWeighting: "eventAwareFreshness" });
-    expect(omitted.total).not.toBeCloseTo(newPolicy.total, 3);
+    const legacy = defaultScoringStrategy({ ...input, timeWeighting: "legacy" });
+    expect(omitted.total).not.toBeCloseTo(legacy.total, 3);
   });
 });
 

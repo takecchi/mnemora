@@ -3424,7 +3424,10 @@ on に変わる（[ADR 0337](./decisions/0337-recall-association-default-on.md)�
 
 ## 🟡 v1.3.0 → 次の版で、挙動が変わるが手順は要らないもの —— **未リリース**
 
-まだ項目は無い。
+- **`@mnemora/core` の `recall()`: `timeWeighting` を渡さないときの方針が `"legacy"` から `"eventAwareFreshness"` になった**（[ADR 0700](./decisions/0700-default-time-weighting-event-aware-freshness.md)。[Issue #2106](https://github.com/takecchi/mnemora/issues/2106)。ADR 0300 §7 のオーナー判断）。
+  `occurredAt` を持たない記憶（恒常的な事実・好み）の `freshness` が、`recordedAt` の古さで沈まず 1 に固定される。`occurredAt` を持つ記憶の式は変わらない。忘却ゲート・`validAt` ゲートは変わらない。型・シグネチャは変わらず、新しく断る入力も無い。
+  影響が出るのは、`timeWeighting` を渡さずに `recall()` を呼び、古く記録した `occurredAt` の無い記憶が沈むこと（順位・`below_threshold`・`score.freshness`）に頼っていた呼び出し側である。従来どおりにするには `timeWeighting: "legacy"` を渡す——既定を変える前の省略時と1バイトも変わらない。
+  ⚠ 取り引き: `occurredAt`・`validFrom`・`validUntil` のどれも持たない古い予定も持ち上がる（[docs/recall.md](./recall.md) §7.1）。
 
 ## この文書が確かめていないこと
 

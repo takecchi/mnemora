@@ -1438,7 +1438,8 @@ export interface RecallQuery {
   /**
    * 段2（再スコア）の時間項の方針を明示的に選ぶ（[ADR 0300](../../../docs/decisions/0300-time-weighting-policy-opt-in.md)）。
    *
-   * 省略時は `"legacy"`（`DEFAULT_TIME_WEIGHTING_POLICY`、`ScoringInput.timeWeighting` と同じ既定）。
+   * 省略時は `"eventAwareFreshness"`（`DEFAULT_TIME_WEIGHTING_POLICY`、`ScoringInput.timeWeighting` と同じ既定。
+   * [ADR 0700](../../../docs/decisions/0700-default-time-weighting-event-aware-freshness.md)）。従来の順位付けが要るときは `"legacy"` を明示する。
    * `"legacy"` の `freshness` は `occurredAt ?? recordedAt` を起点にした減衰係数で、`decay` と同じ半減期を使う。
    * `occurredAt` が無い記憶（恒常的な事実・好み）は、使われ続けていても `recordedAt` の古さで `freshness` だけが沈み続ける
    * （時間の二重減衰）。
