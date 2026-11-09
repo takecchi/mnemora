@@ -240,6 +240,8 @@ describe("defaultScoringStrategy: freshness は 1 で頭打ちにする（ADR 00
       lastReinforcedAt: new Date(NOW.getTime() - 30 * DAY),
       strength: 1,
       halfLifeHours: 720,
+      // total が各項の素の積であることを見るので、時間の重みの下限は掛けない（ADR 0704）。
+      timeWeightFloor: 0,
     });
     expect(score.freshness).toBe(1);
     expect(score.decay).toBe(0.5);

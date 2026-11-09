@@ -140,14 +140,25 @@ describe("runtime.recall() が decay を跨いで実際にどう振る舞うか 
     // `includeFullyDecayed: true` でゲートを外しても、既定の scoreThreshold（0.1）のままでは戻ってこない。
     // 段2の再スコアの `decay`/`freshness` は floorAt を過ぎると ≈threshold（0.05）以下になり、ゲートとは別の理由（below_threshold）で落ちる。
     // ゲート単体の効果を切り出すには `scoreThreshold: 0` が要るので、まずそれ自体を検算する。
+    // ⚠ これは時間の重みの下限が無い（`timeWeightFloor: 0`）ときの相互作用である（ADR 0704）。
     const ungatedDefaultThreshold = await runtime.recall(ctx, {
       text,
       limit: 10,
       includeFullyDecayed: true,
+      timeWeightFloor: 0,
     });
     const ungatedDefaultThresholdIds = ungatedDefaultThreshold.memories.map((m) => m.memoryId);
     expect(ungatedDefaultThresholdIds).not.toContain(memoryId);
     expect(ungatedDefaultThreshold.omitted.some((o) => o.kind === "below_threshold")).toBe(true);
+
+    // 既定の下限（0.5）では、時間の重みが半分までしか下がらないので、ゲートを外すだけで既定の閾値のまま戻ってくる
+    // （使われない記憶は消えずに薄れる。ADR 0704）。
+    const ungatedWithFloor = await runtime.recall(ctx, {
+      text,
+      limit: 10,
+      includeFullyDecayed: true,
+    });
+    expect(ungatedWithFloor.memories.map((m) => m.memoryId)).toContain(memoryId);
 
     // 対照: `includeFullyDecayed: true` かつ `scoreThreshold: 0` なら戻ってくる。
     // gate 側は `scoreThreshold` を通らない（段1・SQL 側）ので、`scoreThreshold: 0` でも gated 側の結果は変わらないはずで、それも検算する。

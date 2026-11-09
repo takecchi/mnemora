@@ -1376,6 +1376,17 @@ Math.pow(0.5, 1075) === 0                  // 真——ここから先は厳密�
 
 ---
 
+### 7.3 `timeWeightFloor` — 時間は順位を下げるだけで、関連の強さを覆さない（既定 0.5。[ADR 0704](./decisions/0704-recall-time-weight-floor.md)）
+
+正典は「使われない記憶は自然に想起されにくくなり、必要な場合だけ過去の記憶を再び呼び戻せる」（オーナーの仕様 §48）を求める。`total` は `affinity × decay × freshness × …` の積なので、時間の項が際限なく小さくなると、**関連の薄い新しい記憶が、関連の強い古い記憶を上回る**——古い記憶は「想起されにくくなる」のではなく、まっすぐ指す問いにも返らなくなる（半年の実測で、休眠の事実は90日で 0/8。ADR 0699・0700）。
+
+`RecallQuery.timeWeightFloor`（φ、0 以上 1 以下）は、時間の重みを `φ + (1 − φ) × decay × freshness` にする。どれだけ古くても時間の重みは φ を割らない。⟹ 時間は「関連が近い候補どうしの順」を決めるだけになり、古い記憶は新しい競争相手が増えるにつれて上位から外れていく（薄れる）が、関連が十分強ければ呼び戻せる。
+
+- **既定は 0.5**（`DEFAULT_TIME_WEIGHT_FLOOR`）。`0` を渡すと従来の式（`affinity × decay × tagMatch × freshness × strength`）をビット単位で同じに通す。
+- φ を使ったとき、`ScoreBreakdown.timeWeightFloor` にその値が入る（`total` を内訳から組み立て直せるようにするため）。
+- 忘却ゲート（`includeFullyDecayed`）・閾値（`scoreThreshold`）とは独立。⚠ ゲートは既定で効いたままなので、減衰が閾値（`DEFAULT_DECAY_THRESHOLD`）を割った記憶は、この欄に関係なく候補から外れる。
+- **⚠ 取り引き**: 時間で古い値を沈める力が弱まるので、訂正の古い側（`active` のまま残っている誤った値）が新しい側より上に来ることがある（実測: 120日目以降、6件中1件）。訂正は `contested`・`superseded` の状態で扱うこと（`superseded` は返らず、`contested` は対で返る）。
+
 ## 8. 矛盾がある場合の提示
 
 段3(矛盾の解決と必須の同伴取得)が recall パイプライン上でどう働くかを述べる。データモデル側の詳細(`status` の遷移、`contradicts` の対向関係、`superseded_by_id` 列)は `./memory-model.md` に譲る。

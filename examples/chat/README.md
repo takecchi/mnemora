@@ -1754,6 +1754,10 @@ DATABASE_URL=... MNEMORA_LONG_HORIZON_JSON=<path> pnpm --filter @mnemora/example
 `MNEMORA_LONG_HORIZON_JSON` を設定すると、集計と全 probe の記録を機械可読な JSON
 （`src/long-horizon-format.ts` の `buildLongHorizonJson`）として書き出す。未設定なら書かない。
 
+`MNEMORA_LONG_HORIZON_TIME_WEIGHT_FLOOR=<0〜1>` で全 arm の `recall()` に時間の重みの下限を渡し、
+`MNEMORA_LONG_HORIZON_INCLUDE_FULLY_DECAYED=1` で忘却ゲートを外す（どちらも省略時は core の既定。
+測った結果は [ADR 0704](../../docs/decisions/0704-recall-time-weight-floor.md)）。
+
 🔴 **測っているのは「gold の記憶が返ったか」（出典への到達）であり、回答の正しさではない**
 （`docs/autonomy.md` §2.2 の2）。⚠ 事実・雑談は合成データで、実運用の会話の分布ではない。
 

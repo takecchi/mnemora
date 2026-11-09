@@ -386,6 +386,7 @@ const EXPECTED: Result = {
       ["consolidate", true, 1],
       ["reflect", false, 0],
       ["embed", false, 0],
+      ["embed", false, 0],
     ],
     [2, 0, 0, 0],
     [

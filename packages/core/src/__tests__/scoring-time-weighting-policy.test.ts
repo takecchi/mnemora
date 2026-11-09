@@ -18,6 +18,8 @@ function baseInput() {
     queryTags: [] as string[],
     strength: 1,
     halfLifeHours: HALF_LIFE_HOURS,
+    // 時間の方針（freshness の式）そのものを見る歯なので、時間の重みの下限は掛けない（ADR 0704）。
+    timeWeightFloor: 0,
     // similarity / lexicalMatch は渡さない ⟹ affinity は中立の1に退化する
     // （同一関連度を保つための固定）。
   };

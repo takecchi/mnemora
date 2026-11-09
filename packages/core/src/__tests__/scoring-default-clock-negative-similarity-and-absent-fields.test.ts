@@ -14,6 +14,8 @@ function baseInput() {
     lastReinforcedAt: null,
     strength: 1,
     halfLifeHours: 24,
+    // total が各項の素の積であることを見る歯があるので、時間の重みの下限は掛けない（ADR 0704）。
+    timeWeightFloor: 0,
   };
 }
 

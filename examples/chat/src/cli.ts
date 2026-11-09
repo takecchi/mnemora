@@ -1141,7 +1141,23 @@ async function runLongHorizon(): Promise<void> {
       console.log(`  ${warmup.detail}`);
     }
     const started = Date.now();
+    const floorEnv = process.env.MNEMORA_LONG_HORIZON_TIME_WEIGHT_FLOOR;
+    const timeWeightFloor =
+      floorEnv === undefined || floorEnv === "" ? undefined : Number(floorEnv);
+    if (timeWeightFloor !== undefined && !(timeWeightFloor >= 0 && timeWeightFloor <= 1)) {
+      throw new Error(
+        `MNEMORA_LONG_HORIZON_TIME_WEIGHT_FLOOR は 0 以上 1 以下にすること（受け取った値: ${floorEnv ?? ""}）`,
+      );
+    }
+    const includeFullyDecayed = process.env.MNEMORA_LONG_HORIZON_INCLUDE_FULLY_DECAYED === "1";
+    if (timeWeightFloor !== undefined || includeFullyDecayed) {
+      console.log(
+        `[long-horizon] timeWeightFloor=${String(timeWeightFloor)} includeFullyDecayed=${String(includeFullyDecayed)}`,
+      );
+    }
     const report = await runLongHorizonBench(handle, {
+      ...(timeWeightFloor !== undefined ? { timeWeightFloor } : {}),
+      ...(includeFullyDecayed ? { includeFullyDecayed } : {}),
       tenantPrefix: `long-horizon-${newRunToken()}`,
       log: (line) => {
         console.log(line);

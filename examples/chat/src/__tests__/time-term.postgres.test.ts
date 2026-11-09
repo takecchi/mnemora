@@ -4,6 +4,19 @@ import { createExampleRuntime } from "../runtime-factory.js";
 import { TIE_EPSILON, formatTimeTermReport, runTimeTermArm } from "../time-term-arm.js";
 import { TIME_PROBES } from "../time-term-probe-set.js";
 import type { TimeProbeOutcome } from "../time-term-arm.js";
+
+/**
+ * ペアの時間の重みの比（古い側 / 新しい側）を、返った内訳から組み立てる（ADR 0704）。
+ * 時間の重みは、下限 φ（`score.timeWeightFloor`）が無ければ `decay × freshness`、在れば `φ + (1 − φ) × decay × freshness`。
+ * 同じ本文（similarity・tagMatch・strength が同じ）のペアでは、`totalRatio` はこの比に一致する。
+ */
+function expectedTimeWeightRatio(p: TimeProbeOutcome): number {
+  const tw = (score: { decay: number; freshness: number; timeWeightFloor?: number }) =>
+    score.timeWeightFloor === undefined
+      ? score.decay * score.freshness
+      : score.timeWeightFloor + (1 - score.timeWeightFloor) * score.decay * score.freshness;
+  return tw(p.older!.score) / tw(p.newer!.score);
+}
 import {
   closeTestClient,
   getTestClient,
@@ -79,7 +92,7 @@ describe("examples/chat: time-term arm(擬似 provider・本物の Postgres)", (
       expect(halfLife.similarityGapWithinPair).toBe(0);
       expect(halfLife.freshnessRatio).not.toBeNull();
       expect(halfLife.totalRatio).not.toBeNull();
-      expect(Math.abs(halfLife.totalRatio! - halfLife.freshnessRatio!)).toBeLessThan(1e-3);
+      expect(Math.abs(halfLife.totalRatio! - expectedTimeWeightRatio(halfLife))).toBeLessThan(1e-3);
 
       const realistic = byId.get("realistic")!;
       expect(realistic.outcome).toBe("newer-ranked-higher");
@@ -90,11 +103,15 @@ describe("examples/chat: time-term arm(擬似 provider・本物の Postgres)", (
       expect(realistic.similarityGapWithinPair).toBe(0);
       expect(realistic.freshnessRatio).not.toBeNull();
       expect(realistic.totalRatio).not.toBeNull();
-      expect(Math.abs(realistic.totalRatio! - realistic.freshnessRatio!)).toBeLessThan(1e-3);
+      expect(Math.abs(realistic.totalRatio! - expectedTimeWeightRatio(realistic))).toBeLessThan(
+        1e-3,
+      );
 
+      // 時間の重みの下限（既定 0.5、ADR 0704）があるので、ずっと昔の出来事も閾値を割らずに返り、新しい側の下に並ぶ
+      // （消えずに薄れる）。下限が無かった頃は below_threshold で返らなかった。
       const farPast = byId.get("far-past")!;
-      expect(farPast.outcome).toBe("older-not-returned");
-      expect(farPast.omittedKinds).toContain("below_threshold");
+      expect(farPast.outcome).toBe("newer-ranked-higher");
+      expect(farPast.older).not.toBeNull();
 
       const decayHalfLife = byId.get("decay-half-life")!;
       expect(decayHalfLife.outcome).toBe("newer-ranked-higher");
@@ -106,7 +123,9 @@ describe("examples/chat: time-term arm(擬似 provider・本物の Postgres)", (
       expect(decayHalfLife.older!.score.decay).toBeCloseTo(0.5, 3);
       expect(decayHalfLife.decayRatio).not.toBeNull();
       expect(decayHalfLife.totalRatio).not.toBeNull();
-      expect(Math.abs(decayHalfLife.totalRatio! - decayHalfLife.decayRatio!)).toBeLessThan(1e-3);
+      expect(
+        Math.abs(decayHalfLife.totalRatio! - expectedTimeWeightRatio(decayHalfLife)),
+      ).toBeLessThan(1e-3);
 
       const decayRealistic = byId.get("decay-realistic")!;
       expect(decayRealistic.outcome).toBe("newer-ranked-higher");
@@ -117,7 +136,9 @@ describe("examples/chat: time-term arm(擬似 provider・本物の Postgres)", (
       expect(decayRealistic.freshnessGapWithinPair).toBe(0);
       expect(decayRealistic.decayRatio).not.toBeNull();
       expect(decayRealistic.totalRatio).not.toBeNull();
-      expect(Math.abs(decayRealistic.totalRatio! - decayRealistic.decayRatio!)).toBeLessThan(1e-3);
+      expect(
+        Math.abs(decayRealistic.totalRatio! - expectedTimeWeightRatio(decayRealistic)),
+      ).toBeLessThan(1e-3);
 
       const decaySameRecordedAt = byId.get("decay-same-recorded-at")!;
       expect(decaySameRecordedAt.outcome).toBe("tied");

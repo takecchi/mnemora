@@ -515,10 +515,10 @@ const EXPECTED: Result = {
     ],
     [
       "tenant",
-      ["m0", "mA", "mB", "q0"],
-      '[["below_threshold",null,null,1]]',
+      ["m0", "mA", "mB", "q0", "qA"],
+      "[]",
       5,
-      ["qA"],
+      [],
       {
         T: 5,
         hasS: true,
@@ -560,10 +560,10 @@ const EXPECTED: Result = {
     ],
     [
       "tenant",
-      ["m0", "mB", "q0"],
-      '[["below_threshold",null,null,1],["filtered","decayed","within_scope",1],["ann_unreached",null,null,null]]',
+      ["m0", "mA", "mB", "q0"],
+      '[["filtered","decayed","within_scope",1],["ann_unreached",null,null,null]]',
       5,
-      ["mA", "qA"],
+      ["qA"],
       {
         T: 6,
         hasS: true,
@@ -575,10 +575,10 @@ const EXPECTED: Result = {
     ],
     [
       "alice(subject)",
-      [],
-      '[["below_threshold",null,null,1],["filtered","decayed","within_scope",1],["ann_unreached",null,null,null]]',
+      ["mA"],
+      '[["filtered","decayed","within_scope",1],["ann_unreached",null,null,null]]',
       2,
-      ["mA", "qA"],
+      ["qA"],
       {
         T: 6,
         hasS: true,
@@ -605,10 +605,10 @@ const EXPECTED: Result = {
     ],
     [
       "tenant",
-      ["m0"],
-      '[["below_threshold",null,null,3],["filtered","decayed","within_scope",1],["ann_unreached",null,null,null]]',
+      ["m0", "mA", "mB", "q0"],
+      '[["filtered","decayed","within_scope",1],["ann_unreached",null,null,null]]',
       5,
-      ["mA", "mB", "q0", "qA"],
+      ["qA"],
       {
         T: 7,
         hasS: true,
@@ -635,10 +635,10 @@ const EXPECTED: Result = {
     ],
     [
       "bob(subject)",
-      [],
-      '[["below_threshold",null,null,1]]',
-      1,
       ["mB"],
+      "[]",
+      1,
+      [],
       {
         T: 7,
         hasS: true,
@@ -650,10 +650,10 @@ const EXPECTED: Result = {
     ],
     [
       "tenant",
-      ["m0"],
-      '[["below_threshold",null,null,1],["filtered","decayed","within_scope",3],["ann_unreached",null,null,null]]',
+      ["m0", "mB"],
+      '[["filtered","decayed","within_scope",3],["ann_unreached",null,null,null]]',
       5,
-      ["mA", "mB", "q0", "qA"],
+      ["mA", "q0", "qA"],
       {
         T: 8,
         hasS: true,
@@ -819,7 +819,7 @@ const EXPECTED: Result = {
     [["act0", "wall0"], 2],
     [["act0", "wall0"], 3],
     [["act0", "wall0"], 4],
-    [["wall0"], 5],
+    [["act0", "wall0"], 5],
     [["wall0"], 6],
     [["wall0"], 7],
     [["wall0"], 8],
@@ -847,22 +847,37 @@ const EXPECTED: Result = {
     [["b0", "bA"], "[]", 2, [], 2],
     [["b0", "bA"], "[]", 2, [], 3],
     [["b0", "bA"], "[]", 2, [], 4],
-    [[], '[["below_threshold",null,null,2]]', 2, ["b0", "bA"], 5],
+    [["b0", "bA"], "[]", 2, ["b0", "bA"], 5],
     [[], '[["filtered","archived","outside_scope",2]]', 0, [], 6],
   ],
   "9 a subject id with upper-case letters keeps its case in the counters": [
-    { z0: ["active", 0, 5, 1] },
-    { T: 0, hasS: true, S: { "Zed-Mixed": 2 } },
+    {
+      z0: ["active", 0, 5, 1],
+    },
+    {
+      T: 0,
+      hasS: true,
+      S: {
+        "Zed-Mixed": 2,
+      },
+    },
   ],
   "10 a memory with no activity floor is not counted as decayed": [
     ["a0", "w0"],
     "[]",
     2,
     [],
-    { w0: ["active", null, null, null], a0: ["active", 0, 13, 3] },
+    {
+      w0: ["active", null, null, null],
+      a0: ["active", 0, 13, 3],
+    },
   ],
   "11 tenant counters only: sweep at the exact floor, contested rows stay": [
-    { d0: ["active", 0, 5, 1], c1: ["contested", 0, 5, 1], c2: ["contested", 0, 5, 1] },
+    {
+      d0: ["active", 0, 5, 1],
+      c1: ["contested", 0, 5, 1],
+      c2: ["contested", 0, 5, 1],
+    },
     [[], 1],
     [[], 2],
     [[], 3],
@@ -870,7 +885,11 @@ const EXPECTED: Result = {
     [["d0"], 5],
     [[], 6],
     [[], 7],
-    { d0: ["archived", 0, 5, 1], c1: ["contested", 0, 5, 1], c2: ["contested", 0, 5, 1] },
+    {
+      d0: ["archived", 0, 5, 1],
+      c1: ["contested", 0, 5, 1],
+      c2: ["contested", 0, 5, 1],
+    },
   ],
   "12 sweep stops at the limit and the rest goes next time": [
     [
@@ -878,7 +897,11 @@ const EXPECTED: Result = {
       [["e3"], false],
       [[], false],
     ],
-    { e1: ["archived", 0, 5, 1], e2: ["archived", 1, 6, 1], e3: ["archived", 2, 7, 1] },
+    {
+      e1: ["archived", 0, 5, 1],
+      e2: ["archived", 1, 6, 1],
+      e3: ["archived", 2, 7, 1],
+    },
   ],
 };
 const space = TEST_EMBEDDING_SPACE;

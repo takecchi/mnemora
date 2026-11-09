@@ -297,6 +297,8 @@ describe("recall() — 歯②: 既定(channels 未指定)は ADR 0084 以前と1
             strength: 1,
             total: 1,
             affinityMeasured: true,
+            // 既定の時間の重みの下限（ADR 0704）。0 より大きい下限を使ったときだけ内訳に入る。
+            timeWeightFloor: 0.5,
           },
           speaker: null,
           subjectId: null,
