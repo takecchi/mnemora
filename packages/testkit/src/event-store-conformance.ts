@@ -80,7 +80,7 @@ const _eventStoreShapeCheck: _EventStoreHasNoUpdateOrDelete = true;
  */
 export function describeEventStoreConformance(options: EventStoreConformanceOptions): void {
   const { name, createStore, prepareMemoryId, supportsSeq = false } = options;
-  const seqIt = supportsSeq ? it : it.skip;
+  const maybeSeqIt = supportsSeq ? it : it.skip;
   const seqName = (title: string) =>
     supportsSeq ? title : `（測っていない: supportsSeq が false）${title}`;
 
@@ -95,7 +95,7 @@ export function describeEventStoreConformance(options: EventStoreConformanceOpti
     // seq（ADR 0702）: 記録した順の番号。`at` は呼び出し側の時計なので、遷移の順は `seq` で読む。
     // -------------------------------------------------------------------
 
-    seqIt(
+    maybeSeqIt(
       seqName(
         "seq: 同じ記憶へ append した順に seq が増える（at が逆行していても）。get も同じ seq を返す",
       ),
@@ -139,7 +139,7 @@ export function describeEventStoreConformance(options: EventStoreConformanceOpti
       },
     );
 
-    seqIt(
+    maybeSeqIt(
       seqName("seq: 同じ at のイベントは、list で seq の昇順（記録した順）に並ぶ"),
       async () => {
         const store = await createStore();
