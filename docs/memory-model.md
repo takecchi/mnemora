@@ -1093,7 +1093,7 @@ CREATE TABLE memory_events (
                         'events_purged','restored','unsuperseded')),
                     -- 実物の制約は packages/postgres/migrations/（最新は 0018_memory_events_kind_unsuperseded.sql）
   at                timestamptz NOT NULL DEFAULT now(),  -- 呼び出し側（runtime）の時計の値。DB の時刻ではない
-  seq               bigint      GENERATED ALWAYS AS IDENTITY, -- 記録した順（0035。ADR 0702）。同じ記憶では遷移の順と一致する
+  seq               bigint      NOT NULL GENERATED ALWAYS AS IDENTITY, -- 記録した順（0035。ADR 0702）。同じ記憶では遷移の順と一致する
   actor             jsonb       NOT NULL,   -- { type: 'human'|'system'|'clone', id?: string }
   digest_snapshot   text        NULL,       -- 記録時点の digest。本文(content)は写さない
   size_before_bytes integer     NULL,       -- 削除・置換の直前サイズ
