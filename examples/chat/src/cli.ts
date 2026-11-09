@@ -155,6 +155,13 @@ import { databaseErrorHint } from "./db-error-hint.js";
 import { formatAnswerTrialsReport, runAnswerTrials } from "./answer-trials.js";
 import { createLongHorizonRuntime, runLongHorizonBench } from "./long-horizon-bench.js";
 import { buildLongHorizonJson, formatLongHorizonReport } from "./long-horizon-format.js";
+import { runContestedDetection } from "./contested-detection-bench.js";
+import {
+  confusionByCategory,
+  confusionOf,
+  formatContestedReport,
+  metricsOf,
+} from "./contested-detection-metrics.js";
 
 const DEFAULT_CHAT_FILLER_PAIRS = 8;
 
@@ -1162,6 +1169,28 @@ async function runLongHorizon(): Promise<void> {
     }
   } finally {
     await handle.close();
+  }
+}
+
+/**
+ * claim key の矛盾検出の決定的な段を、oracle 鍵のケースで測る（`contested-detection-bench.ts`、ADR 0703）。
+ * LLM も実 API も使わない。`MNEMORA_CONTESTED_DETECTION_JSON` を渡すと、ケースごとの判定と指標を JSON で書く。
+ */
+async function runContestedDetectionCommand(): Promise<void> {
+  const results = await runContestedDetection(requireDatabaseUrl(), {
+    tenantPrefix: `contested-detection-${newRunToken()}`,
+  });
+  console.log(formatContestedReport(results));
+  const jsonPath = process.env.MNEMORA_CONTESTED_DETECTION_JSON;
+  if (jsonPath) {
+    const json = {
+      schemaVersion: 1,
+      results,
+      overall: metricsOf(confusionOf(results)),
+      byCategory: confusionByCategory(results),
+    };
+    writeFileSync(jsonPath, `${JSON.stringify(json, null, 2)}\n`, "utf-8");
+    console.log(`\n[contested-detection] 機械可読な結果を書き出した: ${jsonPath}`);
   }
 }
 
@@ -2228,6 +2257,7 @@ function printHelp(write: (text: string) => void = console.log): void {
       "  DATABASE_URL=... pnpm --filter @mnemora/example-chat run validity  # validAt ゲート(Issue #280)が候補の有無をどう動かすかを測る",
       "                                                                      #   既定は擬似 provider。MNEMORA_VALIDITY_JSON で機械可読出力",
       "  DATABASE_URL=... pnpm --filter @mnemora/example-chat run long-horizon # 半年分の時間軸で、植えた事実が recall() に返り続けるかを測る",
+      "  DATABASE_URL=... pnpm --filter @mnemora/example-chat run contested-detection # claim key の矛盾検出の決定的な段を、カテゴリごとに Precision/Recall/F1 で測る",
       "                                                                      #   既定は local embedding・LLM 不使用。MNEMORA_LONG_HORIZON_JSON で機械可読出力",
       "  pnpm --filter @mnemora/example-chat run embedding-fingerprint",
       "                                                                      # 固定入力に対する embed() の結果を書き出す(DB 不要。Issue #565)",
@@ -2321,6 +2351,8 @@ async function main(): Promise<void> {
     await runValidity();
   } else if (command === "long-horizon") {
     await runLongHorizon();
+  } else if (command === "contested-detection") {
+    await runContestedDetectionCommand();
   } else if (command === "embedding-fingerprint") {
     await runEmbeddingFingerprint();
   } else if (command === "identifier-probes") {
