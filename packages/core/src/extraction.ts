@@ -6,6 +6,7 @@ import { findMalformedIdentifierPart } from "./identifier.js";
 import { defaultActivityDecayStrategy, defaultDecayStrategy } from "./strategies/decay.js";
 import { resolveCandidateSubjectId } from "./memory-subject.js";
 import type { LLMProvider, PromptSpec } from "./interfaces/llm-provider.js";
+import { callStructuredWithMeta } from "./llm-structured.js";
 import type { DigestSource, NewMemory } from "./memory.js";
 import { observationPayloadText } from "./observation-text.js";
 import type { Observation } from "./observation.js";
@@ -402,6 +403,11 @@ export interface ExtractCandidatesResult {
    * 可能性があり、「新しい任意プロパティの追加」だけが semver 的に安全だから（[ADR 0178](../../../docs/decisions/0178-public-api-surface-gate.md)）。
    */
   rejectedSubjectIds?: string[];
+  /**
+   * 抽出の応答を実際に返したモデル名（`LLMProvider.completeStructuredWithMeta` が返したとき。ADR 0701）。
+   * 全文フォールバック（LLM を通っていない）・provider が返さなかったときは省く。
+   */
+  respondedModel?: string;
 }
 
 /**
@@ -496,8 +502,9 @@ export async function extractCandidates(
   signal?: AbortSignal,
 ): Promise<ExtractCandidatesResult> {
   try {
-    const result = await runAbortable(signal, (raced) =>
-      llmProvider.completeStructured(
+    const { value: result, respondedModel } = await runAbortable(signal, (raced) =>
+      callStructuredWithMeta(
+        llmProvider,
         ctx,
         {
           prompt: buildExtractionPrompt(observation, subjectCandidates),
@@ -515,6 +522,7 @@ export async function extractCandidates(
       usedWholeObservationFallback: false,
       failure: null,
       rejectedSubjectIds: sanitized.rejectedSubjectIds,
+      ...(respondedModel !== undefined ? { respondedModel } : {}),
     };
   } catch (error) {
     if (isAbort(signal)) {
@@ -545,6 +553,8 @@ export interface BuildNewMemoryParams {
   llmModelId: string;
   /** 推論の出所に書くプロンプトの版（`inferred` の `provenance.promptVersion`）。 */
   promptVersion: string;
+  /** 推論の出所に書く、応答を実際に返したモデル名（`inferred` の `provenance.respondedModel`。ADR 0701）。省けば書かない。 */
+  respondedModel?: string | undefined;
   /** 新しい Memory の半減期（時間）。 */
   halfLifeHours: number;
   /** 新しい Memory の `recordedAt` にする時刻（減衰の起点にもなる）。 */
@@ -575,6 +585,7 @@ function buildProvenance(params: BuildNewMemoryParams): Provenance {
     return {
       kind: "inferred",
       model: params.llmModelId,
+      ...(params.respondedModel !== undefined ? { respondedModel: params.respondedModel } : {}),
       promptVersion: params.promptVersion,
       basis: { memoryIds: [], observationIds: [observation.id] },
       confidence: candidate.confidence ?? 0.5,

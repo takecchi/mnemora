@@ -25,6 +25,24 @@ export interface PromptSpec {
 export interface LLMResponse {
   /** モデルの応答の本文。⚠ 拒否でも切り詰めでもない空応答は空文字になりうる（`@mnemora/openai`・`@mnemora/anthropic` とも。ADR 0072）。 */
   content: string;
+  /** この応答を実際に返したモデルの名前（{@link StructuredResponse} の契約）。確かめられないときはキーごと省く。 */
+  respondedModel?: string;
+}
+
+/**
+ * {@link LLMProvider.completeStructuredWithMeta} の戻り値（[ADR 0701](../../../../docs/decisions/0701-provenance-records-responded-model.md)）。
+ *
+ * `respondedModel` の契約（`LLMResponse.respondedModel` も同じ）:
+ * - provider の**応答そのもの**が持つモデル名（OpenAI・Anthropic の応答の `model`）だけを入れる。要求に使った設定値・既定値・推測で埋めない。
+ * - 応答がモデル名を持たない・空文字のときは、キーごと省く。**省かれていることは「確かめていない」を意味し、「設定値どおり」を意味しない。**
+ * - 別の provider を包む provider（フォールバック・切り替え）は、**実際に応答した中の provider の値**をそのまま返す。
+ *   包む側の設定値で上書きしない。
+ */
+export interface StructuredResponse<T> {
+  /** `req.schema` に合う値（`completeStructured` が返すものと同じ）。 */
+  value: T;
+  /** この応答を実際に返したモデルの名前（{@link StructuredResponse} の契約）。確かめられないときはキーごと省く。 */
+  respondedModel?: string;
 }
 
 /** `LLMProvider.completeStructured` に渡す要求。 */
@@ -75,4 +93,16 @@ export interface LLMProvider {
   complete(ctx: Ctx, req: PromptSpec, opts?: AbortOptions): Promise<LLMResponse>;
   /** `req.schema` に合う値を返させる。`req.schema` への適合を保証するのは provider である（上の #850）。失敗は例外で返す。`opts.signal` は上の「中断と時間の上限」を参照。 */
   completeStructured<T>(ctx: Ctx, req: StructuredRequest<T>, opts?: AbortOptions): Promise<T>;
+  /**
+   * **任意。** `completeStructured` と同じ要求を送り、値と一緒に応答を実際に返したモデル名を返す
+   * （[ADR 0701](../../../../docs/decisions/0701-provenance-records-responded-model.md)）。
+   * 実装していれば、core は抽出でこちらを呼び、`inferred` の `provenance.respondedModel` に載せる。実装していなければ
+   * `completeStructured` を呼び、`respondedModel` は残さない（「確かめていない」）。
+   * 値の契約と失敗の扱いは `completeStructured` と同じ。
+   */
+  completeStructuredWithMeta?<T>(
+    ctx: Ctx,
+    req: StructuredRequest<T>,
+    opts?: AbortOptions,
+  ): Promise<StructuredResponse<T>>;
 }

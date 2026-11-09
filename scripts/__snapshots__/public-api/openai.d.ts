@@ -26,6 +26,7 @@ export interface OpenAIChatCompletionChoice {
 }
 export interface OpenAIChatCompletionResult {
     choices: OpenAIChatCompletionChoice[];
+    model?: string | null;
 }
 export interface OpenAIChatClient {
     chat: {
@@ -103,7 +104,7 @@ export interface OpenAIJsonSchemaFormat {
 export declare function translateForOpenAIStructuredOutput<T>(name: string, schema: z.ZodType<T>): OpenAIJsonSchemaFormat;
 
 // ===== dist/llm-provider.d.ts =====
-import type { AbortOptions, Ctx, LLMProvider, LLMResponse, PromptSpec, StructuredRequest } from "@mnemora/core";
+import type { AbortOptions, Ctx, LLMProvider, LLMResponse, PromptSpec, StructuredRequest, StructuredResponse } from "@mnemora/core";
 import type { OpenAIChatClient } from "./client-types.js";
 export interface OpenAILLMProviderOptions {
     apiKey?: string | undefined;
@@ -117,5 +118,6 @@ export declare class OpenAILLMProvider implements LLMProvider {
     private readonly temperature?;
     constructor(options: OpenAILLMProviderOptions);
     complete(_ctx: Ctx, req: PromptSpec, opts?: AbortOptions): Promise<LLMResponse>;
-    completeStructured<T>(_ctx: Ctx, req: StructuredRequest<T>, opts?: AbortOptions): Promise<T>;
+    completeStructured<T>(ctx: Ctx, req: StructuredRequest<T>, opts?: AbortOptions): Promise<T>;
+    completeStructuredWithMeta<T>(_ctx: Ctx, req: StructuredRequest<T>, opts?: AbortOptions): Promise<StructuredResponse<T>>;
 }

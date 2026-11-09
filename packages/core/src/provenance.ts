@@ -32,8 +32,17 @@ export interface StatedProvenance {
 export interface InferredProvenance {
   /** 常に `"inferred"`。 */
   kind: "inferred";
-  /** 推論した LLM のモデル名（`RuntimeConfig.llmModelId`。省略時は `"unknown"`）。 */
+  /**
+   * **設定した**モデル名（`RuntimeConfig.llmModelId`。省略時は `"unknown"`）。要求に使った名前と一致する保証は無く、
+   * 実際に応答したモデルを表さない。実際に応答したモデルは {@link InferredProvenance.respondedModel}。
+   */
   model: string;
+  /**
+   * **応答を実際に返したモデル**の名前（provider の応答が持つ値。[ADR 0701](../../../docs/decisions/0701-provenance-records-responded-model.md)）。
+   * provider が `LLMProvider.completeStructuredWithMeta` を実装し、応答がモデル名を持っていたときだけ入る。
+   * **無いことは「確かめていない」を意味し、`model` と同じだったことを意味しない。**
+   */
+  respondedModel?: string;
   /** 推論に使ったプロンプトの版。 */
   promptVersion: string;
   /** 推論の根拠。抽出が作る推論では、元の Observation 1件を `observationIds` に持ち、`memoryIds` は空。 */
@@ -84,6 +93,7 @@ const StatedProvenanceSchema = z.object({
 const InferredProvenanceSchema = z.object({
   kind: z.literal("inferred"),
   model: z.string().min(1),
+  respondedModel: z.string().min(1).optional(),
   promptVersion: z.string().min(1),
   basis: z.object({
     memoryIds: z.array(z.string().min(1)),

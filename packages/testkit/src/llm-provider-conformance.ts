@@ -137,14 +137,43 @@ export function describeLLMProviderConformance<T>(options: LLMProviderConformanc
     // ------------------------------------------------------------------
 
     it(
-      'complete が返すオブジェクトの Object.keys() はちょうど ["content"]（ベンダー固有の欄が漏れていない）',
+      'complete が返すオブジェクトの欄は "content" と、core の契約の欄 "respondedModel"（任意）だけ（ベンダー固有の欄が漏れていない）',
       async () => {
         const provider = await createProvider();
 
         const response = await provider.complete(ctx, prompt);
 
-        expect(Object.keys(response)).toEqual(["content"]);
+        for (const key of Object.keys(response)) {
+          expect(["content", "respondedModel"]).toContain(key);
+        }
         expect(typeof response.content).toBe("string");
+        expectRespondedModelOmittedOrNonEmpty(response);
+      },
+      timeout,
+    );
+
+    it(
+      'completeStructuredWithMeta（実装していれば）が返すオブジェクトの欄は "value" と "respondedModel"（任意）だけで、value の欄は structured.schema が宣言した欄の集合に収まっている',
+      async () => {
+        const provider = await createProvider();
+        // 任意の口（ADR 0701）。実装していない provider には当てるものが無い。
+        if (provider.completeStructuredWithMeta === undefined) {
+          return;
+        }
+        const allowed = declaredFieldNames(structured.schema);
+
+        const response = await provider.completeStructuredWithMeta!(ctx, {
+          prompt: structured.prompt,
+          schema: structured.schema,
+        });
+
+        for (const key of Object.keys(response)) {
+          expect(["value", "respondedModel"]).toContain(key);
+        }
+        expectRespondedModelOmittedOrNonEmpty(response);
+        for (const key of Object.keys(response.value as Record<string, unknown>)) {
+          expect(allowed.has(key)).toBe(true);
+        }
       },
       timeout,
     );
@@ -278,4 +307,12 @@ export function describeLLMProviderConformance<T>(options: LLMProviderConformanc
       timeout,
     );
   });
+}
+
+/** `respondedModel` は、キーごと省くか、空でない文字列か（ADR 0701。空文字で「確かめた」顔をさせない）。 */
+function expectRespondedModelOmittedOrNonEmpty(response: { respondedModel?: unknown }): void {
+  if ("respondedModel" in response) {
+    expect(typeof response.respondedModel).toBe("string");
+    expect((response.respondedModel as string).length).toBeGreaterThan(0);
+  }
 }

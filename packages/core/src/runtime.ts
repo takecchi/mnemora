@@ -2460,6 +2460,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     observation: Observation,
     candidates: ExtractedMemoryCandidate[],
     claimKeys?: readonly (ClaimKey | null)[],
+    respondedModel?: string,
   ): Promise<NewMemory[]> {
     const halfLifeHours = await deps.tenantSettingsStore.getDefaultHalfLifeHours(ctx);
     const now = clock.now();
@@ -2480,6 +2481,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
         extractorVersion,
         llmModelId,
         promptVersion,
+        respondedModel,
         halfLifeHours,
         now,
         digestFallbackLength,
@@ -2797,6 +2799,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     claimKeys?: readonly (ClaimKey | null)[],
     detectContested?: boolean,
     droppedFields: readonly DroppedAuxField[] = [],
+    respondedModel?: string,
   ): Promise<{
     memoryIds: MemoryId[];
     contentHashes: Set<string>;
@@ -2807,6 +2810,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       observation,
       candidates,
       claimKeys,
+      respondedModel,
     );
     const memoryIds: MemoryId[] = [];
     const contentHashes = new Set<string>();
@@ -2968,6 +2972,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       usedWholeObservationFallback,
       failure,
       rejectedSubjectIds: rawRejectedSubjectIds,
+      respondedModel,
     } = await extractCandidates(deps.llmProvider, ctx, observation, subjectCandidates, signal);
     // ADR 0443: 保存できない補助の欄（digest・tags）だけを落とし、候補は残す。
     const { candidates, droppedFields } = sanitizeCandidatesAuxFields(
@@ -3015,6 +3020,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       claimKeys,
       claimKeyOptions?.detectContested === true,
       droppedFields,
+      respondedModel,
     );
     return { memoryIds, outcome, failure, rejectedSubjectIds, claimKeyFailure, contestedDetection };
   }
@@ -3083,6 +3089,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       candidates: extractedCandidates,
       usedWholeObservationFallback,
       failure,
+      respondedModel,
     } = await extractCandidates(deps.llmProvider, ctx, observation, undefined, opts?.signal);
     // ADR 0443: observe と同じ。保存できない補助の欄（digest・tags）だけを落とし、候補は残す。
     const { candidates, droppedFields } = sanitizeCandidatesAuxFields(
@@ -3156,7 +3163,13 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       extractorVersion,
     );
 
-    const newMemories = await buildNewMemoriesForCandidates(ctx, observation, candidates);
+    const newMemories = await buildNewMemoriesForCandidates(
+      ctx,
+      observation,
+      candidates,
+      undefined,
+      respondedModel,
+    );
     const contentHashes = new Set(newMemories.map((m) => m.contentHash));
 
     const { toSupersede: classifiedToSupersede, skipped } = classifyReextractTargets(

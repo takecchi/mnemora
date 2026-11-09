@@ -106,6 +106,8 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 
 ### Added
 
+- **`@mnemora/core`: `inferred` の provenance に任意の欄 `respondedModel` を足した——応答を実際に返したモデル名。`model`（設定したモデル名）とは分け、確かめられないときは書かない**（[ADR 0701](./docs/decisions/0701-provenance-records-responded-model.md)）。`LLMProvider` に任意のメソッド `completeStructuredWithMeta`（戻り値 `StructuredResponse<T>`）、`LLMResponse` に任意の欄 `respondedModel` を足した。`@mnemora/openai`・`@mnemora/anthropic` は応答の `model` を返す。型の上では非破壊で、DB マイグレーションは無い。
+  - `@mnemora/testkit` の `describeLLMProviderConformance` の条項1は、`complete` の戻り値のキーに `respondedModel`（任意・空でない文字列）を許すようになった。`completeStructuredWithMeta` を実装した provider には、同じ形の歯が増えた。`describeMemoryStoreConformance` に「inferred で `respondedModel` が空文字なら拒む」の `it` が増えた。
 - **`MemoryStore.purgeMemory` の TSDoc に、purge の後も残るものの約束を足した——`recalls.query`（問いの本文）は purge の約束に含めず、残る。claim key の検出が積んだ監査イベント（`memory_events.meta.note`）の `claimKey`（主語と述語）も残る**（[ADR 0698](./docs/decisions/0698-owner-decisions-purge-scope-retention-tick-limit-rule-name.md)。オーナーへのまとめ問い c9335e43 の問2・問3〈全部推奨〉）。どちらも今の振る舞いを約束にしたもので、実行時の振る舞いは変わらない。conformance suite には、この箇条の時点では足していなかった（後から足した。Breaking の「conformance suite に約束を足した——`MemoryStore.purgeMemory` が、その記憶を目次帯に持つ recall の `query` と…」の箇条）。
 - **`Runtime.purge`・`MemoryStore.purgeMemory` の TSDoc に、purge と同時に走る `recall()` の窓は約束の外だと書いた**（同 ADR。問4）。recall の途中で forget → purge が終わると、後から記録されるその recall の目次帯に、purge 前の digest が残りうる。
 - **`TickOptions.limit` の TSDoc に、既定が 50 であることと、リースの注意（`TickOptions.leaseMs`）への参照を書いた**（同 ADR。問7）。既定値・`leaseMs`・リースを延ばす口が無いことは変わらない。

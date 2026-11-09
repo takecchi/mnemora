@@ -9,11 +9,12 @@ import type {
   LLMResponse,
   PromptSpec,
   StructuredRequest,
+  StructuredResponse,
 } from "@mnemora/core";
 import { runAbortable } from "@mnemora/core";
 import { assertApiKeyFitsInHeader } from "./api-key.js";
 import { assertFiniteNonNegative } from "./option-check.js";
-import type { OpenAIChatClient } from "./client-types.js";
+import type { OpenAIChatClient, OpenAIChatCompletionResult } from "./client-types.js";
 import { OpenAILLMProviderError } from "./errors.js";
 import type { OpenAIJsonSchemaFormat } from "./json-schema.js";
 import { translateForOpenAIStructuredOutput } from "./json-schema.js";
@@ -299,7 +300,10 @@ export class OpenAILLMProvider implements LLMProvider {
     );
     assertNotRefusedOrTruncated(response.choices[0]);
     // `?? ""` を throw にしない: `@mnemora/anthropic` と同じ形を保ち、差し替え可能にするため。
-    return { content: response.choices[0]?.message?.content ?? "" };
+    return {
+      content: response.choices[0]?.message?.content ?? "",
+      ...respondedModelOf(response),
+    };
   }
 
   /**
@@ -315,10 +319,22 @@ export class OpenAILLMProvider implements LLMProvider {
    * そのまま返す。`.nullable().optional()` の欄の `null` は省略として届く。`opts?.signal` は `complete` と同じ。
    */
   async completeStructured<T>(
-    _ctx: Ctx,
+    ctx: Ctx,
     req: StructuredRequest<T>,
     opts?: AbortOptions,
   ): Promise<T> {
+    return (await this.completeStructuredWithMeta(ctx, req, opts)).value;
+  }
+
+  /**
+   * `completeStructured` と同じ要求を送り、値と一緒に応答の `model`（実際に応答したモデル）を返す。
+   * 応答が `model` を持たない・空文字なら `respondedModel` を省く（要求に使った `this.model` で埋めない。ADR 0701）。
+   */
+  async completeStructuredWithMeta<T>(
+    _ctx: Ctx,
+    req: StructuredRequest<T>,
+    opts?: AbortOptions,
+  ): Promise<StructuredResponse<T>> {
     let format: OpenAIJsonSchemaFormat;
     try {
       format = translateAndValidateStructuredOutputFormat(req.schema);
@@ -345,6 +361,12 @@ export class OpenAILLMProvider implements LLMProvider {
     const parsedJson: unknown = JSON.parse(raw);
     const base = toBaseJsonSchema(req.schema);
     const value = needsRootWrap(base) ? unwrapRootValue(parsedJson) : parsedJson;
-    return parseStructuredValue(req.schema, base, value);
+    return { value: parseStructuredValue(req.schema, base, value), ...respondedModelOf(response) };
   }
+}
+
+function respondedModelOf(response: OpenAIChatCompletionResult): { respondedModel?: string } {
+  return typeof response.model === "string" && response.model.length > 0
+    ? { respondedModel: response.model }
+    : {};
 }

@@ -435,6 +435,7 @@ export interface ExtractCandidatesResult {
     usedWholeObservationFallback: boolean;
     failure: ExtractionFailure | null;
     rejectedSubjectIds?: string[];
+    respondedModel?: string;
 }
 export declare function sanitizeCandidateSubjectId(subjectId: string | null | undefined, allowedSubjectCandidates: readonly string[] | undefined): {
     subjectId: string | null | undefined;
@@ -449,6 +450,7 @@ export interface BuildNewMemoryParams {
     extractorVersion: string;
     llmModelId: string;
     promptVersion: string;
+    respondedModel?: string | undefined;
     halfLifeHours: number;
     now: Date;
     digestFallbackLength: number;
@@ -622,6 +624,11 @@ export interface PromptSpec {
 }
 export interface LLMResponse {
     content: string;
+    respondedModel?: string;
+}
+export interface StructuredResponse<T> {
+    value: T;
+    respondedModel?: string;
 }
 export interface StructuredRequest<T> {
     prompt: PromptSpec;
@@ -630,6 +637,7 @@ export interface StructuredRequest<T> {
 export interface LLMProvider {
     complete(ctx: Ctx, req: PromptSpec, opts?: AbortOptions): Promise<LLMResponse>;
     completeStructured<T>(ctx: Ctx, req: StructuredRequest<T>, opts?: AbortOptions): Promise<T>;
+    completeStructuredWithMeta?<T>(ctx: Ctx, req: StructuredRequest<T>, opts?: AbortOptions): Promise<StructuredResponse<T>>;
 }
 
 // ===== dist/interfaces/memory-store.d.ts =====
@@ -1299,6 +1307,7 @@ export declare const MemorySchema: z.ZodObject<{
         z.ZodObject<{
             kind: z.ZodLiteral<"inferred">;
             model: z.ZodString;
+            respondedModel: z.ZodOptional<z.ZodString>;
             promptVersion: z.ZodString;
             basis: z.ZodObject<{
                 memoryIds: z.ZodArray<z.ZodString>;
@@ -1382,6 +1391,7 @@ export declare const NewMemorySchema: z.ZodObject<{
         z.ZodObject<{
             kind: z.ZodLiteral<"inferred">;
             model: z.ZodString;
+            respondedModel: z.ZodOptional<z.ZodString>;
             promptVersion: z.ZodString;
             basis: z.ZodObject<{
                 memoryIds: z.ZodArray<z.ZodString>;
@@ -1727,6 +1737,7 @@ export interface StatedProvenance {
 export interface InferredProvenance {
     kind: "inferred";
     model: string;
+    respondedModel?: string;
     promptVersion: string;
     basis: {
         memoryIds: string[];
@@ -1757,6 +1768,7 @@ export declare const ProvenanceSchema: z.ZodDiscriminatedUnion<[
     z.ZodObject<{
         kind: z.ZodLiteral<"inferred">;
         model: z.ZodString;
+        respondedModel: z.ZodOptional<z.ZodString>;
         promptVersion: z.ZodString;
         basis: z.ZodObject<{
             memoryIds: z.ZodArray<z.ZodString>;

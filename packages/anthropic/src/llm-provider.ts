@@ -6,6 +6,7 @@ import type {
   LLMResponse,
   PromptSpec,
   StructuredRequest,
+  StructuredResponse,
 } from "@mnemora/core";
 import { runAbortable } from "@mnemora/core";
 import { assertApiKeyFitsInHeader } from "./api-key.js";
@@ -13,6 +14,7 @@ import { assertPositiveSafeInteger } from "./option-check.js";
 import type {
   AnthropicContentBlock,
   AnthropicMessageParam,
+  AnthropicMessageResult,
   AnthropicMessagesClient,
 } from "./client-types.js";
 import { AnthropicLLMProviderError } from "./errors.js";
@@ -176,7 +178,7 @@ export class AnthropicLLMProvider implements LLMProvider {
     );
     assertNotRefusedOrTruncated(response);
     // `?? ""` を throw にしない: `@mnemora/openai` と同じ形を保ち、差し替え可能にするため。
-    return { content: firstTextBlock(response.content) ?? "" };
+    return { content: firstTextBlock(response.content) ?? "", ...respondedModelOf(response) };
   }
 
   /**
@@ -190,10 +192,22 @@ export class AnthropicLLMProvider implements LLMProvider {
    * `opts?.signal` と `maxTokens` の SDK 側の例外は `complete` と同じ。
    */
   async completeStructured<T>(
-    _ctx: Ctx,
+    ctx: Ctx,
     req: StructuredRequest<T>,
     opts?: AbortOptions,
   ): Promise<T> {
+    return (await this.completeStructuredWithMeta(ctx, req, opts)).value;
+  }
+
+  /**
+   * `completeStructured` と同じ要求を送り、値と一緒に応答の `model`（実際に応答したモデル）を返す。
+   * 応答が `model` を持たない・空文字なら `respondedModel` を省く（要求に使った `this.model` で埋めない。ADR 0701）。
+   */
+  async completeStructuredWithMeta<T>(
+    _ctx: Ctx,
+    req: StructuredRequest<T>,
+    opts?: AbortOptions,
+  ): Promise<StructuredResponse<T>> {
     let format: AnthropicJsonSchemaFormat;
     try {
       format = translateForAnthropicStructuredOutput(req.schema);
@@ -222,6 +236,12 @@ export class AnthropicLLMProvider implements LLMProvider {
     }
     const parsedJson: unknown = JSON.parse(raw);
     // `stripNulls` 相当は不要: Anthropic は `required` を元のまま通すので、生の JSON をそのまま渡す。
-    return req.schema.parse(parsedJson);
+    return { value: req.schema.parse(parsedJson), ...respondedModelOf(response) };
   }
+}
+
+function respondedModelOf(response: AnthropicMessageResult): { respondedModel?: string } {
+  return typeof response.model === "string" && response.model.length > 0
+    ? { respondedModel: response.model }
+    : {};
 }
