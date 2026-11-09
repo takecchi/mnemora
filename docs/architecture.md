@@ -1379,6 +1379,7 @@ transactional outbox の「書く」側だとすれば、`OutboxStore` は `runt
 ```ts
 interface TenantSettingsStore {
   getDefaultHalfLifeHours(ctx: Ctx): Promise<number>;
+  setDefaultHalfLifeHours?(ctx: Ctx, hours: number): Promise<void>;
   getEventRetention(ctx: Ctx): Promise<EventRetention>;
   setEventRetention(ctx: Ctx, retention: EventRetentionSetting): Promise<void>;
   getDecayClock?(ctx: Ctx): Promise<DecayClock>;

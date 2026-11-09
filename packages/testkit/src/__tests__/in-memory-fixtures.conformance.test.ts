@@ -171,7 +171,7 @@ describeTenantSettingsStoreConformance({
     if (!latestTenantSettingsStore) {
       throw new Error("setDefaultHalfLifeHours より先に createStore() を呼ぶ必要がある");
     }
-    latestTenantSettingsStore.setDefaultHalfLifeHours(ctx.tenantId, hours);
+    return latestTenantSettingsStore.setDefaultHalfLifeHours(ctx, hours);
   },
   supportsDecayClock: true,
   setDefaultHalfLifeRecalls: (ctx: Ctx, recalls: number) => {

@@ -1102,6 +1102,8 @@ import type { Ctx } from "../ctx.js";
 import type { EraseTenantStoreOptions, EraseTenantResult } from "./memory-store.js";
 export declare const DEFAULT_HALF_LIFE_HOURS = 720;
 export declare function isHalfLifeHoursInRange(value: number): boolean;
+export declare const HALF_LIFE_HOURS_INVALID_MESSAGE = "half life hours must be a finite number greater than 0";
+export declare function assertValidHalfLifeHours(value: number): void;
 export type EventRetention = {
     kind: "unset";
 } | {
@@ -1131,6 +1133,7 @@ export declare const TAXONOMY_MODE_INVALID_MESSAGE = "taxonomy mode must be 'ope
 export declare function assertValidTaxonomyMode(value: string): asserts value is TaxonomyMode;
 export interface TenantSettingsStore {
     getDefaultHalfLifeHours(ctx: Ctx): Promise<number>;
+    setDefaultHalfLifeHours?(ctx: Ctx, hours: number): Promise<void>;
     getEventRetention(ctx: Ctx): Promise<EventRetention>;
     setEventRetention(ctx: Ctx, retention: EventRetentionSetting): Promise<void>;
     getDecayClock?(ctx: Ctx): Promise<DecayClock>;

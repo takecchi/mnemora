@@ -3,6 +3,7 @@ import {
   assertValidDecayClock,
   assertValidEventRetentionDays,
   assertValidEventRetentionKind,
+  assertValidHalfLifeHours,
   assertValidHalfLifeRecalls,
   assertValidTaxonomyMode,
   DEFAULT_DECAY_CLOCK,
@@ -21,7 +22,10 @@ import type {
   TenantSettingsStore,
 } from "@mnemora/core";
 import { assertWellFormedCtx, assertWellFormedIdentifier } from "@mnemora/core";
-import { assertHalfLifeRecallsFitsFloat4 } from "./half-life-float4.js";
+import {
+  assertHalfLifeHoursFitsFloat4,
+  assertHalfLifeRecallsFitsFloat4,
+} from "./half-life-float4.js";
 import type { Db } from "./client.js";
 import { omittingParams } from "./omit-params.js";
 
@@ -111,6 +115,25 @@ export class PostgresTenantSettingsStore implements TenantSettingsStore {
       VALUES (${ctx.tenantId}, ${clock}, now())
       ON CONFLICT (tenant_id) DO UPDATE
         SET decay_clock = EXCLUDED.decay_clock, updated_at = now()
+    `),
+    );
+  }
+
+  /**
+   * `tenant_settings.default_half_life_hours` を設定する（UPSERT。ADR 0706）。不正な値は `assertValidHalfLifeHours`（core 共有）で拒む。
+   * **この列は新規作成時の初期値としてのみ使われる。**既存 Memory の `half_life_hours`・`decay_floor_at` は書き換えない。
+   */
+  async setDefaultHalfLifeHours(ctx: Ctx, hours: number): Promise<void> {
+    assertWellFormedCtx(ctx);
+    assertValidHalfLifeHours(hours);
+    // 列は `real`（float4）。収まらない値は DB の生の例外でなく明示の例外で断る。
+    assertHalfLifeHoursFitsFloat4("PostgresTenantSettingsStore", hours);
+    await omittingParams(() =>
+      this.db.execute(sql`
+      INSERT INTO tenant_settings (tenant_id, default_half_life_hours, updated_at)
+      VALUES (${ctx.tenantId}, ${hours}, now())
+      ON CONFLICT (tenant_id) DO UPDATE
+        SET default_half_life_hours = EXCLUDED.default_half_life_hours, updated_at = now()
     `),
     );
   }

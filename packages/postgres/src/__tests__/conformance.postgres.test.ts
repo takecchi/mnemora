@@ -288,13 +288,10 @@ describeTenantSettingsStoreConformance({
     const { db } = await getTestClient();
     return new PostgresTenantSettingsStore(db);
   },
+  // 本番の書き込み口を直接呼ぶ（ADR 0706 より前は生 SQL の UPSERT で行を作っていた）。
   setDefaultHalfLifeHours: async (ctx: Ctx, hours: number) => {
     const { db } = await getTestClient();
-    await db.execute(sql`
-      INSERT INTO tenant_settings (tenant_id, default_half_life_hours, taxonomy_mode, created_at, updated_at)
-      VALUES (${ctx.tenantId}, ${hours}, 'open', now(), now())
-      ON CONFLICT (tenant_id) DO UPDATE SET default_half_life_hours = EXCLUDED.default_half_life_hours
-    `);
+    await new PostgresTenantSettingsStore(db).setDefaultHalfLifeHours(ctx, hours);
   },
   supportsDecayClock: true,
   // 本番の書き込み口を直接呼ぶ（生 SQL の UPSERT で行を作らない）。

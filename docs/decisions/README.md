@@ -699,5 +699,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0702](./0702-memory-event-seq.md) | `memory_events` に記録した順の番号 `seq` を足す——時計のずれたワーカーが混ざっても、同じ記憶の履歴を遷移の順に読めるようにする | 採用 (2026-11) |
 | [0703](./0703-contested-detection-eval.md) | 矛盾検出の精度を、カテゴリごとの Precision/Recall/F1 で測る評価を足す——決定的な段を oracle 鍵で測り、アルゴリズムは変えない | 採用 (2026-11) |
 | [0705](./0705-consolidated-reflected-provenance-model.md) | `consolidated`・`reflected` の provenance にも、設定したモデルと応答を実際に返したモデルを残す | 採用 (2026-11) |
+| [0706](./0706-set-default-half-life-hours.md) | テナントの既定の半減期（時間）を設定する口 `setDefaultHalfLifeHours` を足す | 採用 (2026-11) |
 
 <!-- ADR-INDEX:GENERATED:END -->

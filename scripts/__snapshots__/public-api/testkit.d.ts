@@ -401,7 +401,8 @@ export declare class InMemoryTenantSettingsStore implements TenantSettingsStore 
     constructor(activitySeqBacking?: Map<string, number> | undefined, subjectActivitySeqBacking?: Map<string, Map<string, number>> | undefined, eventRetentionDaysBacking?: Map<string, number | null> | undefined);
     private get eventRetentionDays();
     private ensureRow;
-    setDefaultHalfLifeHours(tenantId: string, hours: number): void;
+    setDefaultHalfLifeHours(target: Ctx | string, hours: number): Promise<void>;
+    private writeDefaultHalfLifeHours;
     getDefaultHalfLifeHours(ctx: Ctx): Promise<number>;
     getEventRetention(ctx: Ctx): Promise<EventRetention>;
     setEventRetention(ctx: Ctx, retention: EventRetentionSetting): Promise<void>;

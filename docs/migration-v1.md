@@ -3432,6 +3432,9 @@ on に変わる（[ADR 0337](./decisions/0337-recall-association-default-on.md)�
   手順は、いつもどおり migration を適用するだけ（列の追加で、既存の行も書き込みも拒まない。既存の行の `seq` は適用時の物理的な並びで振られ、遷移の順とは限らない）。型は任意の欄 `MemoryEvent.seq?` が増えるだけ。
   影響が出るのは、`forgotten` のイベントの `meta` を `{}`・`{ reason }` と完全一致で比べていた呼び出し側と、同じ `at` の行の並びに頼っていた呼び出し側である。状態の履歴を組み立てるなら、`at` ではなく `seq` で並べ直すこと。
 
+- **`@mnemora/core` の `TenantSettingsStore` に任意のメソッド `setDefaultHalfLifeHours?(ctx, hours): Promise<void>` が増えた**（[ADR 0706](./decisions/0706-set-default-half-life-hours.md)）。
+  任意のメソッドなので、実装していない adapter はそのまま適合する。⚠ ただし、自前の `TenantSettingsStore` が**同じ名前で別の形のメソッド**（例: 戻り値が `void`）をたまたま持っていると、型が合わずにコンパイルが通らなくなる（この repo の中にも1件あった。テスト用の最小の store）。その場合は `async` にして `Promise<void>` を返す形にそろえる。
+
 ## この文書が確かめていないこと
 
 - **DB マイグレーション（`0013`/`0014`/`0015`）を実際に Postgres へ適用した結果**
