@@ -1763,6 +1763,17 @@ CI の `long-horizon` ジョブ（`ci.yml`）がこれを実行し、表を Job 
 
 ---
 
+### `long-horizon-e2e`: 同じ時間軸の文を、抽出 LLM を通して測る（段階2）
+
+```bash
+DATABASE_URL=... OPENAI_API_KEY=... pnpm --filter @mnemora/example-chat run long-horizon-e2e
+```
+
+- `long-horizon` と同じ文を、記憶として直接書かずに発話として `observe()` へ流し、何を記憶にするかを抽出 LLM に決めさせる。
+- 使用報告なしの2方針（legacy・eventAware）だけを測る。結果の分類には「抽出されなかった」（`nx`）を足してある。
+- ⚠ **実 API を叩く**（LLM と埋め込みの既定は `openai`）。発話約2,750件で、手元では約1時間半かかった。CI では走らせない。
+- `MNEMORA_LONG_HORIZON_E2E_DAYS` で模擬期間を縮められる（配線を確かめるための小さな実行用）。`MNEMORA_LONG_HORIZON_E2E_JSON` で JSON を書く。
+- 測った結果は [ADR 0700](../../docs/decisions/0700-default-time-weighting-event-aware-freshness.md) の追記と `bench-results/long-horizon-openai-2026-11-10/`。
 ## `contested-detection`: claim key の矛盾検出の決定的な段を、カテゴリごとに測る
 
 ```bash

@@ -162,6 +162,7 @@ import {
   formatContestedReport,
   metricsOf,
 } from "./contested-detection-metrics.js";
+import { formatLongHorizonE2EReport, runLongHorizonE2E } from "./long-horizon-e2e.js";
 
 const DEFAULT_CHAT_FILLER_PAIRS = 8;
 
@@ -1191,6 +1192,49 @@ async function runContestedDetectionCommand(): Promise<void> {
     };
     writeFileSync(jsonPath, `${JSON.stringify(json, null, 2)}\n`, "utf-8");
     console.log(`\n[contested-detection] 機械可読な結果を書き出した: ${jsonPath}`);
+  }
+}
+
+/**
+ * 段階2: 同じ時間軸の文を発話として `observe()` へ流し、抽出 LLM を通して測る（`long-horizon-e2e.ts`）。
+ * ⚠ 実 API を叩く（LLM と埋め込みの既定は `openai`）。鍵が無ければ `createProviders` が例外にする。
+ * `MNEMORA_LONG_HORIZON_E2E_DAYS` で模擬期間を縮められる（配線を確かめるための小さな実行用）。
+ */
+async function runLongHorizonE2ECommand(): Promise<void> {
+  const databaseUrl = requireDatabaseUrl();
+  const handle = await createLongHorizonRuntime(databaseUrl, {
+    ...process.env,
+    MNEMORA_LLM: process.env.MNEMORA_LLM ?? "openai",
+    MNEMORA_EMBEDDING: process.env.MNEMORA_EMBEDDING ?? "openai",
+  });
+  printProviderMode({ ...handle, cassetteIgnored: false }, null);
+  try {
+    const daysEnv = process.env.MNEMORA_LONG_HORIZON_E2E_DAYS;
+    const days = daysEnv === undefined || daysEnv === "" ? undefined : Number(daysEnv);
+    if (days !== undefined && !(Number.isInteger(days) && days > 0)) {
+      throw new Error(
+        `MNEMORA_LONG_HORIZON_E2E_DAYS は正の整数にすること（受け取った値: ${daysEnv ?? ""}）`,
+      );
+    }
+    const started = Date.now();
+    const report = await runLongHorizonE2E(handle, {
+      tenantPrefix: `long-horizon-${newRunToken()}`,
+      ...(days !== undefined ? { days } : {}),
+      log: (line) => {
+        console.log(line);
+      },
+    });
+    console.log(
+      `\n[long-horizon-e2e] 所要 ${String(Math.round((Date.now() - started) / 1000))}秒\n`,
+    );
+    console.log(formatLongHorizonE2EReport(report));
+    const jsonPath = process.env.MNEMORA_LONG_HORIZON_E2E_JSON;
+    if (jsonPath) {
+      writeFileSync(jsonPath, `${JSON.stringify(report, null, 2)}\n`, "utf-8");
+      console.log(`\n[long-horizon-e2e] 機械可読な結果を書き出した: ${jsonPath}`);
+    }
+  } finally {
+    await handle.close();
   }
 }
 
@@ -2258,6 +2302,7 @@ function printHelp(write: (text: string) => void = console.log): void {
       "                                                                      #   既定は擬似 provider。MNEMORA_VALIDITY_JSON で機械可読出力",
       "  DATABASE_URL=... pnpm --filter @mnemora/example-chat run long-horizon # 半年分の時間軸で、植えた事実が recall() に返り続けるかを測る",
       "  DATABASE_URL=... pnpm --filter @mnemora/example-chat run contested-detection # claim key の矛盾検出の決定的な段を、カテゴリごとに Precision/Recall/F1 で測る",
+      "  DATABASE_URL=... OPENAI_API_KEY=... pnpm --filter @mnemora/example-chat run long-horizon-e2e # 同じ時間軸の文を抽出 LLM に通して測る（実 API を叩く。約1時間半）",
       "                                                                      #   既定は local embedding・LLM 不使用。MNEMORA_LONG_HORIZON_JSON で機械可読出力",
       "  pnpm --filter @mnemora/example-chat run embedding-fingerprint",
       "                                                                      # 固定入力に対する embed() の結果を書き出す(DB 不要。Issue #565)",
@@ -2353,6 +2398,8 @@ async function main(): Promise<void> {
     await runLongHorizon();
   } else if (command === "contested-detection") {
     await runContestedDetectionCommand();
+  } else if (command === "long-horizon-e2e") {
+    await runLongHorizonE2ECommand();
   } else if (command === "embedding-fingerprint") {
     await runEmbeddingFingerprint();
   } else if (command === "identifier-probes") {

@@ -81,7 +81,7 @@ const TENANT_GROUPS: readonly { key: string; arms: readonly LongHorizonArm[] }[]
 ];
 
 /** 診断用の `recall()` の閾値。閾値による除外を実質無効にして、gold のスコアを必ず読めるようにする。 */
-const DIAGNOSTIC_SCORE_THRESHOLD = -1_000_000;
+export const DIAGNOSTIC_SCORE_THRESHOLD = -1_000_000;
 /**
  * 診断用の `recall()` の件数は、その時点でテナントに書いた記憶の総数以上にする。
  * ⚠ 固定の件数（たとえば200）にしない: 総数より小さいと、候補に上がっているのに順位でその外へ押し出された gold を
@@ -273,7 +273,10 @@ async function writeSeeds(
   });
 }
 
-function rankOf(recall: RecallResult, memoryId: string): { rank: number; via: string } | null {
+export function rankOf(
+  recall: RecallResult,
+  memoryId: string,
+): { rank: number; via: string } | null {
   const index = recall.memories.findIndex((m) => m.memoryId === memoryId);
   if (index < 0) {
     return null;
@@ -281,7 +284,7 @@ function rankOf(recall: RecallResult, memoryId: string): { rank: number; via: st
   return { rank: index + 1, via: recall.memories[index]!.retrievedVia };
 }
 
-function diagnosticOf(recall: RecallResult, memoryId: string): LongHorizonDiagnostic | null {
+export function diagnosticOf(recall: RecallResult, memoryId: string): LongHorizonDiagnostic | null {
   const index = recall.memories.findIndex((m) => m.memoryId === memoryId);
   if (index < 0) {
     return null;
