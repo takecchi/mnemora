@@ -246,6 +246,8 @@ interface StructuredRequest<T> {
 interface LLMProvider {
   complete(ctx: Ctx, req: PromptSpec, opts?: AbortOptions): Promise<LLMResponse>;
   completeStructured<T>(ctx: Ctx, req: StructuredRequest<T>, opts?: AbortOptions): Promise<T>;
+  /** 任意（ADR 0701）。値と一緒に、応答を実際に返したモデル名を返す */
+  completeStructuredWithMeta?<T>(ctx: Ctx, req: StructuredRequest<T>, opts?: AbortOptions): Promise<StructuredResponse<T>>;
 }
 ```
 
@@ -1024,8 +1026,12 @@ type RelationKind = 'contradicts' | 'supports' | 'derived_from';
 interface LLMProvider {
   complete(ctx: Ctx, req: PromptSpec, opts?: AbortOptions): Promise<LLMResponse>;
   completeStructured<T>(ctx: Ctx, req: StructuredRequest<T>, opts?: AbortOptions): Promise<T>;
+  /** 任意（ADR 0701）。値と一緒に、応答を実際に返したモデル名を返す */
+  completeStructuredWithMeta?<T>(ctx: Ctx, req: StructuredRequest<T>, opts?: AbortOptions): Promise<StructuredResponse<T>>;
 }
 ```
+
+- `completeStructuredWithMeta` は任意（[ADR 0701](./decisions/0701-provenance-records-responded-model.md)）。`respondedModel` には応答そのものが持つモデル名だけを入れ、確かめられないときはキーごと省く。包む provider は中の provider の値をそのまま返す。
 
 契約:
 - `completeStructured` はベンダー固有の Structured Output 機構へ翻訳する義務を negate できない
