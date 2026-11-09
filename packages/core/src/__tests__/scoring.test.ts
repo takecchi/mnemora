@@ -221,6 +221,9 @@ describe("defaultScoringStrategy: freshness は 1 で頭打ちにする（ADR 00
       lastReinforcedAt: null,
       strength: 1,
       halfLifeHours: 720,
+      // `recordedAt` へのフォールバックを見る歯なので、方針を明示する（既定の `eventAwareFreshness` では
+      // `occurredAt` が無い記憶の `freshness` が 1 に固定され、フォールバックそのものが起きない）。
+      timeWeighting: "legacy",
     });
     expect(past.freshness).toBe(0.5);
   });

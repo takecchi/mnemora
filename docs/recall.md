@@ -1327,13 +1327,13 @@ Memory 本体(内容・provenance の詳細・状態)の型は `./memory-model.m
 
 ⚠ これは「約束」ではなく今の振る舞いの記録である。重複を1つに数えるよう改めると、重複したクエリタグを渡している呼び出し側の順位が変わる（ADR 0474 の「採らなかった案」）。
 
-### 7.1 `timeWeighting` — 恒常的な記憶と出来事の鮮度を分ける（任意、既定は従来どおり。Issue #690、[ADR 0300](./decisions/0300-time-weighting-policy-opt-in.md)）
+### 7.1 `timeWeighting` — 恒常的な記憶と出来事の鮮度を分ける（既定は `eventAwareFreshness`。Issue #690、[ADR 0300](./decisions/0300-time-weighting-policy-opt-in.md)、[ADR 0700](./decisions/0700-default-time-weighting-event-aware-freshness.md)）
 
-`freshness` は既定（`"legacy"`）では `occurredAt ?? recordedAt` を起点にした減衰係数であり、`decay`（`lastReinforcedAt` 起点。`reinforce` するたびに若返る）と**同じ半減期**を使う。**`occurredAt` が無い記憶**（`docs/memory-model.md` §3 の定義上、特定の出来事時刻を持たない「恒常的な事実・好み」であることが多い）は、`freshness` の起点が `recordedAt`（記録した時刻）にフォールバックする——⟹ **使われ続けている（`reinforce` されている）恒常的な事実でも、`recordedAt` が古いというだけで `freshness` が沈み続け、`total` を引きずり下ろす。** これが「時間の二重減衰」である。
+`freshness` は従来の方針（`"legacy"`）では `occurredAt ?? recordedAt` を起点にした減衰係数であり、`decay`（`lastReinforcedAt` 起点。`reinforce` するたびに若返る）と**同じ半減期**を使う。**`occurredAt` が無い記憶**（`docs/memory-model.md` §3 の定義上、特定の出来事時刻を持たない「恒常的な事実・好み」であることが多い）は、`freshness` の起点が `recordedAt`（記録した時刻）にフォールバックする——⟹ **使われ続けている（`reinforce` されている）恒常的な事実でも、`recordedAt` が古いというだけで `freshness` が沈み続け、`total` を引きずり下ろす。** これが「時間の二重減衰」である。
 
 `RecallQuery.timeWeighting?: "legacy" | "eventAwareFreshness"` を渡すと、`occurredAt` が無い記憶に限って `freshness` を 1（`MAX_FRESHNESS`、ADR 0036 の上限そのもの）に固定できる。`occurredAt` が在る記憶（実際に出来事時刻を持つもの——「来月の出張」「先月の会議」等）は、`"legacy"` と完全に同じ式のままであり、事件の順位付けは1文字も変わらない。
 
-**省略時は `"legacy"`。** この欄を渡さない呼び出しは `recall()` の結果が1バイトも変わらない——既定を新方針にするかどうかはオーナー判断として開いたままである（ADR 0300 §7）。
+**省略時は `"eventAwareFreshness"`。** ADR 0300 §7 がオーナー判断として開いたままにしていた点を、オーナーが「既定を新方針にする」と決めた（[ADR 0700](./decisions/0700-default-time-weighting-event-aware-freshness.md)）。従来どおりの順位付けが要る呼び出しは `timeWeighting: "legacy"` を明示する——その場合の `recall()` の結果は、既定を変える前の省略時と1バイトも変わらない。
 
 **⛔ 忘却ゲート（`includeFullyDecayed`）・`validAt` ゲート（`includeOutsideValidity`）とは独立である。** `timeWeighting` は段2（再スコア、この節が扱う話）だけに効き、段1の候補生成ゲート・後置フィルタの述語には一切渡らない——期限切れの予定は、`timeWeighting` の値に関係なく引き続き除外される。
 
@@ -1356,7 +1356,7 @@ Math.pow(0.5, 1075) === 0                  // 真——ここから先は厳密�
 
 **freshness がまだ0でなくても、他の項が1未満なら `total` はそれより手前で0になりうる。** `total = affinity × decay × tagMatch × freshness × strength` は積なので、`freshness` が非正規化数域（例: `5e-324`）まで縮んだ状態で `strength`（または `decay`）が1未満だと、掛け算の結果がさらに小さくなって丸めで0になる——実測では、上の境界（88.3年）より少し手前の**88.28年**で `freshness` はまだ `5e-324`（非0）だが、`strength: 0.1` を掛けた `total` は既に `0` になった。**⟹ 上の境界は「そこに達すれば必ず0になる」という十分条件であり、「そこまでは0にならない」という必要条件ではない。**
 
-**適用範囲**: `timeWeighting: "eventAwareFreshness"`（§7.1）で `occurredAt` が無い記憶は、`freshness` が `MAX_FRESHNESS`（1）に固定されるため、この下限アンダーフローには当たらない——当たるのは「`occurredAt` が在る記憶」と「`timeWeighting` が既定の `"legacy"`（`occurredAt` の有無に関わらず `recordedAt` へフォールバックする）」の組み合わせだけである。
+**適用範囲**: `timeWeighting: "eventAwareFreshness"`（§7.1）で `occurredAt` が無い記憶は、`freshness` が `MAX_FRESHNESS`（1）に固定されるため、この下限アンダーフローには当たらない——当たるのは「`occurredAt` が在る記憶」と「`timeWeighting` に `"legacy"` を明示した場合（`occurredAt` の有無に関わらず `recordedAt` へフォールバックする）」の組み合わせだけである。
 
 #### `total` が同点（0を含む）のときの順位（現物で確認済み）
 

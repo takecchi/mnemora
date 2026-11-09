@@ -77,7 +77,7 @@ describe("recall() — timeWeighting は同伴取得の2経路にも渡る（ADR
     await runtime.markContested(ctx, a.id, b.id);
     await stores.vectorStore.upsert(ctx, stores.embeddingProvider.space, a.id, [1, 0]);
 
-    const legacy = await runtime.recall(ctx, { vector: [1, 0] });
+    const legacy = await runtime.recall(ctx, { vector: [1, 0], timeWeighting: "legacy" });
     const aware = await runtime.recall(ctx, {
       vector: [1, 0],
       timeWeighting: "eventAwareFreshness",
@@ -105,7 +105,7 @@ describe("recall() — timeWeighting は同伴取得の2経路にも渡る（ADR
     await runtime.markContestedGroup!(ctx, [a.id, b.id, c.id]);
     await stores.vectorStore.upsert(ctx, stores.embeddingProvider.space, a.id, [1, 0]);
 
-    const legacy = await runtime.recall(ctx, { vector: [1, 0] });
+    const legacy = await runtime.recall(ctx, { vector: [1, 0], timeWeighting: "legacy" });
     const aware = await runtime.recall(ctx, {
       vector: [1, 0],
       timeWeighting: "eventAwareFreshness",
@@ -142,7 +142,7 @@ describe("recall() — timeWeighting は連想枠（段3.5）の順位キーに�
     await stores.vectorStore.upsert(ctx, stores.embeddingProvider.space, associated.id, [0, 1]);
 
     const base = { vector: [1, 0], association: { maxCount: 5, anchorCount: 1 } };
-    const legacy = await runtime.recall(ctx, base);
+    const legacy = await runtime.recall(ctx, { ...base, timeWeighting: "legacy" });
     const aware = await runtime.recall(ctx, { ...base, timeWeighting: "eventAwareFreshness" });
 
     const legacyEntry = legacy.memories.find((m) => m.memoryId === associated.id);

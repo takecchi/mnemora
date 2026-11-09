@@ -69,7 +69,7 @@ export interface ScoringInput {
   /**
    * **段2の時間項の方針**（[ADR 0300](../../../../docs/decisions/0300-time-weighting-policy-opt-in.md)）。
    *
-   * **省略時は {@link DEFAULT_TIME_WEIGHTING_POLICY}（`"legacy"`）。**
+   * **省略時は {@link DEFAULT_TIME_WEIGHTING_POLICY}（`"eventAwareFreshness"`）。**
    * `"legacy"` と `"eventAwareFreshness"` の違いは `freshness` の計算にのみ現れる（{@link TimeWeightingPolicy}）。
    * **この方針が動かすのは `freshness` だけ**で、忘却ゲート（`decay_floor_at`/`decay_floor_seq`）・`validAt`
    * ゲートはこの欄を一切参照しない。
@@ -101,10 +101,12 @@ export const TIME_WEIGHTING_POLICIES = ["legacy", "eventAwareFreshness"] as cons
 export type TimeWeightingPolicy = (typeof TIME_WEIGHTING_POLICIES)[number];
 
 /**
- * `ScoringInput.timeWeighting` の既定値。**`"legacy"`**。**この定数を書き換える PR は既定の挙動を変える**
- * （ADR 0300 がオーナー判断として開いたまま残している点）。
+ * `ScoringInput.timeWeighting` の既定値。**`"eventAwareFreshness"`**（[ADR 0700](../../../../docs/decisions/0700-default-time-weighting-event-aware-freshness.md)。
+ * ADR 0300 §7 がオーナー判断として開いていた点を、オーナーが「新方針にする」と決めた）。**この定数を書き換える PR は既定の挙動を変える。**
+ * `"legacy"` に戻すと、`occurredAt` を持たない恒常的な事実が `recordedAt` の古さで沈み、半年の時間軸では1〜2か月で
+ * 既定の `recall()` に返らなくなる（ADR 0699 / ADR 0700 の実測）。
  */
-export const DEFAULT_TIME_WEIGHTING_POLICY: TimeWeightingPolicy = "legacy";
+export const DEFAULT_TIME_WEIGHTING_POLICY: TimeWeightingPolicy = "eventAwareFreshness";
 
 /**
  * `freshness` の上限（[ADR 0036](../../../../docs/decisions/0036-clamp-freshness-at-one.md)）。
@@ -126,8 +128,8 @@ export const MAX_FRESHNESS = 1;
 /**
  * `freshness` の計算そのもの（ADR 0036 の頭打ちと、ADR 0300 の `timeWeighting` 分岐を1箇所に持つ）。
  *
- * - `"legacy"`（既定）: `occurredAt ?? recordedAt` を起点にした減衰係数を `MAX_FRESHNESS` で頭打ちにする。
- * - `"eventAwareFreshness"`: `occurredAt == null` のときだけ `MAX_FRESHNESS` を返す（起点が無いので古びを測る
+ * - `"legacy"`: `occurredAt ?? recordedAt` を起点にした減衰係数を `MAX_FRESHNESS` で頭打ちにする。
+ * - `"eventAwareFreshness"`（既定）: `occurredAt == null` のときだけ `MAX_FRESHNESS` を返す（起点が無いので古びを測る
  *   対象そのものが無い）。`occurredAt` が在るときは `"legacy"` と同じ式を通る。
  *
  * **下限側には clamp が無い（意図的な契約）**: `elapsed / halfLifeHours` が十分大きいと（既定の半減期720時間で

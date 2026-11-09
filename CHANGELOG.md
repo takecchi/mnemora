@@ -112,6 +112,8 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 
 ### Changed（後方互換だが挙動が変わりうるもの）
 
+- **`@mnemora/core` の `recall()`: `timeWeighting` の既定が `"legacy"` から `"eventAwareFreshness"` になった**（[ADR 0700](./docs/decisions/0700-default-time-weighting-event-aware-freshness.md)。[Issue #2106](https://github.com/takecchi/mnemora/issues/2106)。ADR 0300 §7 の**オーナー判断**）。
+  `occurredAt` を持たない記憶の `freshness` が 1 に固定され、使われ続けている恒常的な事実が `recordedAt` の古さで沈まなくなる。従来どおりにするには `timeWeighting: "legacy"` を渡す。型・シグネチャは変わらない。誰が影響を受けるかは [docs/migration-v1.md](./docs/migration-v1.md) の「🟡 v1.3.0 → 次の版」。
 - **`@mnemora/testkit` の `InMemoryMemoryStore.supersedeWithNewMemories` が、CAS に弾かれた対象のイベントを確かめなくなった**（[ADR 0689](./docs/decisions/0689-recheck-0928-followups-cas-skipped-event-and-fake-provenance.md)。[Issue #1827](https://github.com/takecchi/mnemora/issues/1827)。クローンの判断で、オーナーの判断ではない）。
   以前は、CAS に弾かれる対象に書けないイベント（`kind` が列挙に無い・`at` が Invalid Date・`actor` に NUL・`meta` に BigInt・`sizeBeforeBytes` が整数でない）を渡すと例外になった。いまは `conflicted` に積んで返す（`MemoryStore.supersedeWithNewMemories` の TSDoc の約束。`@mnemora/postgres` は元からこの形）。CAS を通る対象は、いままでどおり状態を書き換える前に投げる。**投げる入力が減る向きだけの変更で、型・シグネチャは変わらない。**
 - **`@mnemora/testkit` の `SeededEmbeddingProvider.usage.real` が、委譲先の `embed` が失敗した呼び出しでも、渡した件数を数えるようになった**（[Issue #1999](https://github.com/takecchi/mnemora/issues/1999)。クローンの判断で、オーナーの判断ではない）。

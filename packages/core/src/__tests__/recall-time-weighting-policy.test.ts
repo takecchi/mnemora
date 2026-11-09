@@ -87,8 +87,8 @@ async function createEmbeddedMemory(
   return memory;
 }
 
-describe("recall() — RecallQuery.timeWeighting 省略時は legacy と1バイトも変わらない（既定不変の歯）", () => {
-  it("恒常的な好み（occurredAt無し・古いrecordedAt・最近reinforce相当）が、省略時は below_threshold に落ちる", async () => {
+describe("recall() — RecallQuery.timeWeighting 省略時は 'eventAwareFreshness'、'legacy' は明示したときだけ（既定の歯）", () => {
+  it("恒常的な好み（occurredAt無し・古いrecordedAt・最近reinforce相当）が、省略時は返り、'legacy' を明示すると below_threshold に落ちる", async () => {
     const { runtime, stores } = buildRuntime();
     const durable = await createEmbeddedMemory(stores, [1, 0], {
       digest: "durable-preference",
@@ -98,10 +98,16 @@ describe("recall() — RecallQuery.timeWeighting 省略時は legacy と1バイ�
       decayFloorAt: new Date(NOW.getTime() + 1_000 * DAY_MS), // 忘却ゲートには掛からない
     });
 
-    const result = await runtime.recall(ctx, { vector: [1, 0], limit: 10 });
+    const omitted = await runtime.recall(ctx, { vector: [1, 0], limit: 10 });
+    const legacy = await runtime.recall(ctx, {
+      vector: [1, 0],
+      limit: 10,
+      timeWeighting: "legacy",
+    });
 
-    expect(result.memories.map((m) => m.memoryId)).not.toContain(durable.id);
-    expect(result.omitted).toContainEqual(expect.objectContaining({ kind: "below_threshold" }));
+    expect(omitted.memories.map((m) => m.memoryId)).toContain(durable.id);
+    expect(legacy.memories.map((m) => m.memoryId)).not.toContain(durable.id);
+    expect(legacy.omitted).toContainEqual(expect.objectContaining({ kind: "below_threshold" }));
   });
 });
 
@@ -137,7 +143,11 @@ describe("recall() — RecallQuery.timeWeighting: 'eventAwareFreshness' を渡�
       decayFloorAt: new Date(NOW.getTime() + 1_000 * DAY_MS),
     });
 
-    const legacyResult = await runtime.recall(ctx, { vector: [1, 0], limit: 10 });
+    const legacyResult = await runtime.recall(ctx, {
+      vector: [1, 0],
+      limit: 10,
+      timeWeighting: "legacy",
+    });
     const newPolicyResult = await runtime.recall(ctx, {
       vector: [1, 0],
       limit: 10,
@@ -207,7 +217,11 @@ describe("recall() — 活動時計テナント（decayClock: 'activity'）で�
       decayFloorAt: new Date(NOW.getTime() + 1_000 * DAY_MS),
     });
 
-    const legacyResult = await runtime.recall(ctx, { vector: [1, 0], limit: 10 });
+    const legacyResult = await runtime.recall(ctx, {
+      vector: [1, 0],
+      limit: 10,
+      timeWeighting: "legacy",
+    });
     const newPolicyResult = await runtime.recall(ctx, {
       vector: [1, 0],
       limit: 10,

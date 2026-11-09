@@ -65,12 +65,10 @@ describe("examples/chat: time-term arm(擬似 provider・本物の Postgres)", (
       expect(absent.outcome).toBe("tied");
       expect(absent.newer).not.toBeNull();
       expect(absent.older).not.toBeNull();
-      expect(Math.abs(absent.newer!.score.freshness - absent.newer!.score.decay)).toBeLessThan(
-        1e-9,
-      );
-      expect(Math.abs(absent.older!.score.freshness - absent.older!.score.decay)).toBeLessThan(
-        1e-9,
-      );
+      // 既定の timeWeighting（eventAwareFreshness、ADR 0700）では、occurredAt が無い記憶の freshness は 1 に固定される。
+      // legacy の既定だった頃は recordedAt へフォールバックして decay と等しくなっていた（ADR 0058 の当時の対照）。
+      expect(absent.newer!.score.freshness).toBe(1);
+      expect(absent.older!.score.freshness).toBe(1);
 
       const halfLife = byId.get("half-life")!;
       expect(halfLife.outcome).toBe("newer-ranked-higher");

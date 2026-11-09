@@ -260,8 +260,8 @@ describe("examples/chat: retrieval-quality の仕組み(擬似 provider・本物
   );
 
   it(
-    "🔴 [ADR 0109] tagMatch/strength はどの probe でも候補間で1通り(=1)、" +
-      "decay===freshness は全行で厳密等価 — この前提が崩れたらこの歯が赤くなる",
+    "🔴 [ADR 0109 / ADR 0700] tagMatch/strength/freshness はどの probe でも候補間で1通り(=1)" +
+      " — この前提が崩れたらこの歯が赤くなる",
     async () => {
       await resetTestDatabase();
       await getTestClient();
@@ -285,9 +285,9 @@ describe("examples/chat: retrieval-quality の仕組み(擬似 provider・本物
         const failureMeaning =
           "この歯が赤いのは欠陥が入ったからではない。ベンチの前提が変わったという" +
           "意味である——具体的には recall() に tags が渡されるようになった／" +
-          "Memory.strength に 1 以外が書かれるようになった／occurredAt か " +
-          "lastReinforcedAt が埋まるようになった(＝ decay と freshness の起点が" +
-          "分かれた)。⟹ 意図した変更なら、この歯を更新したうえで順位を測り直すこと" +
+          "Memory.strength に 1 以外が書かれるようになった／occurredAt が埋まるように" +
+          "なった、または timeWeighting の既定が legacy に戻った(＝ freshness が 1 に" +
+          "固定されなくなった)。⟹ 意図した変更なら、この歯を更新したうえで順位を測り直すこと" +
           "(それがこの歯の目的である。ADR 0109)。⛔ 歯を消すだけにしないこと。";
 
         expect(headline.recalledRows, failureMeaning).toBeGreaterThan(0);
@@ -304,10 +304,17 @@ describe("examples/chat: retrieval-quality の仕組み(擬似 provider・本物
           expect([strength!.distinctCount, strength!.min, strength!.max], failureMeaning).toEqual([
             1, 1, 1,
           ]);
-        }
 
-        expect(headline.decayFreshnessDifferentRows, failureMeaning).toBe(0);
-        expect(headline.decayFreshnessEqualRows, failureMeaning).toBe(headline.recalledRows);
+          // ADR 0109 の時点の前提は「既定（legacy）では decay===freshness が全行で厳密等価（total = similarity × decay²）」だった。
+          // 既定が eventAwareFreshness になり（ADR 0700）、occurredAt を持たない記憶の freshness は 1 に固定される
+          // （total = similarity × decay）。「時間項が順位を動かさない」という前提の形が変わっただけで、歯の目的は同じ。
+          const freshness = probe.termSpreads.find((s) => s.term === "freshness");
+          expect(freshness, failureMeaning).toBeDefined();
+          expect(
+            [freshness!.distinctCount, freshness!.min, freshness!.max],
+            failureMeaning,
+          ).toEqual([1, 1, 1]);
+        }
       } finally {
         await handle.close();
       }
