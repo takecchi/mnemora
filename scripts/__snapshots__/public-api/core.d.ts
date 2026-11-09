@@ -2606,7 +2606,7 @@ export type RecallChannel = (typeof RECALL_CHANNELS)[number];
 export declare const DEFAULT_RECALL_CHANNELS: readonly RecallChannel[];
 export declare const ANN_TRUNCATION_UNDECIDABLE_LEXICAL_ACTIVE: string;
 export declare const LEXICAL_STORE_UNAVAILABLE_ERROR_PREFIX = "recall: channels included 'lexical' but no LexicalStore is wired: ";
-export declare const DEFAULT_INCLUDE_FULLY_DECAYED = false;
+export declare const DEFAULT_INCLUDE_FULLY_DECAYED = true;
 export declare const DEFAULT_SCORE_THRESHOLD = 0.1;
 export interface RecallAssociationQuery {
     maxCount: number;

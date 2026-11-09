@@ -503,10 +503,10 @@ const EXPECTED: Result = {
     ],
     [
       "alice(subject)",
-      ["mA"],
-      '[["filtered","decayed","within_scope",1],["ann_unreached",null,null,null]]',
+      ["mA", "qA"],
+      "[]",
       2,
-      ["qA"],
+      [],
       {
         T: 5,
         hasS: true,
@@ -533,10 +533,10 @@ const EXPECTED: Result = {
     ],
     [
       "tenant",
-      ["m0", "mA", "mB", "q0"],
-      '[["filtered","decayed","within_scope",1],["ann_unreached",null,null,null]]',
+      ["m0", "mA", "mB", "q0", "qA"],
+      "[]",
       5,
-      ["qA"],
+      [],
       {
         T: 6,
         hasS: true,
@@ -548,10 +548,10 @@ const EXPECTED: Result = {
     ],
     [
       "alice(subject)",
-      ["mA"],
-      '[["filtered","decayed","within_scope",1],["ann_unreached",null,null,null]]',
+      ["mA", "qA"],
+      "[]",
       2,
-      ["qA"],
+      [],
       {
         T: 6,
         hasS: true,
@@ -578,10 +578,10 @@ const EXPECTED: Result = {
     ],
     [
       "tenant",
-      ["m0", "mA", "mB", "q0"],
-      '[["filtered","decayed","within_scope",1],["ann_unreached",null,null,null]]',
+      ["m0", "mA", "mB", "q0", "qA"],
+      "[]",
       5,
-      ["qA"],
+      [],
       {
         T: 7,
         hasS: true,
@@ -593,10 +593,10 @@ const EXPECTED: Result = {
     ],
     [
       "alice(subject)",
-      [],
-      '[["filtered","decayed","within_scope",2],["ann_unreached",null,null,null]]',
-      2,
       ["mA", "qA"],
+      "[]",
+      2,
+      [],
       {
         T: 7,
         hasS: true,
@@ -623,10 +623,10 @@ const EXPECTED: Result = {
     ],
     [
       "tenant",
-      ["m0", "mB"],
-      '[["filtered","decayed","within_scope",3],["ann_unreached",null,null,null]]',
+      ["m0", "mA", "mB", "q0", "qA"],
+      "[]",
       5,
-      ["mA", "q0", "qA"],
+      [],
       {
         T: 8,
         hasS: true,
@@ -638,10 +638,10 @@ const EXPECTED: Result = {
     ],
     [
       "alice(subject)",
-      [],
-      '[["filtered","decayed","within_scope",2],["ann_unreached",null,null,null]]',
-      2,
       ["mA", "qA"],
+      "[]",
+      2,
+      [],
       {
         T: 8,
         hasS: true,
@@ -653,10 +653,10 @@ const EXPECTED: Result = {
     ],
     [
       "bob(subject)",
-      [],
-      '[["filtered","decayed","within_scope",1],["ann_unreached",null,null,null]]',
-      1,
       ["mB"],
+      "[]",
+      1,
+      [],
       {
         T: 8,
         hasS: true,
@@ -759,7 +759,7 @@ const EXPECTED: Result = {
       reflected: ["active", 17, 22, 1],
     },
   ],
-  "6b recall after the clock has run far (the gate drops what sank)": [],
+  "6b recall after the clock has run far (the gate drops what sank)": ["m0", "mA"],
   "6 sweepArchive clock wall, now=today: still nothing although the activity axis sank": [
     [],
     false,
@@ -793,9 +793,9 @@ const EXPECTED: Result = {
     [["act0", "wall0"], 3],
     [["act0", "wall0"], 4],
     [["act0", "wall0"], 5],
-    [["wall0"], 6],
-    [["wall0"], 7],
-    [["wall0"], 8],
+    [["act0", "wall0"], 6],
+    [["act0", "wall0"], 7],
+    [["act0", "wall0"], 8],
   ],
   "7b switch: sweep (the wall-era memory has no floor and stays)": [
     ["act0"],

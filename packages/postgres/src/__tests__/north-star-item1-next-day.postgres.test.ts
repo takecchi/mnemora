@@ -92,6 +92,7 @@ function manualClock() {
 async function observeThenRecallAfter(
   makeRuntime: (clock: Clock) => Promise<Runtime>,
   elapsedMs: number,
+  queryExtras: { includeFullyDecayed?: boolean } = {},
 ) {
   const { clock, advance } = manualClock();
   const runtime = await makeRuntime(clock);
@@ -99,7 +100,7 @@ async function observeThenRecallAfter(
   expect(observed.memoryIds).toHaveLength(1);
   await runtime.tick(ctx, { kinds: ["embed"], leaseMs: 60_000 });
   advance(elapsedMs);
-  const result = await runtime.recall(ctx, { text: "飼っている猫" });
+  const result = await runtime.recall(ctx, { text: "飼っている猫", ...queryExtras });
   return { memoryId: observed.memoryIds[0]!, result };
 }
 
@@ -117,12 +118,19 @@ for (const [name, makeRuntime] of KITS) {
       );
     });
 
-    it("陽性対照: 同じ時計を1年進めると、その記憶は返らず filtered(decayed) に数えられる（時計が減衰ゲートまで届いている）", async () => {
-      const { memoryId, result } = await observeThenRecallAfter(makeRuntime, 365 * DAY_MS);
+    it("陽性対照: 同じ時計を1年進めると、忘却ゲートを掛けた recall ではその記憶は返らず filtered(decayed) に数えられる（時計が減衰ゲートまで届いている）", async () => {
+      const { memoryId, result } = await observeThenRecallAfter(makeRuntime, 365 * DAY_MS, {
+        includeFullyDecayed: false,
+      });
       expect(result.memories.map((m) => m.memoryId)).not.toContain(memoryId);
       expect(result.omitted).toContainEqual(
         expect.objectContaining({ kind: "filtered", condition: "decayed", count: 1 }),
       );
+    });
+
+    it("既定（ゲートを掛けない、ADR 0707）では、1年後でも同じ言葉で問えばその記憶が返る（消えずに薄れる）", async () => {
+      const { memoryId, result } = await observeThenRecallAfter(makeRuntime, 365 * DAY_MS);
+      expect(result.memories.map((m) => m.memoryId)).toContain(memoryId);
     });
   });
 }

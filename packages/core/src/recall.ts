@@ -1373,15 +1373,18 @@ export interface RecallQuery {
    */
   scopeAggregate?: "exact" | "skip" | undefined;
   /**
-   * 忘却ゲート（decay floor gate）の明示的な opt-out（[ADR 0153](../../../docs/decisions/0153-recall-decay-floor-gate.md)）。
+   * 忘却ゲート（decay floor gate）を外すかどうか（[ADR 0153](../../../docs/decisions/0153-recall-decay-floor-gate.md)、
+   * [ADR 0707](../../../docs/decisions/0707-recall-decay-gate-default-off.md)）。
    *
-   * 既定（省略 = `false`）では、`decayFloorAt` を過ぎた（完全に減衰しきった）Memory は recall の候補から外れる。
+   * **省略時は `DEFAULT_INCLUDE_FULLY_DECAYED`（`true`。ゲートを掛けない）。**時間は順位を下げることにだけ使う（`timeWeightFloor`）。
+   * 以前（ADR 0153〜0706）は省略時 `false` で、ゲートが既定で効いていた。
+   *
+   * `false` を渡すと、`decayFloorAt` を過ぎた（完全に減衰しきった）Memory は recall の候補から外れる。
    * ANN チャンネル（段1）は `VectorFilter.decayFloorAtAfter` に「いま」を押し下げ、語彙チャンネルは `LexicalFilter` を増やさず
    * core の後置フィルタで同じ述語（`memory.decayFloorAt > now`）を適用する（ADR 0153「決めたこと」3）。
-   * 「使われない記憶が、静かに遠ざかる」を、掃引（`status='archived'`）を呼んでいない期間にも効かせるため。
+   * このときの `explain.stages` の `candidate_generation` の `detail.decayGate` は、ANN が `"pushed_down"`、語彙が `"post_filtered"`。
    *
-   * `true` を渡すと、減衰しきった Memory も候補に残り続ける。このときの `explain.stages` の `candidate_generation` の
-   * `detail.decayGate` は `"disabled"` になる（既定は ANN が `"pushed_down"`、語彙が `"post_filtered"`）。
+   * `true`（既定）では、減衰しきった Memory も候補に残る。`detail.decayGate` は `"disabled"` になる。
    */
   includeFullyDecayed?: boolean | undefined;
   /**
@@ -1511,7 +1514,7 @@ export const LEXICAL_STORE_UNAVAILABLE_ERROR_PREFIX =
  * 忘却ゲート（減衰しきった記憶を時間だけで候補から外す）を既定では掛けない。時間は順位を下げることにだけ使う
  * （`RecallQuery.timeWeightFloor`）。以前は `false`（ゲートが既定で効く。ADR 0153）。
  */
-export const DEFAULT_INCLUDE_FULLY_DECAYED = false;
+export const DEFAULT_INCLUDE_FULLY_DECAYED = true;
 
 /** RecallQuery.scoreThreshold の既定値。強い根拠のない裁量値。 */
 export const DEFAULT_SCORE_THRESHOLD = 0.1;

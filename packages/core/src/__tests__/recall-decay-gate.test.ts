@@ -100,11 +100,11 @@ async function createEmbeddedMemory(
 }
 
 describe("recall() — 段1の filter に decayFloorAtAfter が載ること（配線の歯、ADR 0153）", () => {
-  it("既定（includeFullyDecayed 未指定）では VectorStore.search の opts.filter.decayFloorAtAfter に「いま」が渡る", async () => {
+  it("includeFullyDecayed: false では VectorStore.search の opts.filter.decayFloorAtAfter に「いま」が渡る", async () => {
     const { runtime, stores } = buildRuntime();
     const capturedFilters = captureFilters(stores);
 
-    await runtime.recall(ctx, { vector: [1, 0] });
+    await runtime.recall(ctx, { includeFullyDecayed: false, vector: [1, 0] });
 
     expect(capturedFilters).toHaveLength(1);
     expect(capturedFilters[0]?.decayFloorAtAfter).toEqual(NOW);
@@ -121,8 +121,39 @@ describe("recall() — 段1の filter に decayFloorAtAfter が載ること（�
   });
 });
 
+describe("recall() — 既定（includeFullyDecayed 未指定）では忘却ゲートを掛けない（ADR 0707）", () => {
+  it("減衰しきった記憶も既定で返り、filtered(decayed) は積まれず、explain の decayGate は disabled", async () => {
+    const { runtime, stores } = buildRuntime();
+    const decayed = await createEmbeddedMemory(stores, [1, 0], {
+      digest: "decayed",
+      decayFloorAt: new Date(NOW.getTime() - 1_000),
+    });
+
+    const result = await runtime.recall(ctx, { vector: [1, 0], limit: 10 });
+
+    expect(result.memories.map((m) => m.memoryId)).toContain(decayed.id);
+    expect(result.omitted.some((o) => o.kind === "filtered" && o.condition === "decayed")).toBe(
+      false,
+    );
+    const annTrace = result.explain.stages.find(
+      (s) => s.stage === "candidate_generation" && s.detail?.["channel"] === "ann",
+    );
+    expect(annTrace?.detail?.["decayGate"]).toBe("disabled");
+  });
+
+  it("既定では VectorStore.search の opts.filter.decayFloorAtAfter は undefined のまま渡る", async () => {
+    const { runtime, stores } = buildRuntime();
+    const capturedFilters = captureFilters(stores);
+    await createEmbeddedMemory(stores, [1, 0], { digest: "m" });
+
+    await runtime.recall(ctx, { vector: [1, 0], limit: 10 });
+
+    expect(capturedFilters[0]?.decayFloorAtAfter).toBeUndefined();
+  });
+});
+
 describe("recall() — 忘却ゲートが実際に候補を落とす（ANN チャンネル、ADR 0153）", () => {
-  it("decayFloorAt が過去（減衰しきった）記憶は既定では返らず、omitted にも explain にも黙って消えない", async () => {
+  it("decayFloorAt が過去（減衰しきった）記憶は includeFullyDecayed: false では返らず、omitted にも explain にも黙って消えない", async () => {
     const { runtime, stores } = buildRuntime();
     const decayed = await createEmbeddedMemory(stores, [1, 0], {
       digest: "decayed",
@@ -133,7 +164,11 @@ describe("recall() — 忘却ゲートが実際に候補を落とす（ANN チ�
       decayFloorAt: new Date(NOW.getTime() + 1_000 * 60 * 60 * 24 * 365),
     });
 
-    const result = await runtime.recall(ctx, { vector: [1, 0], limit: 10 });
+    const result = await runtime.recall(ctx, {
+      includeFullyDecayed: false,
+      vector: [1, 0],
+      limit: 10,
+    });
 
     const ids = result.memories.map((m) => m.memoryId);
     expect(ids).toContain(alive.id);
@@ -180,7 +215,11 @@ describe("recall() — 忘却ゲートが実際に候補を落とす（ANN チ�
       decayFloorAt: NOW,
     });
 
-    const result = await runtime.recall(ctx, { vector: [1, 0], limit: 10 });
+    const result = await runtime.recall(ctx, {
+      includeFullyDecayed: false,
+      vector: [1, 0],
+      limit: 10,
+    });
 
     expect(result.memories.map((m) => m.memoryId)).not.toContain(onBoundary.id);
   });
@@ -189,7 +228,7 @@ describe("recall() — 忘却ゲートが実際に候補を落とす（ANN チ�
 // `LexicalFilter` は `decayFloorAtAfter` を持たないので、語彙チャンネルでは core の後置フィルタだけがゲートを担う。
 
 describe("recall() — 忘却ゲートが語彙チャンネルにも同じ述語で効く（後置フィルタ、ADR 0153）", () => {
-  it("語彙チャンネルだけを使っても、減衰しきった記憶は既定では返らず、omitted に filtered(decayed) が実測件数で出る", async () => {
+  it("語彙チャンネルだけを使っても、減衰しきった記憶は includeFullyDecayed: false では返らず、omitted に filtered(decayed) が実測件数で出る", async () => {
     const { runtime, stores } = buildRuntime();
     await stores.memoryStore.createMemory(
       ctx,
@@ -209,6 +248,7 @@ describe("recall() — 忘却ゲートが語彙チャンネルにも同じ述語
     );
 
     const result = await runtime.recall(ctx, {
+      includeFullyDecayed: false,
       text: "gemstone",
       channels: ["lexical"],
       limit: 10,
@@ -314,7 +354,11 @@ describe("recall() — 押し下げと後置フィルタは同じ述語である
       decayFloorAt: new Date(NOW.getTime() - 1_000),
     });
 
-    const result = await runtime.recall(ctx, { vector: [1, 0], limit: 10 });
+    const result = await runtime.recall(ctx, {
+      includeFullyDecayed: false,
+      vector: [1, 0],
+      limit: 10,
+    });
 
     expect(result.memories.map((m) => m.memoryId)).not.toContain(decayed.id);
     expect(result.omitted).toContainEqual({
@@ -337,7 +381,11 @@ describe("recall() — 押し下げと後置フィルタは同じ述語である
       decayFloorAt: new Date(NOW.getTime() + 1_000 * 60 * 60 * 24 * 365),
     });
 
-    const result = await runtime.recall(ctx, { vector: [1, 0], limit: 10 });
+    const result = await runtime.recall(ctx, {
+      includeFullyDecayed: false,
+      vector: [1, 0],
+      limit: 10,
+    });
 
     expect(result.omitted).toContainEqual({
       kind: "filtered",
@@ -380,7 +428,7 @@ describe("recall() — 押し下げと後置フィルタは同じ述語である
 
     const scoped = await runtime.recall(
       { tenantId: "tenant-1", subjectId: "alice" },
-      { vector: [1, 0], limit: 10 },
+      { includeFullyDecayed: false, vector: [1, 0], limit: 10 },
     );
     expect(scoped.omitted).toContainEqual({
       kind: "filtered",
@@ -390,7 +438,11 @@ describe("recall() — 押し下げと後置フィルタは同じ述語である
       countKind: "exact",
     });
 
-    const wholeTenant = await runtime.recall(ctx, { vector: [1, 0], limit: 10 });
+    const wholeTenant = await runtime.recall(ctx, {
+      includeFullyDecayed: false,
+      vector: [1, 0],
+      limit: 10,
+    });
     expect(wholeTenant.omitted).toContainEqual({
       kind: "filtered",
       condition: "decayed",
@@ -416,7 +468,11 @@ describe("recall() — 忘却ゲートの時計選択（ADR 0165 決めたこと
       decayFloorSeq: 0, // 活動時計では既に沈んでいる値（nowSeq=0 ちょうど。負数は Postgres の CHECK が拒むので使わない。ADR 0493）
     });
 
-    const result = await runtime.recall(ctx, { vector: [1, 0], limit: 10 });
+    const result = await runtime.recall(ctx, {
+      includeFullyDecayed: false,
+      vector: [1, 0],
+      limit: 10,
+    });
 
     expect(result.memories.map((m) => m.memoryId)).toContain(alive.id);
   });
@@ -431,7 +487,11 @@ describe("recall() — 忘却ゲートの時計選択（ADR 0165 決めたこと
       decayFloorSeq: 0, // nowSeq(=0)ちょうどで狭義の`>`が効かず既に沈んでいる
     });
 
-    const result = await runtime.recall(ctx, { vector: [1, 0], limit: 10 });
+    const result = await runtime.recall(ctx, {
+      includeFullyDecayed: false,
+      vector: [1, 0],
+      limit: 10,
+    });
 
     expect(result.memories.map((m) => m.memoryId)).not.toContain(dead.id);
     expect(result.omitted).toContainEqual({
@@ -453,7 +513,11 @@ describe("recall() — 忘却ゲートの時計選択（ADR 0165 決めたこと
       decayFloorSeq: 100,
     });
 
-    const result = await runtime.recall(ctx, { vector: [1, 0], limit: 10 });
+    const result = await runtime.recall(ctx, {
+      includeFullyDecayed: false,
+      vector: [1, 0],
+      limit: 10,
+    });
 
     expect(result.memories.map((m) => m.memoryId)).toContain(alive.id);
     expect(result.omitted).not.toContainEqual(
@@ -471,7 +535,11 @@ describe("recall() — 忘却ゲートの時計選択（ADR 0165 決めたこと
       decayFloorSeq: null,
     });
 
-    const result = await runtime.recall(ctx, { vector: [1, 0], limit: 10 });
+    const result = await runtime.recall(ctx, {
+      includeFullyDecayed: false,
+      vector: [1, 0],
+      limit: 10,
+    });
 
     expect(result.memories.map((m) => m.memoryId)).toContain(alive.id);
   });
@@ -486,7 +554,11 @@ describe("recall() — 忘却ゲートの時計選択（ADR 0165 決めたこと
       decayFloorSeq: 0, // 活動時計は沈んでいる(nowSeq=0で狭義の`>`が効かない)
     });
 
-    const result = await runtime.recall(ctx, { vector: [1, 0], limit: 10 });
+    const result = await runtime.recall(ctx, {
+      includeFullyDecayed: false,
+      vector: [1, 0],
+      limit: 10,
+    });
 
     expect(result.memories.map((m) => m.memoryId)).toContain(alive.id);
     // 'either' は OR（最も緩い）: 壁時計が生きているので落ちていない。集約側で AND/OR を取り違えると 1 件を名乗って赤くなる。
@@ -505,7 +577,11 @@ describe("recall() — 忘却ゲートの時計選択（ADR 0165 決めたこと
       decayFloorSeq: 100, // 活動時計は生きている
     });
 
-    const result = await runtime.recall(ctx, { vector: [1, 0], limit: 10 });
+    const result = await runtime.recall(ctx, {
+      includeFullyDecayed: false,
+      vector: [1, 0],
+      limit: 10,
+    });
 
     expect(result.memories.map((m) => m.memoryId)).toContain(alive.id);
     expect(result.omitted).not.toContainEqual(
@@ -523,7 +599,11 @@ describe("recall() — 忘却ゲートの時計選択（ADR 0165 決めたこと
       decayFloorSeq: 0,
     });
 
-    const result = await runtime.recall(ctx, { vector: [1, 0], limit: 10 });
+    const result = await runtime.recall(ctx, {
+      includeFullyDecayed: false,
+      vector: [1, 0],
+      limit: 10,
+    });
 
     expect(result.memories.map((m) => m.memoryId)).not.toContain(dead.id);
     expect(result.omitted).toContainEqual({
@@ -540,7 +620,11 @@ describe("recall() — 忘却ゲートの時計選択（ADR 0165 決めたこと
     await stores.tenantSettingsStore.setDecayClock(ctx, "activity");
     await createEmbeddedMemory(stores, [1, 0], { digest: "m", decayFloorAt: FAR_FUTURE });
 
-    const result = await runtime.recall(ctx, { vector: [1, 0], limit: 10 });
+    const result = await runtime.recall(ctx, {
+      includeFullyDecayed: false,
+      vector: [1, 0],
+      limit: 10,
+    });
 
     const annTrace = result.explain.stages.find(
       (s) => s.stage === "candidate_generation" && s.detail?.["channel"] === "ann",
@@ -575,6 +659,7 @@ describe("recall() — 語彙チャンネルの後置フィルタにも活動時
     );
 
     const result = await runtime.recall(ctx, {
+      includeFullyDecayed: false,
       text: "gemstone",
       channels: ["lexical"],
       limit: 10,
@@ -644,7 +729,12 @@ describe("recall() — ⭐ 'activity' 単独で、素通りされ続けた記憶
         decayFloorSeq: 3,
       }),
     );
-    const query: RecallQuery = { text: "gemstone", channels: ["lexical"], limit: 10 };
+    const query: RecallQuery = {
+      text: "gemstone",
+      channels: ["lexical"],
+      limit: 10,
+      includeFullyDecayed: false,
+    };
 
     const first = await runtime.recall(ctx, query);
     expect(first.memories.map((m) => m.memoryId)).toContain(target.id);
@@ -674,7 +764,12 @@ describe("recall() — ⭐ 'activity' 単独で、素通りされ続けた記憶
         decayFloorSeq: 3,
       }),
     );
-    const query: RecallQuery = { text: "gemstone", channels: ["lexical"], limit: 10 };
+    const query: RecallQuery = {
+      text: "gemstone",
+      channels: ["lexical"],
+      limit: 10,
+      includeFullyDecayed: false,
+    };
 
     for (let i = 0; i < 4; i += 1) {
       const result = await runtime.recall(ctx, query);

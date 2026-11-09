@@ -123,7 +123,12 @@ describe("recall() — 連想用 search() の filter が段1の ANN と同じゲ
     await seedAnchorAndAssociated(stores, {});
     const filters = captureFilters(stores);
 
-    await runtime.recall(ctx, { vector: [1, 0], limit: 10, association: ASSOCIATION });
+    await runtime.recall(ctx, {
+      includeFullyDecayed: false,
+      vector: [1, 0],
+      limit: 10,
+      association: ASSOCIATION,
+    });
 
     expect(filters).toHaveLength(2);
     const [stage1, association] = filters;
@@ -165,6 +170,7 @@ describe("recall() — 連想枠に忘却ゲートが掛かる（Issue #347）",
     });
 
     const result = await runtime.recall(ctx, {
+      includeFullyDecayed: false,
       vector: [1, 0],
       limit: 10,
       association: ASSOCIATION,
@@ -181,6 +187,7 @@ describe("recall() — 連想枠に忘却ゲートが掛かる（Issue #347）",
     });
 
     const result = await runtime.recall(ctx, {
+      includeFullyDecayed: false,
       vector: [1, 0],
       limit: 10,
       association: ASSOCIATION,
@@ -225,6 +232,7 @@ describe("recall() — 連想枠の忘却ゲートが活動時計の軸も見る
     );
 
     const result = await runtime.recall(ctx, {
+      includeFullyDecayed: false,
       vector: [1, 0],
       limit: 10,
       association: ASSOCIATION,
@@ -246,6 +254,7 @@ describe("recall() — 連想枠の忘却ゲートが活動時計の軸も見る
     );
 
     const result = await runtime.recall(ctx, {
+      includeFullyDecayed: false,
       vector: [1, 0],
       limit: 10,
       association: ASSOCIATION,
@@ -270,6 +279,7 @@ describe("recall() — 連想枠の忘却ゲートが活動時計の軸も見る
     );
 
     const result = await runtime.recall(ctx, {
+      includeFullyDecayed: false,
       vector: [1, 0],
       limit: 10,
       association: ASSOCIATION,
@@ -289,6 +299,7 @@ describe("recall() — 連想枠に validAt ゲートが掛かる（Issue #347�
     });
 
     const result = await runtime.recall(ctx, {
+      includeFullyDecayed: false,
       vector: [1, 0],
       limit: 10,
       association: ASSOCIATION,
@@ -307,6 +318,7 @@ describe("recall() — 連想枠に validAt ゲートが掛かる（Issue #347�
     });
 
     const result = await runtime.recall(ctx, {
+      includeFullyDecayed: false,
       vector: [1, 0],
       limit: 10,
       association: ASSOCIATION,
@@ -325,6 +337,7 @@ describe("recall() — 連想枠に validAt ゲートが掛かる（Issue #347�
     });
 
     const result = await runtime.recall(ctx, {
+      includeFullyDecayed: false,
       vector: [1, 0],
       limit: 10,
       association: ASSOCIATION,
@@ -342,6 +355,7 @@ describe("recall() — 連想枠に validAt ゲートが掛かる（Issue #347�
     const { associated } = await seedAnchorAndAssociated(stores, { validUntil: expiredAt });
 
     const result = await runtime.recall(ctx, {
+      includeFullyDecayed: false,
       vector: [1, 0],
       limit: 10,
       association: ASSOCIATION,
@@ -360,6 +374,7 @@ describe("recall() — 連想枠から superseded は引き続き返らない（
     const { associated } = await seedAnchorAndAssociated(stores, { status: "superseded" });
 
     const result = await runtime.recall(ctx, {
+      includeFullyDecayed: false,
       vector: [1, 0],
       limit: 10,
       association: ASSOCIATION,
@@ -460,6 +475,7 @@ describe("recall() — 連想用 adapter がゲートを無視しても、後置
     });
 
     const result = await runtime.recall(ctx, {
+      includeFullyDecayed: false,
       vector: [1, 0],
       limit: 10,
       association: ASSOCIATION,
@@ -494,6 +510,7 @@ describe("recall() — 連想用 adapter がゲートを無視しても、後置
     );
 
     const result = await runtime.recall(ctx, {
+      includeFullyDecayed: false,
       vector: [1, 0],
       limit: 10,
       association: ASSOCIATION,
@@ -511,6 +528,7 @@ describe("recall() — 連想用 adapter がゲートを無視しても、後置
     });
 
     const result = await runtime.recall(ctx, {
+      includeFullyDecayed: false,
       vector: [1, 0],
       limit: 10,
       association: ASSOCIATION,
@@ -530,6 +548,7 @@ describe("recall() — 連想枠の maxCount 切り捨てが omitted.over_limit 
     }
 
     const result = await runtime.recall(ctx, {
+      includeFullyDecayed: false,
       vector: [1, 0],
       limit: 10,
       association: ASSOCIATION,
@@ -550,6 +569,7 @@ describe("recall() — 連想枠の maxCount 切り捨てが omitted.over_limit 
     await seedAnchorAndAssociated(stores, {}); // 連想候補は1件だけ、maxCount(5)未満
 
     const result = await runtime.recall(ctx, {
+      includeFullyDecayed: false,
       vector: [1, 0],
       limit: 10,
       association: ASSOCIATION,

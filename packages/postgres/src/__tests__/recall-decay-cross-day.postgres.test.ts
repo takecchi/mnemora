@@ -81,7 +81,7 @@ describe("runtime.recall() が decay を跨いで実際にどう振る舞うか 
 
     clock.set(new Date(t0.getTime() + oneDayMs));
 
-    const result = await runtime.recall(ctx, { text, limit: 10 });
+    const result = await runtime.recall(ctx, { includeFullyDecayed: false, text, limit: 10 });
     const ids = result.memories.map((m) => m.memoryId);
     expect(ids).toContain(memoryId);
 
@@ -116,7 +116,7 @@ describe("runtime.recall() が decay を跨いで実際にどう振る舞うか 
     const afterFloor = new Date(floorAt.getTime() + 24 * 60 * 60 * 1000);
     clock.set(afterFloor);
 
-    const gated = await runtime.recall(ctx, { text, limit: 10 });
+    const gated = await runtime.recall(ctx, { includeFullyDecayed: false, text, limit: 10 });
     const gatedIds = gated.memories.map((m) => m.memoryId);
     expect(gatedIds).not.toContain(memoryId);
 
@@ -162,7 +162,12 @@ describe("runtime.recall() が decay を跨いで実際にどう振る舞うか 
 
     // 対照: `includeFullyDecayed: true` かつ `scoreThreshold: 0` なら戻ってくる。
     // gate 側は `scoreThreshold` を通らない（段1・SQL 側）ので、`scoreThreshold: 0` でも gated 側の結果は変わらないはずで、それも検算する。
-    const gatedZeroThreshold = await runtime.recall(ctx, { text, limit: 10, scoreThreshold: 0 });
+    const gatedZeroThreshold = await runtime.recall(ctx, {
+      includeFullyDecayed: false,
+      text,
+      limit: 10,
+      scoreThreshold: 0,
+    });
     const gatedZeroThresholdIds = gatedZeroThreshold.memories.map((m) => m.memoryId);
     expect(gatedZeroThresholdIds).not.toContain(memoryId);
 
@@ -252,7 +257,11 @@ describe("runtime.recall() が decay を跨いで実際にどう振る舞うか 
       // ⚠ `text` を渡すと埋め込みが要る。ここで見たいのは段5の集約なので、
       //   ベクトルを直接渡して段1を走らせる（上の4件は embeddingStatus: 'skipped' で
       //   ベクトルを持たないため、`memories` には1件も返らない——それでよい）。
-      const result = await runtime.recall(ctx, { vector: [0, 0, 1], limit: 10 });
+      const result = await runtime.recall(ctx, {
+        includeFullyDecayed: false,
+        vector: [0, 0, 1],
+        limit: 10,
+      });
       const omission = result.omitted.find(
         (o) => o.kind === "filtered" && o.condition === "decayed",
       ) as { count: number; countKind: string } | undefined;

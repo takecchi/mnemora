@@ -119,6 +119,8 @@ const ASSOCIATION_QUERY: RecallQuery = {
   vector: QUERY_VECTOR,
   limit: 10,
   association: { maxCount: 5, anchorCount: 1 },
+  // このファイルは忘却ゲートが連想枠にも掛かることの検査なので、ゲートを明示的に掛ける（既定では掛けない。ADR 0707）。
+  includeFullyDecayed: false,
 };
 
 describe("runtime.recall() の連想枠に忘却ゲートが掛かる — 本物の Postgres + pgvector（Issue #347）", () => {

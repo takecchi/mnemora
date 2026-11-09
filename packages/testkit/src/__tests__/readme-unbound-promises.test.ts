@@ -58,13 +58,14 @@ describe("README「@mnemora/testkit/fixtures」: インメモリの store は別
   });
 });
 
-describe("README「テストデータのひな型」: buildNewMemoryFixture の既定値のまま実時計で recall すると0件になる", () => {
+describe("README「テストデータのひな型」: buildNewMemoryFixture の既定値のまま実時計で、忘却ゲートを掛けて recall すると0件になる", () => {
   const ctx: Ctx = { tenantId: "tenant-1" };
   // 実時計の代わりに、既定の減衰の床より後の固定の日付を使う。
   const NOW = new Date("2026-09-28T00:00:00.000Z");
 
   async function recallCount(
     overrides: Parameters<typeof buildNewMemoryFixture>[0],
+    includeFullyDecayed?: boolean,
   ): Promise<number> {
     const memoryStore = new fixtures.InMemoryMemoryStore();
     const vectorStore = new fixtures.InMemoryVectorStore(memoryStore);
@@ -86,7 +87,11 @@ describe("README「テストデータのひな型」: buildNewMemoryFixture の�
     );
     const [vector] = await embeddingProvider.embed(ctx, [memory.content]);
     await vectorStore.upsert(ctx, embeddingProvider.space, memory.id, vector!);
-    const result = await runtime.recall(ctx, { vector: vector!, association: null });
+    const result = await runtime.recall(ctx, {
+      vector: vector!,
+      association: null,
+      ...(includeFullyDecayed !== undefined ? { includeFullyDecayed } : {}),
+    });
     return result.memories.length;
   }
 
@@ -95,8 +100,12 @@ describe("README「テストデータのひな型」: buildNewMemoryFixture の�
     expect(floor?.toISOString().slice(0, 16)).toBe("2026-05-10T15:47");
   });
 
-  it("既定値のままでは0件、recordedAt を明示すれば1件（陽性対照）", async () => {
-    expect(await recallCount({})).toBe(0);
-    expect(await recallCount({ recordedAt: NOW })).toBe(1);
+  it("ゲートを掛けると既定値のままでは0件、recordedAt を明示すれば1件（陽性対照）", async () => {
+    expect(await recallCount({}, false)).toBe(0);
+    expect(await recallCount({ recordedAt: NOW }, false)).toBe(1);
+  });
+
+  it("既定の recall()（ゲートを掛けない、ADR 0707）では、既定値のままでも返る", async () => {
+    expect(await recallCount({})).toBe(1);
   });
 });
