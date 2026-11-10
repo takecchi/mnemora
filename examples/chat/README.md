@@ -1761,7 +1761,7 @@ DATABASE_URL=... MNEMORA_LONG_HORIZON_JSON=<path> pnpm --filter @mnemora/example
 🔴 **測っているのは「gold の記憶が返ったか」（出典への到達）であり、回答の正しさではない**
 （`docs/autonomy.md` §2.2 の2）。⚠ 事実・雑談は合成データで、実運用の会話の分布ではない。
 
-CI の `long-horizon` ジョブ（`ci.yml`）がこれを実行し、表を Job Summary に、JSON を成果物に残す。
+CI の `long-horizon` ジョブ（`ci.yml`）がこれを実行し、表を Job Summary に、JSON を成果物に残す。基準値 `long-horizon-baseline.json` との `outcome` の差も Job Summary に出す（`scripts/long-horizon-summary.mjs`。⛔ 門ではない）。
 **⛔ 門ではない**——事実は種類ごとに数件しかなく、閾値判定に足る母数ではない。
 ⚠ **基準値ファイルはまだ無い**（`validity` と同じ。CI の artifact から後続の PR で採る）。
 
