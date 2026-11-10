@@ -1807,6 +1807,14 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
+      - name: 実測値と基準値の差分を Job Summary に残す（⛔ 門ではない）
+        if: always()
+        run: |
+          node scripts/long-horizon-summary.mjs \
+            --measured "${{ github.workspace }}/long-horizon.json" \
+            --baseline examples/chat/long-horizon-baseline.json \
+            >> "$GITHUB_STEP_SUMMARY"
+
       - name: 実測値そのもの（機械可読）を成果物として残す
         if: always()
         uses: actions/upload-artifact@v6

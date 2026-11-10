@@ -1,0 +1,7239 @@
+{
+  "_readme": [
+    "long-horizon（ADR 0699）の基準値。⛔ これは門ではない。基準値と違っても CI は落ちない（scripts/long-horizon-summary.mjs が Job Summary に差を出すだけ）。",
+    "⚠ 比べるのは probe ごとの outcome（gold が返ったか・返らなかった理由）だけ。順位・スコア・プロンプトの文字数は比べない。",
+    "⚠ 成果物（約500KB）から、比較に要る欄と読むのに要る最小限の欄（arm・checkpointDay・factId・factClass・role・outcome・returnedRank）だけを残した。診断用のスコア・quantities は成果物を見ること。",
+    "⚠ 既定の時間の重みの下限（ADR 0704）と忘却ゲートを掛けない既定（ADR 0707）の後に採った。CI は local 埋め込みで、下限を入れても30日目以降の gold はほぼ返らない（類似度の差が小さいため。ADR 0704「これが覆るとしたら」）。",
+    "⚠ 同じ run の attempt 1 と 2 で、800件中4件の outcome が違った（150〜180日目、件数の上限の境目。総合スコアと診断順位は同じで、同点に近い候補の並びが入れ替わったと見ている）。下の unstableProbes の4件の差は、揺れとして読むこと。",
+    "⚠ 合成データ。標本は事実が種類ごとに数件で、ここから成功率は主張しない。"
+  ],
+  "provenance": {
+    "runId": "42686121067",
+    "attempts": [1, 2],
+    "headSha": "85a186e12d2463810753d457e99275dcf28a7fe6",
+    "measuredAt": "2026-11-09T19:44:22.486Z",
+    "how": "gh run download 42686121067 -n long-horizon（attempt 1 と 2）。attempt 1 の long-horizon.json から probes の欄を絞って使う。",
+    "repeatRuns": "2回（同じ run の attempt 1・2）。outcome は800件中796件が一致した。",
+    "unstableProbes": [
+      "A|150|dormant-left-handed|gold",
+      "A|180|habitual-morning-run|gold",
+      "A|180|dormant-left-handed|gold",
+      "A|180|correction-project|superseded"
+    ]
+  },
+  "schemaVersion": 1,
+  "measuredAt": "2026-11-09T19:44:22.486Z",
+  "commit": "85a186e12d2463810753d457e99275dcf28a7fe6",
+  "llmMode": "deterministic",
+  "embeddingMode": "local",
+  "embeddingSpace": {
+    "provider": "local",
+    "model": "ruri-v3-30m/sym",
+    "dimensions": 256
+  },
+  "days": 180,
+  "fillersPerDay": 15,
+  "checkpointDays": [7, 30, 45, 60, 90, 120, 150, 180],
+  "probes": [
+    {
+      "arm": "A",
+      "checkpointDay": 7,
+      "factId": "habitual-daughter-name",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 7,
+      "factId": "habitual-cat-name",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 7,
+      "factId": "habitual-workplace",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 7,
+      "factId": "habitual-morning-run",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 7
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 7,
+      "factId": "habitual-favorite-author",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 2
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 7,
+      "factId": "habitual-car",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 8
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 7,
+      "factId": "habitual-tomato",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 4
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 7,
+      "factId": "habitual-mother-sapporo",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 3
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 7,
+      "factId": "dormant-shellfish-allergy",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 7,
+      "factId": "dormant-blood-type",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 7,
+      "factId": "dormant-anniversary",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 2
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 7,
+      "factId": "dormant-trombone",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 7,
+      "factId": "dormant-acrophobia",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 7,
+      "factId": "dormant-passport",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 7,
+      "factId": "dormant-left-handed",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 7,
+      "factId": "dormant-shrine",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 7,
+      "factId": "correction-residence",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "returned",
+      "returnedRank": 10
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 7,
+      "factId": "correction-phone",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "returned",
+      "returnedRank": 10
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 7,
+      "factId": "correction-gym",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 7,
+      "factId": "correction-project",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "returned",
+      "returnedRank": 4
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 7,
+      "factId": "correction-drink",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "returned",
+      "returnedRank": 6
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 7,
+      "factId": "correction-lesson",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "returned",
+      "returnedRank": 3
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 7,
+      "factId": "habitual-daughter-name",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 7,
+      "factId": "habitual-cat-name",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 7,
+      "factId": "habitual-workplace",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 4
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 7,
+      "factId": "habitual-morning-run",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 7,
+      "factId": "habitual-favorite-author",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 7,
+      "factId": "habitual-car",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 7,
+      "factId": "habitual-tomato",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 7,
+      "factId": "habitual-mother-sapporo",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 7,
+      "factId": "dormant-shellfish-allergy",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 7,
+      "factId": "dormant-blood-type",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 7,
+      "factId": "dormant-anniversary",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 7,
+      "factId": "dormant-trombone",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 7,
+      "factId": "dormant-acrophobia",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 7,
+      "factId": "dormant-passport",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 7,
+      "factId": "dormant-left-handed",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 7,
+      "factId": "dormant-shrine",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 7,
+      "factId": "correction-residence",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 7,
+      "factId": "correction-phone",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "returned",
+      "returnedRank": 3
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 7,
+      "factId": "correction-gym",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "returned",
+      "returnedRank": 3
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 7,
+      "factId": "correction-project",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 7,
+      "factId": "correction-drink",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 7,
+      "factId": "correction-lesson",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 30,
+      "factId": "habitual-daughter-name",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 30,
+      "factId": "habitual-cat-name",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 30,
+      "factId": "habitual-workplace",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 30,
+      "factId": "habitual-morning-run",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 30,
+      "factId": "habitual-favorite-author",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 30,
+      "factId": "habitual-car",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 30,
+      "factId": "habitual-tomato",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 30,
+      "factId": "habitual-mother-sapporo",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 30,
+      "factId": "dormant-shellfish-allergy",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 30,
+      "factId": "dormant-blood-type",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 30,
+      "factId": "dormant-anniversary",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 30,
+      "factId": "dormant-trombone",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 30,
+      "factId": "dormant-acrophobia",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 30,
+      "factId": "dormant-passport",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 30,
+      "factId": "dormant-left-handed",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 30,
+      "factId": "dormant-shrine",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 30,
+      "factId": "correction-residence",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 30,
+      "factId": "correction-phone",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 30,
+      "factId": "correction-gym",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 30,
+      "factId": "correction-project",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 30,
+      "factId": "correction-drink",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 30,
+      "factId": "correction-lesson",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 30,
+      "factId": "habitual-daughter-name",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 30,
+      "factId": "habitual-cat-name",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 30,
+      "factId": "habitual-workplace",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 30,
+      "factId": "habitual-morning-run",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 30,
+      "factId": "habitual-favorite-author",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 30,
+      "factId": "habitual-car",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 30,
+      "factId": "habitual-tomato",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 30,
+      "factId": "habitual-mother-sapporo",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 30,
+      "factId": "dormant-shellfish-allergy",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 30,
+      "factId": "dormant-blood-type",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 8
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 30,
+      "factId": "dormant-anniversary",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 30,
+      "factId": "dormant-trombone",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 30,
+      "factId": "dormant-acrophobia",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 30,
+      "factId": "dormant-passport",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 30,
+      "factId": "dormant-left-handed",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 30,
+      "factId": "dormant-shrine",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 30,
+      "factId": "correction-residence",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 30,
+      "factId": "correction-phone",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 30,
+      "factId": "correction-gym",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 30,
+      "factId": "correction-project",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 30,
+      "factId": "correction-drink",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 30,
+      "factId": "correction-lesson",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 45,
+      "factId": "habitual-daughter-name",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 45,
+      "factId": "habitual-cat-name",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 45,
+      "factId": "habitual-workplace",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 45,
+      "factId": "habitual-morning-run",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 45,
+      "factId": "habitual-favorite-author",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 45,
+      "factId": "habitual-car",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 45,
+      "factId": "habitual-tomato",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 45,
+      "factId": "habitual-mother-sapporo",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 45,
+      "factId": "dormant-shellfish-allergy",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 45,
+      "factId": "dormant-blood-type",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 45,
+      "factId": "dormant-anniversary",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 45,
+      "factId": "dormant-trombone",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 45,
+      "factId": "dormant-acrophobia",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 45,
+      "factId": "dormant-passport",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 45,
+      "factId": "dormant-left-handed",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 45,
+      "factId": "dormant-shrine",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 45,
+      "factId": "correction-residence",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 45,
+      "factId": "correction-phone",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 45,
+      "factId": "correction-gym",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 45,
+      "factId": "correction-project",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 45,
+      "factId": "correction-drink",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 45,
+      "factId": "correction-lesson",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 45,
+      "factId": "habitual-daughter-name",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 45,
+      "factId": "habitual-cat-name",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 45,
+      "factId": "habitual-workplace",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 45,
+      "factId": "habitual-morning-run",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 45,
+      "factId": "habitual-favorite-author",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 45,
+      "factId": "habitual-car",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 45,
+      "factId": "habitual-tomato",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 45,
+      "factId": "habitual-mother-sapporo",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 45,
+      "factId": "dormant-shellfish-allergy",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 45,
+      "factId": "dormant-blood-type",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 45,
+      "factId": "dormant-anniversary",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 45,
+      "factId": "dormant-trombone",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 45,
+      "factId": "dormant-acrophobia",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 45,
+      "factId": "dormant-passport",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 45,
+      "factId": "dormant-left-handed",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 45,
+      "factId": "dormant-shrine",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 45,
+      "factId": "correction-residence",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 45,
+      "factId": "correction-phone",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 45,
+      "factId": "correction-gym",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 45,
+      "factId": "correction-project",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 45,
+      "factId": "correction-drink",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 45,
+      "factId": "correction-lesson",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 60,
+      "factId": "habitual-daughter-name",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 60,
+      "factId": "habitual-cat-name",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 60,
+      "factId": "habitual-workplace",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 60,
+      "factId": "habitual-morning-run",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 60,
+      "factId": "habitual-favorite-author",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 60,
+      "factId": "habitual-car",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 60,
+      "factId": "habitual-tomato",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 60,
+      "factId": "habitual-mother-sapporo",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 60,
+      "factId": "dormant-shellfish-allergy",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 60,
+      "factId": "dormant-blood-type",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 60,
+      "factId": "dormant-anniversary",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 60,
+      "factId": "dormant-trombone",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 60,
+      "factId": "dormant-acrophobia",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 60,
+      "factId": "dormant-passport",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 60,
+      "factId": "dormant-left-handed",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 60,
+      "factId": "dormant-shrine",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 60,
+      "factId": "correction-residence",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 60,
+      "factId": "correction-phone",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 60,
+      "factId": "correction-gym",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 60,
+      "factId": "correction-project",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 60,
+      "factId": "correction-drink",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 60,
+      "factId": "correction-lesson",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 60,
+      "factId": "habitual-daughter-name",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 60,
+      "factId": "habitual-cat-name",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 60,
+      "factId": "habitual-workplace",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 60,
+      "factId": "habitual-morning-run",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 60,
+      "factId": "habitual-favorite-author",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 60,
+      "factId": "habitual-car",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 60,
+      "factId": "habitual-tomato",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 60,
+      "factId": "habitual-mother-sapporo",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 60,
+      "factId": "dormant-shellfish-allergy",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 60,
+      "factId": "dormant-blood-type",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 60,
+      "factId": "dormant-anniversary",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 60,
+      "factId": "dormant-trombone",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 60,
+      "factId": "dormant-acrophobia",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 60,
+      "factId": "dormant-passport",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 60,
+      "factId": "dormant-left-handed",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 60,
+      "factId": "dormant-shrine",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 60,
+      "factId": "correction-residence",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 60,
+      "factId": "correction-phone",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 60,
+      "factId": "correction-gym",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 60,
+      "factId": "correction-project",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 60,
+      "factId": "correction-drink",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 60,
+      "factId": "correction-lesson",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 90,
+      "factId": "habitual-daughter-name",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 90,
+      "factId": "habitual-cat-name",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 90,
+      "factId": "habitual-workplace",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 90,
+      "factId": "habitual-morning-run",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 90,
+      "factId": "habitual-favorite-author",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 90,
+      "factId": "habitual-car",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 90,
+      "factId": "habitual-tomato",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 90,
+      "factId": "habitual-mother-sapporo",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 90,
+      "factId": "dormant-shellfish-allergy",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 90,
+      "factId": "dormant-blood-type",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 90,
+      "factId": "dormant-anniversary",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 90,
+      "factId": "dormant-trombone",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 90,
+      "factId": "dormant-acrophobia",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 90,
+      "factId": "dormant-passport",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 90,
+      "factId": "dormant-left-handed",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 90,
+      "factId": "dormant-shrine",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 90,
+      "factId": "correction-residence",
+      "factClass": "correction",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 90,
+      "factId": "correction-residence",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 90,
+      "factId": "correction-phone",
+      "factClass": "correction",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 90,
+      "factId": "correction-phone",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 90,
+      "factId": "correction-gym",
+      "factClass": "correction",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 90,
+      "factId": "correction-gym",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 90,
+      "factId": "correction-project",
+      "factClass": "correction",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 2
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 90,
+      "factId": "correction-project",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 90,
+      "factId": "correction-drink",
+      "factClass": "correction",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 90,
+      "factId": "correction-drink",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 90,
+      "factId": "correction-lesson",
+      "factClass": "correction",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 90,
+      "factId": "correction-lesson",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 90,
+      "factId": "habitual-daughter-name",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 90,
+      "factId": "habitual-cat-name",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 90,
+      "factId": "habitual-workplace",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 90,
+      "factId": "habitual-morning-run",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 90,
+      "factId": "habitual-favorite-author",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 90,
+      "factId": "habitual-car",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 90,
+      "factId": "habitual-tomato",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 90,
+      "factId": "habitual-mother-sapporo",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 90,
+      "factId": "dormant-shellfish-allergy",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 90,
+      "factId": "dormant-blood-type",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 90,
+      "factId": "dormant-anniversary",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 90,
+      "factId": "dormant-trombone",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 90,
+      "factId": "dormant-acrophobia",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 90,
+      "factId": "dormant-passport",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 90,
+      "factId": "dormant-left-handed",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 90,
+      "factId": "dormant-shrine",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 90,
+      "factId": "correction-residence",
+      "factClass": "correction",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 90,
+      "factId": "correction-residence",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 90,
+      "factId": "correction-phone",
+      "factClass": "correction",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 90,
+      "factId": "correction-phone",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 90,
+      "factId": "correction-gym",
+      "factClass": "correction",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 90,
+      "factId": "correction-gym",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 90,
+      "factId": "correction-project",
+      "factClass": "correction",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 2
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 90,
+      "factId": "correction-project",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 90,
+      "factId": "correction-drink",
+      "factClass": "correction",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 90,
+      "factId": "correction-drink",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 90,
+      "factId": "correction-lesson",
+      "factClass": "correction",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 90,
+      "factId": "correction-lesson",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 120,
+      "factId": "habitual-daughter-name",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 10
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 120,
+      "factId": "habitual-cat-name",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 120,
+      "factId": "habitual-workplace",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 120,
+      "factId": "habitual-morning-run",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 120,
+      "factId": "habitual-favorite-author",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 120,
+      "factId": "habitual-car",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 120,
+      "factId": "habitual-tomato",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 120,
+      "factId": "habitual-mother-sapporo",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 120,
+      "factId": "dormant-shellfish-allergy",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 120,
+      "factId": "dormant-blood-type",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 9
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 120,
+      "factId": "dormant-anniversary",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 120,
+      "factId": "dormant-trombone",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 120,
+      "factId": "dormant-acrophobia",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 120,
+      "factId": "dormant-passport",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 120,
+      "factId": "dormant-left-handed",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 120,
+      "factId": "dormant-shrine",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 120,
+      "factId": "correction-residence",
+      "factClass": "correction",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 8
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 120,
+      "factId": "correction-residence",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 120,
+      "factId": "correction-phone",
+      "factClass": "correction",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 7
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 120,
+      "factId": "correction-phone",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 120,
+      "factId": "correction-gym",
+      "factClass": "correction",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 6
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 120,
+      "factId": "correction-gym",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 120,
+      "factId": "correction-project",
+      "factClass": "correction",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 8
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 120,
+      "factId": "correction-project",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 120,
+      "factId": "correction-drink",
+      "factClass": "correction",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 120,
+      "factId": "correction-drink",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 120,
+      "factId": "correction-lesson",
+      "factClass": "correction",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 7
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 120,
+      "factId": "correction-lesson",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 120,
+      "factId": "habitual-daughter-name",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 120,
+      "factId": "habitual-cat-name",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 120,
+      "factId": "habitual-workplace",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 120,
+      "factId": "habitual-morning-run",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 120,
+      "factId": "habitual-favorite-author",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 120,
+      "factId": "habitual-car",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 120,
+      "factId": "habitual-tomato",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 120,
+      "factId": "habitual-mother-sapporo",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 120,
+      "factId": "dormant-shellfish-allergy",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 120,
+      "factId": "dormant-blood-type",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 120,
+      "factId": "dormant-anniversary",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 120,
+      "factId": "dormant-trombone",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 120,
+      "factId": "dormant-acrophobia",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 120,
+      "factId": "dormant-passport",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 120,
+      "factId": "dormant-left-handed",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 120,
+      "factId": "dormant-shrine",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 120,
+      "factId": "correction-residence",
+      "factClass": "correction",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 8
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 120,
+      "factId": "correction-residence",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 120,
+      "factId": "correction-phone",
+      "factClass": "correction",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 7
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 120,
+      "factId": "correction-phone",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 120,
+      "factId": "correction-gym",
+      "factClass": "correction",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 6
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 120,
+      "factId": "correction-gym",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 120,
+      "factId": "correction-project",
+      "factClass": "correction",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 8
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 120,
+      "factId": "correction-project",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 120,
+      "factId": "correction-drink",
+      "factClass": "correction",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 120,
+      "factId": "correction-drink",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 120,
+      "factId": "correction-lesson",
+      "factClass": "correction",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 7
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 120,
+      "factId": "correction-lesson",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 150,
+      "factId": "habitual-daughter-name",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 10
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 150,
+      "factId": "habitual-cat-name",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 8
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 150,
+      "factId": "habitual-workplace",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 150,
+      "factId": "habitual-morning-run",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 150,
+      "factId": "habitual-favorite-author",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 150,
+      "factId": "habitual-car",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 150,
+      "factId": "habitual-tomato",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 150,
+      "factId": "habitual-mother-sapporo",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 150,
+      "factId": "dormant-shellfish-allergy",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 150,
+      "factId": "dormant-blood-type",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 150,
+      "factId": "dormant-anniversary",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 150,
+      "factId": "dormant-trombone",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 9
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 150,
+      "factId": "dormant-acrophobia",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 150,
+      "factId": "dormant-passport",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 150,
+      "factId": "dormant-left-handed",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 150,
+      "factId": "dormant-shrine",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 150,
+      "factId": "correction-residence",
+      "factClass": "correction",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 150,
+      "factId": "correction-residence",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 150,
+      "factId": "correction-phone",
+      "factClass": "correction",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 150,
+      "factId": "correction-phone",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 150,
+      "factId": "correction-gym",
+      "factClass": "correction",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 9
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 150,
+      "factId": "correction-gym",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 150,
+      "factId": "correction-project",
+      "factClass": "correction",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 150,
+      "factId": "correction-project",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 150,
+      "factId": "correction-drink",
+      "factClass": "correction",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 150,
+      "factId": "correction-drink",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 150,
+      "factId": "correction-lesson",
+      "factClass": "correction",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 150,
+      "factId": "correction-lesson",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 150,
+      "factId": "habitual-daughter-name",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 150,
+      "factId": "habitual-cat-name",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 150,
+      "factId": "habitual-workplace",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 150,
+      "factId": "habitual-morning-run",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 150,
+      "factId": "habitual-favorite-author",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 150,
+      "factId": "habitual-car",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 150,
+      "factId": "habitual-tomato",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 150,
+      "factId": "habitual-mother-sapporo",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 150,
+      "factId": "dormant-shellfish-allergy",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 150,
+      "factId": "dormant-blood-type",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 150,
+      "factId": "dormant-anniversary",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 150,
+      "factId": "dormant-trombone",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 150,
+      "factId": "dormant-acrophobia",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 150,
+      "factId": "dormant-passport",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 150,
+      "factId": "dormant-left-handed",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 150,
+      "factId": "dormant-shrine",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 150,
+      "factId": "correction-residence",
+      "factClass": "correction",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 150,
+      "factId": "correction-residence",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 150,
+      "factId": "correction-phone",
+      "factClass": "correction",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 150,
+      "factId": "correction-phone",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 150,
+      "factId": "correction-gym",
+      "factClass": "correction",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 9
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 150,
+      "factId": "correction-gym",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 150,
+      "factId": "correction-project",
+      "factClass": "correction",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 150,
+      "factId": "correction-project",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 150,
+      "factId": "correction-drink",
+      "factClass": "correction",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 150,
+      "factId": "correction-drink",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 150,
+      "factId": "correction-lesson",
+      "factClass": "correction",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 150,
+      "factId": "correction-lesson",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 180,
+      "factId": "habitual-daughter-name",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 6
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 180,
+      "factId": "habitual-cat-name",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 9
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 180,
+      "factId": "habitual-workplace",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 180,
+      "factId": "habitual-morning-run",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 10
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 180,
+      "factId": "habitual-favorite-author",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 180,
+      "factId": "habitual-car",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 180,
+      "factId": "habitual-tomato",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 9
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 180,
+      "factId": "habitual-mother-sapporo",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 180,
+      "factId": "dormant-shellfish-allergy",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 180,
+      "factId": "dormant-blood-type",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 180,
+      "factId": "dormant-anniversary",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 180,
+      "factId": "dormant-trombone",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 8
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 180,
+      "factId": "dormant-acrophobia",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 180,
+      "factId": "dormant-passport",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 180,
+      "factId": "dormant-left-handed",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 180,
+      "factId": "dormant-shrine",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 9
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 180,
+      "factId": "correction-residence",
+      "factClass": "correction",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 180,
+      "factId": "correction-residence",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 180,
+      "factId": "correction-phone",
+      "factClass": "correction",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 180,
+      "factId": "correction-phone",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 180,
+      "factId": "correction-gym",
+      "factClass": "correction",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 7
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 180,
+      "factId": "correction-gym",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "returned",
+      "returnedRank": 8
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 180,
+      "factId": "correction-project",
+      "factClass": "correction",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 180,
+      "factId": "correction-project",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 180,
+      "factId": "correction-drink",
+      "factClass": "correction",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 180,
+      "factId": "correction-drink",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 180,
+      "factId": "correction-lesson",
+      "factClass": "correction",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "A",
+      "checkpointDay": 180,
+      "factId": "correction-lesson",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 180,
+      "factId": "habitual-daughter-name",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 180,
+      "factId": "habitual-cat-name",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 180,
+      "factId": "habitual-workplace",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 180,
+      "factId": "habitual-morning-run",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 180,
+      "factId": "habitual-favorite-author",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 180,
+      "factId": "habitual-car",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 180,
+      "factId": "habitual-tomato",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 180,
+      "factId": "habitual-mother-sapporo",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 180,
+      "factId": "dormant-shellfish-allergy",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 180,
+      "factId": "dormant-blood-type",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 180,
+      "factId": "dormant-anniversary",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 180,
+      "factId": "dormant-trombone",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 180,
+      "factId": "dormant-acrophobia",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 180,
+      "factId": "dormant-passport",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 180,
+      "factId": "dormant-left-handed",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 180,
+      "factId": "dormant-shrine",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 180,
+      "factId": "correction-residence",
+      "factClass": "correction",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 180,
+      "factId": "correction-residence",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 180,
+      "factId": "correction-phone",
+      "factClass": "correction",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 180,
+      "factId": "correction-phone",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 180,
+      "factId": "correction-gym",
+      "factClass": "correction",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 180,
+      "factId": "correction-gym",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 180,
+      "factId": "correction-project",
+      "factClass": "correction",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 180,
+      "factId": "correction-project",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 180,
+      "factId": "correction-drink",
+      "factClass": "correction",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 180,
+      "factId": "correction-drink",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 180,
+      "factId": "correction-lesson",
+      "factClass": "correction",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "C",
+      "checkpointDay": 180,
+      "factId": "correction-lesson",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 7,
+      "factId": "habitual-daughter-name",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 7,
+      "factId": "habitual-cat-name",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 7,
+      "factId": "habitual-workplace",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 7,
+      "factId": "habitual-morning-run",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 7
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 7,
+      "factId": "habitual-favorite-author",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 2
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 7,
+      "factId": "habitual-car",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 8
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 7,
+      "factId": "habitual-tomato",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 4
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 7,
+      "factId": "habitual-mother-sapporo",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 3
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 7,
+      "factId": "dormant-shellfish-allergy",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 7,
+      "factId": "dormant-blood-type",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 7,
+      "factId": "dormant-anniversary",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 2
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 7,
+      "factId": "dormant-trombone",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 7,
+      "factId": "dormant-acrophobia",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 7,
+      "factId": "dormant-passport",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 7,
+      "factId": "dormant-left-handed",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 7,
+      "factId": "dormant-shrine",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 7,
+      "factId": "correction-residence",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "returned",
+      "returnedRank": 10
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 7,
+      "factId": "correction-phone",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "returned",
+      "returnedRank": 10
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 7,
+      "factId": "correction-gym",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 7,
+      "factId": "correction-project",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "returned",
+      "returnedRank": 4
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 7,
+      "factId": "correction-drink",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "returned",
+      "returnedRank": 6
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 7,
+      "factId": "correction-lesson",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "returned",
+      "returnedRank": 3
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 30,
+      "factId": "habitual-daughter-name",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 30,
+      "factId": "habitual-cat-name",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 30,
+      "factId": "habitual-workplace",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 30,
+      "factId": "habitual-morning-run",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 30,
+      "factId": "habitual-favorite-author",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 30,
+      "factId": "habitual-car",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 30,
+      "factId": "habitual-tomato",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 30,
+      "factId": "habitual-mother-sapporo",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 30,
+      "factId": "dormant-shellfish-allergy",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 30,
+      "factId": "dormant-blood-type",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 30,
+      "factId": "dormant-anniversary",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 30,
+      "factId": "dormant-trombone",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 30,
+      "factId": "dormant-acrophobia",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 30,
+      "factId": "dormant-passport",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 30,
+      "factId": "dormant-left-handed",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 30,
+      "factId": "dormant-shrine",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 30,
+      "factId": "correction-residence",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 30,
+      "factId": "correction-phone",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 30,
+      "factId": "correction-gym",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 30,
+      "factId": "correction-project",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 30,
+      "factId": "correction-drink",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 30,
+      "factId": "correction-lesson",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 45,
+      "factId": "habitual-daughter-name",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 45,
+      "factId": "habitual-cat-name",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 45,
+      "factId": "habitual-workplace",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 45,
+      "factId": "habitual-morning-run",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 45,
+      "factId": "habitual-favorite-author",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 45,
+      "factId": "habitual-car",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 45,
+      "factId": "habitual-tomato",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 45,
+      "factId": "habitual-mother-sapporo",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 45,
+      "factId": "dormant-shellfish-allergy",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 45,
+      "factId": "dormant-blood-type",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 45,
+      "factId": "dormant-anniversary",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 45,
+      "factId": "dormant-trombone",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 45,
+      "factId": "dormant-acrophobia",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 45,
+      "factId": "dormant-passport",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 45,
+      "factId": "dormant-left-handed",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 45,
+      "factId": "dormant-shrine",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 45,
+      "factId": "correction-residence",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 45,
+      "factId": "correction-phone",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 45,
+      "factId": "correction-gym",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 45,
+      "factId": "correction-project",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 45,
+      "factId": "correction-drink",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 45,
+      "factId": "correction-lesson",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 60,
+      "factId": "habitual-daughter-name",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 60,
+      "factId": "habitual-cat-name",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 60,
+      "factId": "habitual-workplace",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 60,
+      "factId": "habitual-morning-run",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 60,
+      "factId": "habitual-favorite-author",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 60,
+      "factId": "habitual-car",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 60,
+      "factId": "habitual-tomato",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 60,
+      "factId": "habitual-mother-sapporo",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 60,
+      "factId": "dormant-shellfish-allergy",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 60,
+      "factId": "dormant-blood-type",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 60,
+      "factId": "dormant-anniversary",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 60,
+      "factId": "dormant-trombone",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 60,
+      "factId": "dormant-acrophobia",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 60,
+      "factId": "dormant-passport",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 60,
+      "factId": "dormant-left-handed",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 60,
+      "factId": "dormant-shrine",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 60,
+      "factId": "correction-residence",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 60,
+      "factId": "correction-phone",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 60,
+      "factId": "correction-gym",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 60,
+      "factId": "correction-project",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 60,
+      "factId": "correction-drink",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 60,
+      "factId": "correction-lesson",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 90,
+      "factId": "habitual-daughter-name",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 90,
+      "factId": "habitual-cat-name",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 90,
+      "factId": "habitual-workplace",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 90,
+      "factId": "habitual-morning-run",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 90,
+      "factId": "habitual-favorite-author",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 90,
+      "factId": "habitual-car",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 90,
+      "factId": "habitual-tomato",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 90,
+      "factId": "habitual-mother-sapporo",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 90,
+      "factId": "dormant-shellfish-allergy",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 90,
+      "factId": "dormant-blood-type",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 90,
+      "factId": "dormant-anniversary",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 90,
+      "factId": "dormant-trombone",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 90,
+      "factId": "dormant-acrophobia",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 90,
+      "factId": "dormant-passport",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 90,
+      "factId": "dormant-left-handed",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 90,
+      "factId": "dormant-shrine",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 90,
+      "factId": "correction-residence",
+      "factClass": "correction",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 90,
+      "factId": "correction-residence",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 90,
+      "factId": "correction-phone",
+      "factClass": "correction",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 90,
+      "factId": "correction-phone",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 90,
+      "factId": "correction-gym",
+      "factClass": "correction",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 90,
+      "factId": "correction-gym",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 90,
+      "factId": "correction-project",
+      "factClass": "correction",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 2
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 90,
+      "factId": "correction-project",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 90,
+      "factId": "correction-drink",
+      "factClass": "correction",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 90,
+      "factId": "correction-drink",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 90,
+      "factId": "correction-lesson",
+      "factClass": "correction",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 90,
+      "factId": "correction-lesson",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 120,
+      "factId": "habitual-daughter-name",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 120,
+      "factId": "habitual-cat-name",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 120,
+      "factId": "habitual-workplace",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 120,
+      "factId": "habitual-morning-run",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 120,
+      "factId": "habitual-favorite-author",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 120,
+      "factId": "habitual-car",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 120,
+      "factId": "habitual-tomato",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 120,
+      "factId": "habitual-mother-sapporo",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 120,
+      "factId": "dormant-shellfish-allergy",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 120,
+      "factId": "dormant-blood-type",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 9
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 120,
+      "factId": "dormant-anniversary",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 120,
+      "factId": "dormant-trombone",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 120,
+      "factId": "dormant-acrophobia",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 120,
+      "factId": "dormant-passport",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 120,
+      "factId": "dormant-left-handed",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 120,
+      "factId": "dormant-shrine",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 120,
+      "factId": "correction-residence",
+      "factClass": "correction",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 8
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 120,
+      "factId": "correction-residence",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 120,
+      "factId": "correction-phone",
+      "factClass": "correction",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 7
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 120,
+      "factId": "correction-phone",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 120,
+      "factId": "correction-gym",
+      "factClass": "correction",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 8
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 120,
+      "factId": "correction-gym",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 120,
+      "factId": "correction-project",
+      "factClass": "correction",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 120,
+      "factId": "correction-project",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 120,
+      "factId": "correction-drink",
+      "factClass": "correction",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 7
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 120,
+      "factId": "correction-drink",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 120,
+      "factId": "correction-lesson",
+      "factClass": "correction",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 5
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 120,
+      "factId": "correction-lesson",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 150,
+      "factId": "habitual-daughter-name",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 150,
+      "factId": "habitual-cat-name",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 150,
+      "factId": "habitual-workplace",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 150,
+      "factId": "habitual-morning-run",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 150,
+      "factId": "habitual-favorite-author",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 150,
+      "factId": "habitual-car",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 150,
+      "factId": "habitual-tomato",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 150,
+      "factId": "habitual-mother-sapporo",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 150,
+      "factId": "dormant-shellfish-allergy",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 150,
+      "factId": "dormant-blood-type",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 150,
+      "factId": "dormant-anniversary",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 150,
+      "factId": "dormant-trombone",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 150,
+      "factId": "dormant-acrophobia",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 150,
+      "factId": "dormant-passport",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 150,
+      "factId": "dormant-left-handed",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 150,
+      "factId": "dormant-shrine",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 150,
+      "factId": "correction-residence",
+      "factClass": "correction",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 150,
+      "factId": "correction-residence",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 150,
+      "factId": "correction-phone",
+      "factClass": "correction",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 150,
+      "factId": "correction-phone",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 150,
+      "factId": "correction-gym",
+      "factClass": "correction",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 150,
+      "factId": "correction-gym",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 150,
+      "factId": "correction-project",
+      "factClass": "correction",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 150,
+      "factId": "correction-project",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 150,
+      "factId": "correction-drink",
+      "factClass": "correction",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 150,
+      "factId": "correction-drink",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 150,
+      "factId": "correction-lesson",
+      "factClass": "correction",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 150,
+      "factId": "correction-lesson",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 180,
+      "factId": "habitual-daughter-name",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 180,
+      "factId": "habitual-cat-name",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 180,
+      "factId": "habitual-workplace",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 180,
+      "factId": "habitual-morning-run",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 180,
+      "factId": "habitual-favorite-author",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 180,
+      "factId": "habitual-car",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 180,
+      "factId": "habitual-tomato",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 180,
+      "factId": "habitual-mother-sapporo",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 180,
+      "factId": "dormant-shellfish-allergy",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 180,
+      "factId": "dormant-blood-type",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 180,
+      "factId": "dormant-anniversary",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 180,
+      "factId": "dormant-trombone",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 180,
+      "factId": "dormant-acrophobia",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 180,
+      "factId": "dormant-passport",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 9
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 180,
+      "factId": "dormant-left-handed",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 180,
+      "factId": "dormant-shrine",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 180,
+      "factId": "correction-residence",
+      "factClass": "correction",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 180,
+      "factId": "correction-residence",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 180,
+      "factId": "correction-phone",
+      "factClass": "correction",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 180,
+      "factId": "correction-phone",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 180,
+      "factId": "correction-gym",
+      "factClass": "correction",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 180,
+      "factId": "correction-gym",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 180,
+      "factId": "correction-project",
+      "factClass": "correction",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 180,
+      "factId": "correction-project",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 180,
+      "factId": "correction-drink",
+      "factClass": "correction",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 180,
+      "factId": "correction-drink",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 180,
+      "factId": "correction-lesson",
+      "factClass": "correction",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "B",
+      "checkpointDay": 180,
+      "factId": "correction-lesson",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 7,
+      "factId": "habitual-daughter-name",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 7,
+      "factId": "habitual-cat-name",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 7,
+      "factId": "habitual-workplace",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 4
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 7,
+      "factId": "habitual-morning-run",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 7,
+      "factId": "habitual-favorite-author",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 7,
+      "factId": "habitual-car",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 7,
+      "factId": "habitual-tomato",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 7,
+      "factId": "habitual-mother-sapporo",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 7,
+      "factId": "dormant-shellfish-allergy",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 7,
+      "factId": "dormant-blood-type",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 7,
+      "factId": "dormant-anniversary",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 7,
+      "factId": "dormant-trombone",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 7,
+      "factId": "dormant-acrophobia",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 7,
+      "factId": "dormant-passport",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 7,
+      "factId": "dormant-left-handed",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 7,
+      "factId": "dormant-shrine",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 7,
+      "factId": "correction-residence",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 7,
+      "factId": "correction-phone",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "returned",
+      "returnedRank": 3
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 7,
+      "factId": "correction-gym",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "returned",
+      "returnedRank": 3
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 7,
+      "factId": "correction-project",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 7,
+      "factId": "correction-drink",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 7,
+      "factId": "correction-lesson",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 30,
+      "factId": "habitual-daughter-name",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 30,
+      "factId": "habitual-cat-name",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 30,
+      "factId": "habitual-workplace",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 30,
+      "factId": "habitual-morning-run",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 30,
+      "factId": "habitual-favorite-author",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 30,
+      "factId": "habitual-car",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 30,
+      "factId": "habitual-tomato",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 30,
+      "factId": "habitual-mother-sapporo",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 30,
+      "factId": "dormant-shellfish-allergy",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 30,
+      "factId": "dormant-blood-type",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 30,
+      "factId": "dormant-anniversary",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 30,
+      "factId": "dormant-trombone",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 30,
+      "factId": "dormant-acrophobia",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 30,
+      "factId": "dormant-passport",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 30,
+      "factId": "dormant-left-handed",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 30,
+      "factId": "dormant-shrine",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 30,
+      "factId": "correction-residence",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 30,
+      "factId": "correction-phone",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 30,
+      "factId": "correction-gym",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 30,
+      "factId": "correction-project",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 30,
+      "factId": "correction-drink",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 30,
+      "factId": "correction-lesson",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 45,
+      "factId": "habitual-daughter-name",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 45,
+      "factId": "habitual-cat-name",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 45,
+      "factId": "habitual-workplace",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 45,
+      "factId": "habitual-morning-run",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 45,
+      "factId": "habitual-favorite-author",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 45,
+      "factId": "habitual-car",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 45,
+      "factId": "habitual-tomato",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 45,
+      "factId": "habitual-mother-sapporo",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 45,
+      "factId": "dormant-shellfish-allergy",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 45,
+      "factId": "dormant-blood-type",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 45,
+      "factId": "dormant-anniversary",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 45,
+      "factId": "dormant-trombone",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 45,
+      "factId": "dormant-acrophobia",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 45,
+      "factId": "dormant-passport",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 45,
+      "factId": "dormant-left-handed",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 45,
+      "factId": "dormant-shrine",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 45,
+      "factId": "correction-residence",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 45,
+      "factId": "correction-phone",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 45,
+      "factId": "correction-gym",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 45,
+      "factId": "correction-project",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 45,
+      "factId": "correction-drink",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 45,
+      "factId": "correction-lesson",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 60,
+      "factId": "habitual-daughter-name",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 60,
+      "factId": "habitual-cat-name",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 60,
+      "factId": "habitual-workplace",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 60,
+      "factId": "habitual-morning-run",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 60,
+      "factId": "habitual-favorite-author",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 60,
+      "factId": "habitual-car",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 60,
+      "factId": "habitual-tomato",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 60,
+      "factId": "habitual-mother-sapporo",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 60,
+      "factId": "dormant-shellfish-allergy",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 60,
+      "factId": "dormant-blood-type",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 60,
+      "factId": "dormant-anniversary",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 60,
+      "factId": "dormant-trombone",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 60,
+      "factId": "dormant-acrophobia",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 60,
+      "factId": "dormant-passport",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 60,
+      "factId": "dormant-left-handed",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 60,
+      "factId": "dormant-shrine",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 60,
+      "factId": "correction-residence",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 60,
+      "factId": "correction-phone",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 60,
+      "factId": "correction-gym",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 60,
+      "factId": "correction-project",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 60,
+      "factId": "correction-drink",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 60,
+      "factId": "correction-lesson",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 90,
+      "factId": "habitual-daughter-name",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 90,
+      "factId": "habitual-cat-name",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 90,
+      "factId": "habitual-workplace",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 90,
+      "factId": "habitual-morning-run",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 90,
+      "factId": "habitual-favorite-author",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 90,
+      "factId": "habitual-car",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 90,
+      "factId": "habitual-tomato",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 90,
+      "factId": "habitual-mother-sapporo",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 90,
+      "factId": "dormant-shellfish-allergy",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 90,
+      "factId": "dormant-blood-type",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 90,
+      "factId": "dormant-anniversary",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 90,
+      "factId": "dormant-trombone",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 90,
+      "factId": "dormant-acrophobia",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 90,
+      "factId": "dormant-passport",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 90,
+      "factId": "dormant-left-handed",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 90,
+      "factId": "dormant-shrine",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 90,
+      "factId": "correction-residence",
+      "factClass": "correction",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 90,
+      "factId": "correction-residence",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "returned",
+      "returnedRank": 2
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 90,
+      "factId": "correction-phone",
+      "factClass": "correction",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 90,
+      "factId": "correction-phone",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 90,
+      "factId": "correction-gym",
+      "factClass": "correction",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 90,
+      "factId": "correction-gym",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 90,
+      "factId": "correction-project",
+      "factClass": "correction",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 2
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 90,
+      "factId": "correction-project",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 90,
+      "factId": "correction-drink",
+      "factClass": "correction",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 90,
+      "factId": "correction-drink",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 90,
+      "factId": "correction-lesson",
+      "factClass": "correction",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 90,
+      "factId": "correction-lesson",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 120,
+      "factId": "habitual-daughter-name",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 120,
+      "factId": "habitual-cat-name",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 120,
+      "factId": "habitual-workplace",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 120,
+      "factId": "habitual-morning-run",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 120,
+      "factId": "habitual-favorite-author",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 120,
+      "factId": "habitual-car",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 120,
+      "factId": "habitual-tomato",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 120,
+      "factId": "habitual-mother-sapporo",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 120,
+      "factId": "dormant-shellfish-allergy",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 120,
+      "factId": "dormant-blood-type",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 120,
+      "factId": "dormant-anniversary",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 120,
+      "factId": "dormant-trombone",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 120,
+      "factId": "dormant-acrophobia",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 120,
+      "factId": "dormant-passport",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 120,
+      "factId": "dormant-left-handed",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 120,
+      "factId": "dormant-shrine",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 120,
+      "factId": "correction-residence",
+      "factClass": "correction",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 2
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 120,
+      "factId": "correction-residence",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 120,
+      "factId": "correction-phone",
+      "factClass": "correction",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 8
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 120,
+      "factId": "correction-phone",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 120,
+      "factId": "correction-gym",
+      "factClass": "correction",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 120,
+      "factId": "correction-gym",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 120,
+      "factId": "correction-project",
+      "factClass": "correction",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 120,
+      "factId": "correction-project",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 120,
+      "factId": "correction-drink",
+      "factClass": "correction",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 120,
+      "factId": "correction-drink",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 120,
+      "factId": "correction-lesson",
+      "factClass": "correction",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 2
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 120,
+      "factId": "correction-lesson",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 150,
+      "factId": "habitual-daughter-name",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 150,
+      "factId": "habitual-cat-name",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 150,
+      "factId": "habitual-workplace",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 150,
+      "factId": "habitual-morning-run",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 150,
+      "factId": "habitual-favorite-author",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 150,
+      "factId": "habitual-car",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 150,
+      "factId": "habitual-tomato",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 150,
+      "factId": "habitual-mother-sapporo",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 150,
+      "factId": "dormant-shellfish-allergy",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 150,
+      "factId": "dormant-blood-type",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 150,
+      "factId": "dormant-anniversary",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 150,
+      "factId": "dormant-trombone",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 150,
+      "factId": "dormant-acrophobia",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 150,
+      "factId": "dormant-passport",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 150,
+      "factId": "dormant-left-handed",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 150,
+      "factId": "dormant-shrine",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 150,
+      "factId": "correction-residence",
+      "factClass": "correction",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 2
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 150,
+      "factId": "correction-residence",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 150,
+      "factId": "correction-phone",
+      "factClass": "correction",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 150,
+      "factId": "correction-phone",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 150,
+      "factId": "correction-gym",
+      "factClass": "correction",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 150,
+      "factId": "correction-gym",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 150,
+      "factId": "correction-project",
+      "factClass": "correction",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 150,
+      "factId": "correction-project",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 150,
+      "factId": "correction-drink",
+      "factClass": "correction",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 150,
+      "factId": "correction-drink",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 150,
+      "factId": "correction-lesson",
+      "factClass": "correction",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 2
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 150,
+      "factId": "correction-lesson",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 180,
+      "factId": "habitual-daughter-name",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 180,
+      "factId": "habitual-cat-name",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 180,
+      "factId": "habitual-workplace",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 180,
+      "factId": "habitual-morning-run",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 180,
+      "factId": "habitual-favorite-author",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 180,
+      "factId": "habitual-car",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 180,
+      "factId": "habitual-tomato",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 180,
+      "factId": "habitual-mother-sapporo",
+      "factClass": "habitual",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 180,
+      "factId": "dormant-shellfish-allergy",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 180,
+      "factId": "dormant-blood-type",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 180,
+      "factId": "dormant-anniversary",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 180,
+      "factId": "dormant-trombone",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 180,
+      "factId": "dormant-acrophobia",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 180,
+      "factId": "dormant-passport",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 180,
+      "factId": "dormant-left-handed",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 180,
+      "factId": "dormant-shrine",
+      "factClass": "dormant",
+      "role": "gold",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 180,
+      "factId": "correction-residence",
+      "factClass": "correction",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 3
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 180,
+      "factId": "correction-residence",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "returned",
+      "returnedRank": 1
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 180,
+      "factId": "correction-phone",
+      "factClass": "correction",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 180,
+      "factId": "correction-phone",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 180,
+      "factId": "correction-gym",
+      "factClass": "correction",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 180,
+      "factId": "correction-gym",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 180,
+      "factId": "correction-project",
+      "factClass": "correction",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 180,
+      "factId": "correction-project",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 180,
+      "factId": "correction-drink",
+      "factClass": "correction",
+      "role": "gold",
+      "outcome": "returned",
+      "returnedRank": 6
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 180,
+      "factId": "correction-drink",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "decayed",
+      "returnedRank": null
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 180,
+      "factId": "correction-lesson",
+      "factClass": "correction",
+      "role": "gold",
+      "outcome": "outranked",
+      "returnedRank": null
+    },
+    {
+      "arm": "D",
+      "checkpointDay": 180,
+      "factId": "correction-lesson",
+      "factClass": "correction",
+      "role": "superseded",
+      "outcome": "decayed",
+      "returnedRank": null
+    }
+  ]
+}

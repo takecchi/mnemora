@@ -125,6 +125,13 @@
 - 使用報告を「返ったものだけ」ではなく「会話に出たもの」で送る使い方をしたときの振る舞い。
 - 活動時計（`decay_clock = 'activity'`）、半減期を延ばした設定、`sweepArchive` を定期的に呼ぶ運用。
 
+## 追記（2026-11-10）: 基準値を置いた
+
+- `examples/chat/long-horizon-baseline.json` を置いた。main の CI run 42686121067 の attempt 1 の成果物から、probe の欄を絞って採った（ADR 0121 の作法）。
+- CI の `long-horizon` ジョブは、`scripts/long-horizon-summary.mjs` で、probe ごとの `outcome` の差を Job Summary に出す。⛔ 門ではない。
+- 同じ run の attempt 1 と 2 で、800件中4件の `outcome` が違った（150〜180日目、件数の上限の境目）。基準値の `provenance.unstableProbes` に載せ、要約では「既知の揺れ」として分けて出す。
+- ⚠ 基準値は、既定の時間の重みの下限（ADR 0704）と、忘却ゲートを掛けない既定（ADR 0707）の後に採った。CI は `local` 埋め込みで、新しい既定でも30日目以降の gold はほぼ返らない。OpenAI 埋め込みでは90日まで 7/8 が返った（ADR 0704）。⟹ 下限の効き方は、埋め込みの類似度の差の大きさに依る。
+
 ## これが覆るとしたら
 
 - **CI で2回の run が一致したら**、基準値ファイルを足す（後続の PR）。
