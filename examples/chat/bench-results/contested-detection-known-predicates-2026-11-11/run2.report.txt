@@ -1,0 +1,26 @@
+## claim key の矛盾検出（決定的な段・oracle 鍵）
+
+⚠ 抽出と claim key を理想どおりの値に固定し、検出段だけを測った。LLM の鍵の揺れは含まない。合成データで、件数は少ない。
+
+| カテゴリ | 検出されるべきか | 件数 | 検出した | TP | FP | FN | TN |
+|---|---|---|---|---|---|---|---|
+| true_conflict | される | 4 | 4 | 4 | 0 | 0 | 0 |
+| explicit_correction | される | 4 | 3 | 3 | 0 | 1 | 0 |
+| paraphrase | されない | 4 | 3 | 0 | 3 | 0 | 1 |
+| temporal_compatible | されない | 4 | 2 | 0 | 2 | 0 | 2 |
+| non_conflict | されない | 4 | 3 | 0 | 3 | 0 | 1 |
+
+全体: TP=7 FP=8 FN=1 TN=4 / Precision=0.467 Recall=0.875 F1=0.609
+
+外れたケース:
+- correction-same-utterance（explicit_correction）: 見逃し（FN）
+- paraphrase-color（paraphrase）: 誤検出（FP）
+- paraphrase-residence（paraphrase）: 誤検出（FP）
+- paraphrase-pet（paraphrase）: 誤検出（FP）
+- temporal-in-text-only（temporal_compatible）: 誤検出（FP）
+- temporal-in-text-age（temporal_compatible）: 誤検出（FP）
+- non-conflict-other-predicate（non_conflict）: 誤検出（FP）
+- non-conflict-multi-valued（non_conflict）: 誤検出（FP）
+- non-conflict-languages（non_conflict）: 誤検出（FP）
+
+[contested-detection] 機械可読な結果を書き出した: /private/tmp/claude-501/-Users-takecchi-RustroverProjects-mnemora/8016ea6f-1dd4-42d8-a3ad-ef4816f380e5/scratchpad/contested-vocab-2.json

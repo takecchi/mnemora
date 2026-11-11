@@ -3442,6 +3442,9 @@ on に変わる（[ADR 0337](./decisions/0337-recall-association-default-on.md)�
   減衰しきった記憶も候補に残り、`omitted` の `filtered(decayed)` は積まれず、`explain` の `decayGate` は `"disabled"` になる。型は変わらない。
   影響が出るのは、減衰しきった記憶が既定で返らないこと・`filtered(decayed)` の件数に頼っていた呼び出し側である。従来どおりにするには `includeFullyDecayed: false` を渡す。`sweepArchive`（減衰しきった記憶を `archived` にする掃引）は変わらないので、明示的に掃引している運用では、archive された記憶は今までどおり返らない。
 
+- **`@mnemora/core`: `claimKey: { enabled: true, detectContested: true }` で `knownPredicatesFromStore` を省略すると、既存の述語が claim key の語彙ヒントに入る**（[ADR 0708](./decisions/0708-claim-key-known-predicates-default-with-detect-contested.md)）。
+  claim key の LLM のプロンプトが変わり、`MemoryStore.listActiveClaimPredicates?` を1回読むようになる。記録した応答（カセット）を再生している呼び出し側は、記録に無いプロンプトになりうる。従来どおりにするには `knownPredicatesFromStore: false` を渡す。
+
 ## この文書が確かめていないこと
 
 - **DB マイグレーション（`0013`/`0014`/`0015`）を実際に Postgres へ適用した結果**

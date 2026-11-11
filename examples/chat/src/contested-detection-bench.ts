@@ -73,6 +73,8 @@ export async function runContestedDetection(
     cases?: readonly ContestedCase[];
     /** 渡すと claim key だけを本物の LLM に付けさせる（抽出は oracle のまま）。 */
     claimKeyProvider?: LLMProvider;
+    /** `true` なら `ClaimKeyOptions.knownPredicatesFromStore` を渡す（既存の述語を語彙ヒントにする。ADR 0329）。 */
+    knownPredicatesFromStore?: boolean;
   },
 ): Promise<ContestedCaseResult[]> {
   const client = createPostgresClient(databaseUrl);
@@ -109,7 +111,12 @@ export async function runContestedDetection(
           externalId: `${c.id}-${String(index)}`,
           ...(turn.validFrom !== undefined ? { validFrom: turn.validFrom } : {}),
           ...(turn.validUntil !== undefined ? { validUntil: turn.validUntil } : {}),
-          claimKey: { enabled: true, detectContested: true },
+          claimKey: {
+            enabled: true,
+            detectContested: true,
+            // core の既定（detectContested なら有効、ADR 0708）に依らず、測る条件を明示する。
+            knownPredicatesFromStore: options.knownPredicatesFromStore === true,
+          },
         });
         if ((observed.contestedDetection ?? []).some((d) => reportsConflict(d.result.kind))) {
           detected = true;
