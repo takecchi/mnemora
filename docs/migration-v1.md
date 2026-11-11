@@ -1,4 +1,4 @@
-# 移行ガイド（v0.1.9 → v0.2.0 → v0.3.0 → v0.4.0 → v0.5.0 → v1.0.0 → v1.0.1 → v1.0.2 → v1.1.0 → v1.2.0 → v1.3.0 → 次の版）
+# 移行ガイド（v0.1.9 → v0.2.0 → v0.3.0 → v0.4.0 → v0.5.0 → v1.0.0 → v1.0.1 → v1.0.2 → v1.1.0 → v1.2.0 → v1.3.0 → v2.0.0 → 次の版）
 
 **この文書は、利用者が版を上げるときに何をどう直すかだけを扱う。**⭐ **5世代を持つ**（⚠ 2026-09-18 に2→3世代、2026-09-19 に3→4世代、**2026-09-21 に4→5世代**へ訂正した。下記）**:**
 
@@ -14,7 +14,8 @@
 | **v1.0.2 → v1.1.0**（🔴 **出荷済み**） | **12件**（確定。両端が tag で閉じている） | 「🔴 破壊的変更（v1.0.2 → v1.1.0）」 |
 | **v1.1.0 → v1.2.0**（🔴 **出荷済み**。2026-10-02） | 件数はここに書かない（両端が tag で閉じている。見出しと CHANGELOG `[1.2.0]` の `### Breaking` が持つ。項目29 は破壊的と数えない） | 「🔴 破壊的変更（v1.1.0 → v1.2.0）」 |
 | **v1.2.0 → v1.3.0**（`v1.3.0` で出す。2026-10-07） | 件数はここに書かない（見出しと CHANGELOG `[1.3.0]` の `### Breaking` が持つ） | 「🔴 破壊的変更（v1.2.0 → v1.3.0）」 |
-| **v1.3.0 → 次の版**（未リリース） | 件数はここに書かない（`main` が動けば変わる） | 「🔴 破壊的変更（v1.3.0 → 次の版）」 |
+| **v1.3.0 → v2.0.0**（`v2.0.0` で出す。2026-11-11） | 件数はここに書かない（見出しと CHANGELOG `[2.0.0]` の `### Breaking` が持つ） | 「🔴 破壊的変更（v1.3.0 → v2.0.0）」 |
+| **v2.0.0 → 次の版**（未リリース） | 件数はここに書かない（`main` が動けば変わる） | 「🔴 破壊的変更（v2.0.0 → 次の版）」 |
 
 ⭐ **全5世代の件数を書いてよいのは、両端が tag で閉じているからである。**`v0.1.9`→`v0.2.0` も
 `v0.2.0`→`v0.3.0` も `v0.3.0`→`v0.4.0` も `v0.4.0`→`v0.5.0` も `v0.5.0`→`v1.0.0` も、
@@ -2860,9 +2861,9 @@ PR #1712（[ADR 0600](./decisions/0600-erase-tenant-recheck-teeth.md)）・#1715
 
 **DB マイグレーション**: 要らない。
 
-## 🔴 破壊的変更（v1.3.0 → 次の版）—— **未リリース**
+## 🔴 破壊的変更（v1.3.0 → v2.0.0）—— **`v2.0.0` で出す**
 
-この節は、`v1.3.0`（tag の sha の正本は GitHub Release `v1.3.0`）より後に `main` へ入った変更を数える。まだ棚卸しはしておらず、下の項目は、着地に先立って変更を作った本人が足したものである。⛔ ここに件数を書かないこと（[ADR 0234](./decisions/0234-bake-no-numbers-into-tools-and-artifacts.md)）。番号は 72 から振る。
+この節は、`v1.3.0`（tag の sha の正本は GitHub Release `v1.3.0`）より後に `main` へ入った変更を数える。下の項目は、着地に先立って変更を作った本人が足したものである。⚠ **2026-11-11 に `07a35b80`（PR #2126）まで棚卸しした**（CHANGELOG `[2.0.0]` 節の冒頭）。この節の項目の過不足は、CHANGELOG の `### Breaking` と突き合わせた範囲での確認で、型に現れない意味の変更を網羅したとは言わない。⛔ ここに件数を書かないこと（[ADR 0234](./decisions/0234-bake-no-numbers-into-tools-and-artifacts.md)）。番号は 72 から振る。
 
 ### 72. `memories.provenance` の jsonb に `kind` が無い行を、DB が拒むようになった（`@mnemora/postgres` の migration `0033`・`0034`）
 
@@ -3422,7 +3423,7 @@ on に変わる（[ADR 0337](./decisions/0337-recall-association-default-on.md)�
 - **`@mnemora/postgres` の `runMigrations`: `registerEmbeddingSpace` と同時に走って埋め込み表の索引の名前がぶつかり（`23505`・`pg_class_relname_nsp_index`・`idx_memory_embeddings_…`）落ちたファイルを、1回だけ流し直す**（[ADR 0638](./decisions/0638-run-migrations-reruns-file-once-on-embedding-index-name-race.md)。🟡。[ADR 0464](./decisions/0464-register-embedding-space-absorbs-migration-index-race.md) の負債 D1b）。
   以前は、そのとき `runMigrations` が `migration <file> failed: …`（`cause.code` は `23505`）で落ち、呼び直すと通った。いまは runner が同じファイルを1回だけやり直して通る。2回目も落ちたら、2回目のエラーが今までと同じ形で出る。**落ちる入力が減る変更**で、手順は要らない。DB マイグレーションは足していない（既存の migration ファイルは変えていない）。この失敗を捕まえて呼び直していた呼び出し側は、その分岐に入らなくなる。
 
-## 🟡 v1.3.0 → 次の版で、挙動が変わるが手順は要らないもの —— **未リリース**
+## 🟡 v1.3.0 → v2.0.0 で、挙動が変わるが手順は要らないもの —— **`v2.0.0` で出す**
 
 - **`@mnemora/core` の `recall()`: `timeWeighting` を渡さないときの方針が `"legacy"` から `"eventAwareFreshness"` になった**（[ADR 0700](./decisions/0700-default-time-weighting-event-aware-freshness.md)。[Issue #2106](https://github.com/takecchi/mnemora/issues/2106)。ADR 0300 §7 のオーナー判断）。
   `occurredAt` を持たない記憶（恒常的な事実・好み）の `freshness` が、`recordedAt` の古さで沈まず 1 に固定される。`occurredAt` を持つ記憶の式は変わらない。忘却ゲート・`validAt` ゲートは変わらない。型・シグネチャは変わらず、新しく断る入力も無い。
@@ -3444,6 +3445,14 @@ on に変わる（[ADR 0337](./decisions/0337-recall-association-default-on.md)�
 
 - **`@mnemora/core`: `claimKey: { enabled: true, detectContested: true }` で `knownPredicatesFromStore` を省略すると、既存の述語が claim key の語彙ヒントに入る**（[ADR 0708](./decisions/0708-claim-key-known-predicates-default-with-detect-contested.md)）。
   claim key の LLM のプロンプトが変わり、`MemoryStore.listActiveClaimPredicates?` を1回読むようになる。記録した応答（カセット）を再生している呼び出し側は、記録に無いプロンプトになりうる。従来どおりにするには `knownPredicatesFromStore: false` を渡す。
+
+## 🔴 破壊的変更（v2.0.0 → 次の版）—— **未リリース**
+
+この節は、`v2.0.0`（tag の sha の正本は GitHub Release `v2.0.0`）より後に `main` へ入った変更を数える。まだ項目は無い。⛔ ここに件数を書かないこと（[ADR 0234](./decisions/0234-bake-no-numbers-into-tools-and-artifacts.md)）。番号は、上の節の最後の番号の続きから振る。
+
+## 🟡 v2.0.0 → 次の版で、挙動が変わるが手順は要らないもの —— **未リリース**
+
+まだ項目は無い。
 
 ## この文書が確かめていないこと
 
