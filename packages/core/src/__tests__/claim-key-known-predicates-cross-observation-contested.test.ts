@@ -94,10 +94,36 @@ describe("claim key の検出: knownPredicatesFromStore と detectContested を�
     expect(travel?.contestedWith).toBe(hobbyId);
   });
 
-  it("対照: knownPredicatesFromStore を付けなければ、2つ目の語彙ヒントに new_hobby_intent は入らない", async () => {
+  it("対照: knownPredicatesFromStore: false を明示すれば、2つ目の語彙ヒントに new_hobby_intent は入らない", async () => {
+    const llm = sequencedLlm(script());
+    const { runtime } = buildRuntime(llm);
+    const claimKey = {
+      enabled: true,
+      detectContested: true,
+      knownPredicatesFromStore: false,
+    } as const;
+
+    await runtime.observe(ctx, { kind: "utterance", text: FIRST_TEXT, claimKey });
+    await runtime.observe(ctx, { kind: "utterance", text: SECOND_TEXT, claimKey });
+
+    expect(llm.calls[3]!.prompt.system).not.toContain("new_hobby_intent");
+  });
+
+  it("既定（ADR 0708）: detectContested: true なら、knownPredicatesFromStore を省略しても既存の述語が語彙ヒントに入る", async () => {
     const llm = sequencedLlm(script());
     const { runtime } = buildRuntime(llm);
     const claimKey = { enabled: true, detectContested: true } as const;
+
+    await runtime.observe(ctx, { kind: "utterance", text: FIRST_TEXT, claimKey });
+    await runtime.observe(ctx, { kind: "utterance", text: SECOND_TEXT, claimKey });
+
+    expect(llm.calls[3]!.prompt.system).toContain("new_hobby_intent");
+  });
+
+  it("既定: detectContested を使わない（enabled だけの）呼び出しでは、既存の述語を語彙ヒントに入れない（プロンプトを変えない）", async () => {
+    const llm = sequencedLlm(script());
+    const { runtime } = buildRuntime(llm);
+    const claimKey = { enabled: true } as const;
 
     await runtime.observe(ctx, { kind: "utterance", text: FIRST_TEXT, claimKey });
     await runtime.observe(ctx, { kind: "utterance", text: SECOND_TEXT, claimKey });

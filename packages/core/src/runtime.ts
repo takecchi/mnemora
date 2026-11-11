@@ -2915,7 +2915,9 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     claimKeyOptions: ClaimKeyOptions,
   ): Promise<string[] | undefined> {
     const callerKnown = claimKeyOptions.knownPredicates ?? [];
-    const fromStoreOption = claimKeyOptions.knownPredicatesFromStore;
+    // 省略時は `detectContested` に揃える（ADR 0708）。検出を使うなら、ターンをまたいで述語の名前を揃えないと訂正を見逃す。
+    const fromStoreOption =
+      claimKeyOptions.knownPredicatesFromStore ?? claimKeyOptions.detectContested === true;
     const listActiveClaimPredicates = deps.memoryStore.listActiveClaimPredicates;
     if (!fromStoreOption || listActiveClaimPredicates === undefined) {
       return callerKnown.length > 0 ? callerKnown : undefined;

@@ -1213,9 +1213,16 @@ async function runContestedDetectionCommand(): Promise<void> {
   console.log(
     `[contested-detection] claim key: ${claimKeyProvider === undefined ? "oracle" : "OpenAI"}`,
   );
+  // `MNEMORA_CONTESTED_KNOWN_PREDICATES_FROM_STORE=1` で、既存の述語を claim key の語彙ヒントに渡す（ADR 0329）。
+  const knownPredicatesFromStore =
+    process.env.MNEMORA_CONTESTED_KNOWN_PREDICATES_FROM_STORE === "1";
+  if (knownPredicatesFromStore) {
+    console.log("[contested-detection] knownPredicatesFromStore: true");
+  }
   const results = await runContestedDetection(requireDatabaseUrl(), {
     tenantPrefix: `contested-detection-${newRunToken()}`,
     ...(claimKeyProvider !== undefined ? { claimKeyProvider } : {}),
+    ...(knownPredicatesFromStore ? { knownPredicatesFromStore } : {}),
   });
   console.log(formatContestedReport(results));
   const jsonPath = process.env.MNEMORA_CONTESTED_DETECTION_JSON;

@@ -117,6 +117,7 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 
 ### Changed（後方互換だが挙動が変わりうるもの）
 
+- **`@mnemora/core`: `claimKey: { detectContested: true }` のとき、`knownPredicatesFromStore` を省略すると有効になる（既存の述語を claim key の語彙ヒントに渡す）**（[ADR 0708](./docs/decisions/0708-claim-key-known-predicates-default-with-detect-contested.md)）。実際の LLM で、述語の名前がターンごとに揃わず訂正を見逃していた（Recall 0.38〜0.63）のが、0.875 に上がった。⚠ 語彙に吸い寄せられた誤検出も増える（`contested` の印が付くだけで、記憶は失われない）。従来どおりにするには `knownPredicatesFromStore: false` を渡す。`detectContested` を使わない呼び出しは変わらない。
 - **`@mnemora/core` の `recall()`: 忘却ゲートを既定では掛けなくなった——`includeFullyDecayed` の既定が `false` から `true` になった**（[ADR 0707](./docs/decisions/0707-recall-decay-gate-default-off.md)。ADR 0153 の既定を覆す）。減衰しきった記憶（`decayFloorAt` を過ぎた記憶）も、関連が強ければ返る。時間は順位を下げることにだけ効く（ADR 0704 の `timeWeightFloor`）。`omitted` の `filtered(decayed)` は、既定では積まれなくなる。従来どおりにするには `includeFullyDecayed: false` を渡す。`consolidate`・`reflect` が内部で呼ぶ `recall()` にも効く。掃引（`sweepArchive`）は変わらない。
 - **`@mnemora/core` の `recall()`: 時間の重みに下限を足した——`RecallQuery.timeWeightFloor`（既定 0.5）。古い記憶でも、時間の重みは半分までしか下がらない**（[ADR 0704](./docs/decisions/0704-recall-time-weight-floor.md)）。以前は時間の項が際限なく小さくなり、関連の薄い新しい記憶が関連の強い古い記憶を上回って、話題に出ない事実がまっすぐ指す問いにも返らなくなっていた。`timeWeightFloor: 0` を渡せば従来の順位付けと1バイトも変わらない。φ を使ったとき `ScoreBreakdown` に任意の欄 `timeWeightFloor` が入る。`consolidate`・`reflect` が内部で呼ぶ `recall()` にも効く。誰が影響を受けるかは [docs/migration-v1.md](./docs/migration-v1.md) の「🟡 v1.3.0 → 次の版」。
   ⚠ `@mnemora/local-embedding` では、類似度の差が小さいので下限がほとんど効かない（30日目以降の正解はほぼ返らなかった）。`packages/local-embedding/README.md` の注意書き。

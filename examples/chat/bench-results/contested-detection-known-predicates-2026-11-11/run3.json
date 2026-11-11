@@ -1,0 +1,502 @@
+{
+  "schemaVersion": 1,
+  "results": [
+    {
+      "id": "conflict-color",
+      "category": "true_conflict",
+      "detected": true,
+      "derivedKeys": [
+        {
+          "claims": [
+            {
+              "subject": "user",
+              "predicate": "favorite_color"
+            }
+          ]
+        },
+        {
+          "claims": [
+            {
+              "subject": "user",
+              "predicate": "favorite_color"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "conflict-residence-same-period",
+      "category": "true_conflict",
+      "detected": true,
+      "derivedKeys": [
+        {
+          "claims": [
+            {
+              "subject": "user",
+              "predicate": "residence_year"
+            }
+          ]
+        },
+        {
+          "claims": [
+            {
+              "subject": "user",
+              "predicate": "residence_year"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "conflict-employer",
+      "category": "true_conflict",
+      "detected": true,
+      "derivedKeys": [
+        {
+          "claims": [
+            {
+              "subject": "user",
+              "predicate": "employed_at_logistics_company"
+            }
+          ]
+        },
+        {
+          "claims": [
+            {
+              "subject": "user",
+              "predicate": "employed_at_logistics_company"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "conflict-blood-type",
+      "category": "true_conflict",
+      "detected": true,
+      "derivedKeys": [
+        {
+          "claims": [
+            {
+              "subject": "user",
+              "predicate": "blood_type"
+            }
+          ]
+        },
+        {
+          "claims": [
+            {
+              "subject": "user",
+              "predicate": "blood_type"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "correction-separate-turn",
+      "category": "explicit_correction",
+      "detected": true,
+      "derivedKeys": [
+        {
+          "claims": [
+            {
+              "subject": "user",
+              "predicate": "favorite_color"
+            }
+          ]
+        },
+        {
+          "claims": [
+            {
+              "subject": "user",
+              "predicate": "favorite_color"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "correction-residence",
+      "category": "explicit_correction",
+      "detected": true,
+      "derivedKeys": [
+        {
+          "claims": [
+            {
+              "subject": "user",
+              "predicate": "location"
+            }
+          ]
+        },
+        {
+          "claims": [
+            {
+              "subject": "user",
+              "predicate": "location"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "correction-same-utterance",
+      "category": "explicit_correction",
+      "detected": false,
+      "derivedKeys": [
+        {
+          "claims": [
+            {
+              "subject": "user",
+              "predicate": "meeting_day"
+            },
+            {
+              "subject": "user",
+              "predicate": "meeting_day"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "correction-allergy",
+      "category": "explicit_correction",
+      "detected": true,
+      "derivedKeys": [
+        {
+          "claims": [
+            {
+              "subject": "user",
+              "predicate": "egg_allergy"
+            }
+          ]
+        },
+        {
+          "claims": [
+            {
+              "subject": "user",
+              "predicate": "egg_allergy"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "paraphrase-color",
+      "category": "paraphrase",
+      "detected": true,
+      "derivedKeys": [
+        {
+          "claims": [
+            {
+              "subject": "user",
+              "predicate": "favorite_color"
+            }
+          ]
+        },
+        {
+          "claims": [
+            {
+              "subject": "user",
+              "predicate": "favorite_color"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "paraphrase-whitespace",
+      "category": "paraphrase",
+      "detected": false,
+      "derivedKeys": [
+        {
+          "claims": [
+            {
+              "subject": "user",
+              "predicate": "favorite_color"
+            }
+          ]
+        },
+        {
+          "claims": [
+            {
+              "subject": "user",
+              "predicate": "favorite_color"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "paraphrase-residence",
+      "category": "paraphrase",
+      "detected": true,
+      "derivedKeys": [
+        {
+          "claims": [
+            {
+              "subject": "user",
+              "predicate": "location"
+            }
+          ]
+        },
+        {
+          "claims": [
+            {
+              "subject": "user",
+              "predicate": "location"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "paraphrase-pet",
+      "category": "paraphrase",
+      "detected": true,
+      "derivedKeys": [
+        {
+          "claims": [
+            {
+              "subject": "user",
+              "predicate": "has_pet"
+            }
+          ]
+        },
+        {
+          "claims": [
+            {
+              "subject": "user",
+              "predicate": "has_pet"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "temporal-explicit-periods",
+      "category": "temporal_compatible",
+      "detected": false,
+      "derivedKeys": [
+        {
+          "claims": [
+            {
+              "subject": "user",
+              "predicate": "residence_year"
+            }
+          ]
+        },
+        {
+          "claims": [
+            {
+              "subject": "user",
+              "predicate": "residence_year"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "temporal-explicit-employer",
+      "category": "temporal_compatible",
+      "detected": false,
+      "derivedKeys": [
+        {
+          "claims": [
+            {
+              "subject": "user",
+              "predicate": "employment_history"
+            }
+          ]
+        },
+        {
+          "claims": [
+            {
+              "subject": "user",
+              "predicate": "employment_history"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "temporal-in-text-only",
+      "category": "temporal_compatible",
+      "detected": true,
+      "derivedKeys": [
+        {
+          "claims": [
+            {
+              "subject": "user",
+              "predicate": "residency_location"
+            }
+          ]
+        },
+        {
+          "claims": [
+            {
+              "subject": "user",
+              "predicate": "residency_location"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "temporal-in-text-age",
+      "category": "temporal_compatible",
+      "detected": true,
+      "derivedKeys": [
+        {
+          "claims": [
+            {
+              "subject": "user",
+              "predicate": "age"
+            }
+          ]
+        },
+        {
+          "claims": [
+            {
+              "subject": "user",
+              "predicate": "age"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "non-conflict-other-person",
+      "category": "non_conflict",
+      "detected": false,
+      "derivedKeys": [
+        {
+          "claims": [
+            {
+              "subject": "user",
+              "predicate": "favorite_color"
+            }
+          ]
+        },
+        {
+          "claims": [
+            {
+              "subject": "sister",
+              "predicate": "favorite_color"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "non-conflict-other-predicate",
+      "category": "non_conflict",
+      "detected": true,
+      "derivedKeys": [
+        {
+          "claims": [
+            {
+              "subject": "user",
+              "predicate": "favorite_color"
+            }
+          ]
+        },
+        {
+          "claims": [
+            {
+              "subject": "user",
+              "predicate": "favorite_color"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "non-conflict-multi-valued",
+      "category": "non_conflict",
+      "detected": true,
+      "derivedKeys": [
+        {
+          "claims": [
+            {
+              "subject": "user",
+              "predicate": "hobby"
+            }
+          ]
+        },
+        {
+          "claims": [
+            {
+              "subject": "user",
+              "predicate": "hobby"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "non-conflict-languages",
+      "category": "non_conflict",
+      "detected": true,
+      "derivedKeys": [
+        {
+          "claims": [
+            {
+              "subject": "user",
+              "predicate": "can_speak_english"
+            }
+          ]
+        },
+        {
+          "claims": [
+            {
+              "subject": "user",
+              "predicate": "can_speak_english"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "overall": {
+    "tp": 7,
+    "fp": 8,
+    "fn": 1,
+    "tn": 4,
+    "precision": 0.4666666666666667,
+    "recall": 0.875,
+    "f1": 0.608695652173913
+  },
+  "byCategory": {
+    "true_conflict": {
+      "tp": 4,
+      "fp": 0,
+      "fn": 0,
+      "tn": 0
+    },
+    "explicit_correction": {
+      "tp": 3,
+      "fp": 0,
+      "fn": 1,
+      "tn": 0
+    },
+    "paraphrase": {
+      "tp": 0,
+      "fp": 3,
+      "fn": 0,
+      "tn": 1
+    },
+    "temporal_compatible": {
+      "tp": 0,
+      "fp": 2,
+      "fn": 0,
+      "tn": 2
+    },
+    "non_conflict": {
+      "tp": 0,
+      "fp": 3,
+      "fn": 0,
+      "tn": 1
+    }
+  }
+}

@@ -1789,6 +1789,7 @@ DATABASE_URL=... pnpm --filter @mnemora/example-chat run contested-detection
 - カテゴリ: 同時点の矛盾・明示的な訂正（検出されるべき）、言い換え・時間的に両立・別の情報（検出されるべきでない）。Precision・Recall・F1 と、カテゴリごとの TP/FP/FN/TN を出す。`MNEMORA_CONTESTED_DETECTION_JSON` で JSON も書く。
 - いまの判定は `src/__tests__/contested-detection.postgres.test.ts` がケースごとに固定している（既知の誤検出・見逃しを含む）。
 - `MNEMORA_CONTESTED_CLAIM_KEYS=openai` を渡すと、claim key だけを本物の LLM（`gpt-4o-mini`）に付けさせる（抽出は oracle のまま）。⚠ 実 API を叩く（`OPENAI_API_KEY` が要る）。結果の JSON には、発話ごとの鍵の応答（`derivedKeys`）が入る。測った結果は ADR 0703 の追記。
+- `MNEMORA_CONTESTED_KNOWN_PREDICATES_FROM_STORE=1` を渡すと、`knownPredicatesFromStore: true`（既存の述語を語彙ヒントにする）を明示して測る。core の既定では `detectContested: true` のときに有効になる（ADR 0708）が、この測定は既定に依らないよう明示の指定でだけ有効にする。
 - ⚠ 合成データで、カテゴリごとに4件しかない。実運用の誤検出率は主張しない。測った数字と、アルゴリズムを変えなかった理由は [ADR 0703](../../docs/decisions/0703-contested-detection-eval.md)。
 
 ## `consolidation-cost`: `Runtime.consolidate()` が「載る量」に効くかの実測（Issue #136）

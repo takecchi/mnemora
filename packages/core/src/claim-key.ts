@@ -282,7 +282,7 @@ export const DEFAULT_KNOWN_PREDICATES_FROM_STORE_LIMIT = 20;
  *   `active` なら `Runtime.markContested` を呼ぶ（`superseded` へは進めない）。その1件が既に `contested` だった場合・
  *   一致が2件以上の場合は `markContested` を呼ばず、状態を動かさずに evidence だけを積む。
  *   **`enabled: false`（または省略）と組み合わせても何も起きない**（`runtime.ts` の `detectClaimKeyContested` 参照）。
- * - **`{ enabled: true, knownPredicatesFromStore: true }`**（ADR 0329）: `deriveClaimKeys` を呼ぶ**前**に、
+ * - **`{ enabled: true, knownPredicatesFromStore: true }`**（ADR 0329。**`detectContested: true` のときは省略しても有効**。ADR 0708）: `deriveClaimKeys` を呼ぶ**前**に、
  *   `MemoryStore.listActiveClaimPredicates?`（任意メソッド）で「同じ tenant・同じ `subjectId`・`active`」な既存 Memory の
  *   predicate 一覧を新しい順に集め、呼び出し側の `knownPredicates`（渡していれば）の**後ろ**へ重複無く連結してから渡す
  *   （利用者が明示的に選んだ語彙を優先する）。**`enabled: false`/省略、または store がこの口を実装していない adapter では、
@@ -333,7 +333,9 @@ export interface ClaimKeyOptions {
   detectContested?: boolean | undefined;
   /**
    * `MemoryStore.listActiveClaimPredicates?` から集めた predicate 一覧を、`knownPredicates` の語彙ヒントへ動的に足す
-   * （ADR 0329）。**既定 `false`（省略と同じ）。**`true` を渡すと {@link DEFAULT_KNOWN_PREDICATES_FROM_STORE_LIMIT} 件まで、
+   * （ADR 0329）。**省略時は `detectContested` と同じ値**（[ADR 0708](../../../docs/decisions/0708-claim-key-known-predicates-default-with-detect-contested.md)。
+   * 検出を使うなら、ターンをまたいで述語の名前を揃えないと訂正を見逃すため。`detectContested` を使わない呼び出しでは、従来どおり
+   * store を読まず、プロンプトも変わらない）。`false` を明示すれば無効にできる。`true` を渡すと {@link DEFAULT_KNOWN_PREDICATES_FROM_STORE_LIMIT} 件まで、
    * `{ limit: number }` を渡すとその件数まで集める。`enabled: false`/省略、または store がこの口を実装していない adapter では
    * 静かに効かない（上のクラス doc 参照）。
    *
