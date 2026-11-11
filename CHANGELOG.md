@@ -39,9 +39,28 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 
 ---
 
-## [1.4.0] - 未リリース
+## [2.1.0] - 未リリース
 
-**この節は `v1.3.0` からの差分を対象とする。**⛔ **版は仮である**——破壊的変更が無ければ `1.3.1` になりうる。版を決めるのはオーナーである。起点は `v1.3.0` の tag が指す commit であり（tag の sha の正本は GitHub Release `v1.3.0`）、それより後に `main` へ入った PR がこの節の対象になる。まだ何も棚卸ししていない。⛔ ここに件数を書かないこと（[ADR 0234](./docs/decisions/0234-bake-no-numbers-into-tools-and-artifacts.md)）。
+**この節は `v2.0.0` からの差分を対象とする。**⛔ **版は仮である**——破壊的変更が無ければ `2.0.1` になりうる。版を決めるのはオーナーである。起点は `v2.0.0` の tag が指す commit であり（tag の sha の正本は GitHub Release `v2.0.0`）、それより後に `main` へ入った PR がこの節の対象になる。まだ何も棚卸ししていない。⛔ ここに件数を書かないこと（[ADR 0234](./docs/decisions/0234-bake-no-numbers-into-tools-and-artifacts.md)）。
+
+## [2.0.0] - 2026-11-11
+
+**この節は `v1.3.0` からの差分を対象とする。****版は `2.0.0` である**（オーナーの判断、2026-11-11、対話セッション。既定の挙動を変える変更が4つ入ったため。下の「⭐ この版で既定が変わったもの」）。起点は `v1.3.0` の tag が指す commit であり（tag の sha の正本は GitHub Release `v1.3.0`）、`07a35b80`（PR #2126）までに `main` へ入った PR を数えた。⚠ 日付は Release を作る予定の日である。別の日に出すなら、その日に直すこと。⛔ ここに件数を書かないこと（[ADR 0234](./docs/decisions/0234-bake-no-numbers-into-tools-and-artifacts.md)）。
+
+⚠ **2026-11-11 の棚卸し（`v1.3.0`..`07a35b80`）**: `scripts/release-candidates.mjs` が信号を付けた commit を、この節の項目と突き合わせた（PR・Issue・ADR の番号と、項目の言葉で）。
+- **場所を直した項目**: PR #1870（語彙検索のクエリ全体の上限を書記素の境界で切る、Issue #1798）の項目が、出荷済みの `[1.3.0]` 節の `### Fixed` に書き足されていた。`v1.3.0` の tag（`d811241f`）より後の PR なので、この節の `### Fixed` へ移した。
+- **載せなかったもの**: コード中のコメントや文書だけを直した PR（`chore:`・`docs:` の大半）、すでに書かれていた約束を試験で縛っただけの PR（例: #2093 の `attributes` の上限の両端、#2082・#2083・#2074）、scripts の試験（#2060）。どれも利用者に見える振る舞いは変えていない。
+- **適合スイートに約束を足した `test:` の PR**（#2044・#2052・#2053・#2066・#2070・#2072・#2075 など）は、下の `### Breaking` の項目が Issue（#1935・#1940・#2012・#2048 など）の単位でまとめて受けている。
+- この判断は担い手（Claude Code）の判断であり、オーナーの判断ではない。
+
+### ⭐ この版で既定が変わったもの（型は変わらない）
+
+- `recall()` の時間の方針の既定が `eventAwareFreshness` になった（ADR 0700）。
+- `recall()` の時間の重みに下限 0.5 が掛かる（ADR 0704）。
+- `recall()` が既定では忘却ゲートを掛けない（ADR 0707）。
+- `claimKey: { detectContested: true }` のとき、既存の述語を語彙ヒントに渡す（ADR 0708）。
+
+どれも、従来どおりにする指定がある（下の `### Changed` の各項目）。⚠ `@mnemora/local-embedding` では、下限がほとんど効かない（`packages/local-embedding/README.md`）。**DB マイグレーション `0033`・`0034`・`0035` がある**（`0033`・`0034` は下の `### Breaking`、`0035` は `### Added`）。
 
 ### Breaking
 
@@ -119,15 +138,19 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 
 - **`@mnemora/core`: `claimKey: { detectContested: true }` のとき、`knownPredicatesFromStore` を省略すると有効になる（既存の述語を claim key の語彙ヒントに渡す）**（[ADR 0708](./docs/decisions/0708-claim-key-known-predicates-default-with-detect-contested.md)）。実際の LLM で、述語の名前がターンごとに揃わず訂正を見逃していた（Recall 0.38〜0.63）のが、0.875 に上がった。⚠ 語彙に吸い寄せられた誤検出も増える（`contested` の印が付くだけで、記憶は失われない）。従来どおりにするには `knownPredicatesFromStore: false` を渡す。`detectContested` を使わない呼び出しは変わらない。
 - **`@mnemora/core` の `recall()`: 忘却ゲートを既定では掛けなくなった——`includeFullyDecayed` の既定が `false` から `true` になった**（[ADR 0707](./docs/decisions/0707-recall-decay-gate-default-off.md)。ADR 0153 の既定を覆す）。減衰しきった記憶（`decayFloorAt` を過ぎた記憶）も、関連が強ければ返る。時間は順位を下げることにだけ効く（ADR 0704 の `timeWeightFloor`）。`omitted` の `filtered(decayed)` は、既定では積まれなくなる。従来どおりにするには `includeFullyDecayed: false` を渡す。`consolidate`・`reflect` が内部で呼ぶ `recall()` にも効く。掃引（`sweepArchive`）は変わらない。
-- **`@mnemora/core` の `recall()`: 時間の重みに下限を足した——`RecallQuery.timeWeightFloor`（既定 0.5）。古い記憶でも、時間の重みは半分までしか下がらない**（[ADR 0704](./docs/decisions/0704-recall-time-weight-floor.md)）。以前は時間の項が際限なく小さくなり、関連の薄い新しい記憶が関連の強い古い記憶を上回って、話題に出ない事実がまっすぐ指す問いにも返らなくなっていた。`timeWeightFloor: 0` を渡せば従来の順位付けと1バイトも変わらない。φ を使ったとき `ScoreBreakdown` に任意の欄 `timeWeightFloor` が入る。`consolidate`・`reflect` が内部で呼ぶ `recall()` にも効く。誰が影響を受けるかは [docs/migration-v1.md](./docs/migration-v1.md) の「🟡 v1.3.0 → 次の版」。
+- **`@mnemora/core` の `recall()`: 時間の重みに下限を足した——`RecallQuery.timeWeightFloor`（既定 0.5）。古い記憶でも、時間の重みは半分までしか下がらない**（[ADR 0704](./docs/decisions/0704-recall-time-weight-floor.md)）。以前は時間の項が際限なく小さくなり、関連の薄い新しい記憶が関連の強い古い記憶を上回って、話題に出ない事実がまっすぐ指す問いにも返らなくなっていた。`timeWeightFloor: 0` を渡せば従来の順位付けと1バイトも変わらない。φ を使ったとき `ScoreBreakdown` に任意の欄 `timeWeightFloor` が入る。`consolidate`・`reflect` が内部で呼ぶ `recall()` にも効く。誰が影響を受けるかは [docs/migration-v1.md](./docs/migration-v1.md) の「🟡 v1.3.0 → v2.0.0」。
   ⚠ `@mnemora/local-embedding` では、類似度の差が小さいので下限がほとんど効かない（30日目以降の正解はほぼ返らなかった）。`packages/local-embedding/README.md` の注意書き。
 - **`@mnemora/core` の `recall()`: `timeWeighting` の既定が `"legacy"` から `"eventAwareFreshness"` になった**（[ADR 0700](./docs/decisions/0700-default-time-weighting-event-aware-freshness.md)。[Issue #2106](https://github.com/takecchi/mnemora/issues/2106)。ADR 0300 §7 の**オーナー判断**）。
-  `occurredAt` を持たない記憶の `freshness` が 1 に固定され、使われ続けている恒常的な事実が `recordedAt` の古さで沈まなくなる。従来どおりにするには `timeWeighting: "legacy"` を渡す。型・シグネチャは変わらない。誰が影響を受けるかは [docs/migration-v1.md](./docs/migration-v1.md) の「🟡 v1.3.0 → 次の版」。
-- **`EventStore.list` の、同じ `at` の行が `seq` の順に並ぶようになった（`@mnemora/postgres`・testkit の fixture）。`forget` が積む `forgotten` のイベントの `meta` に `previousStatus`（直前の status）が増えた**（[ADR 0702](./docs/decisions/0702-memory-event-seq.md)）。`meta` を完全一致で比べていた呼び出し側だけが影響を受ける。誰が影響を受けるかは [docs/migration-v1.md](./docs/migration-v1.md) の「🟡 v1.3.0 → 次の版」。
+  `occurredAt` を持たない記憶の `freshness` が 1 に固定され、使われ続けている恒常的な事実が `recordedAt` の古さで沈まなくなる。従来どおりにするには `timeWeighting: "legacy"` を渡す。型・シグネチャは変わらない。誰が影響を受けるかは [docs/migration-v1.md](./docs/migration-v1.md) の「🟡 v1.3.0 → v2.0.0」。
+- **`EventStore.list` の、同じ `at` の行が `seq` の順に並ぶようになった（`@mnemora/postgres`・testkit の fixture）。`forget` が積む `forgotten` のイベントの `meta` に `previousStatus`（直前の status）が増えた**（[ADR 0702](./docs/decisions/0702-memory-event-seq.md)）。`meta` を完全一致で比べていた呼び出し側だけが影響を受ける。誰が影響を受けるかは [docs/migration-v1.md](./docs/migration-v1.md) の「🟡 v1.3.0 → v2.0.0」。
 - **`@mnemora/testkit` の `InMemoryMemoryStore.supersedeWithNewMemories` が、CAS に弾かれた対象のイベントを確かめなくなった**（[ADR 0689](./docs/decisions/0689-recheck-0928-followups-cas-skipped-event-and-fake-provenance.md)。[Issue #1827](https://github.com/takecchi/mnemora/issues/1827)。クローンの判断で、オーナーの判断ではない）。
   以前は、CAS に弾かれる対象に書けないイベント（`kind` が列挙に無い・`at` が Invalid Date・`actor` に NUL・`meta` に BigInt・`sizeBeforeBytes` が整数でない）を渡すと例外になった。いまは `conflicted` に積んで返す（`MemoryStore.supersedeWithNewMemories` の TSDoc の約束。`@mnemora/postgres` は元からこの形）。CAS を通る対象は、いままでどおり状態を書き換える前に投げる。**投げる入力が減る向きだけの変更で、型・シグネチャは変わらない。**
 - **`@mnemora/testkit` の `SeededEmbeddingProvider.usage.real` が、委譲先の `embed` が失敗した呼び出しでも、渡した件数を数えるようになった**（[Issue #1999](https://github.com/takecchi/mnemora/issues/1999)。クローンの判断で、オーナーの判断ではない）。
   以前は、委譲先が reject したときと、種に無かった入力と違う件数を返して落ちたときは `real` に入らなかった。`SeedUsageCounts.real` の TSDoc は「委譲先へ渡した件数」で、`SeededLLMProvider`（`complete`・`completeStructured`）は委譲先を呼ぶ前に数えていたので、左右が食い違っていた。いまは `SeededEmbeddingProvider` も委譲先の `embed` を呼ぶ直前に数える。失敗した呼び出しも実 API には届いており、`real` から落とすと実 API の件数が少なく見えるため。`seeded` は種から返した件数のままで、型・シグネチャは変わらない。**失敗を挟む使い方では `real` が増える向きの変更。**
+
+### Fixed
+
+- **`@mnemora/postgres` の語彙検索で、クエリ全体の上限（600）の切り口を、書記素の境界に揃えた**（[Issue #1798](https://github.com/takecchi/mnemora/issues/1798)、[ADR 0092](./docs/decisions/0092-lexical-or-coverage.md) の追記）。以前は境目にサロゲートペアが来ると孤立サロゲートが、結合文字・ZWJ の絵文字列が来ると割れた書記素が残った。長さは今までどおり 600 コードユニット以下で、境目に当たらないクエリは変わらない。公開の型・API は変わらない。 同じ切り詰めを写している `@mnemora/testkit/fixtures` の `InMemoryLexicalStore` も同じ切り口に揃えた（例外は投げない）。
 
 ## [1.3.0] - 2026-10-07
 
@@ -428,8 +451,6 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - **破壊的と数えない理由**: 断る入力は増えない（落ちる入力が減るだけ）。型・公開 API・既定値・保存済みのデータは変えない。本物の adapter は変えていない。
 
 - **`@mnemora/core` の `recall()` で、クエリ埋め込みの失敗の `cause`（`providerErrorKind`・`errorName`）を、書記素の境界で切るようにした**（[Issue #1798](https://github.com/takecchi/mnemora/issues/1798)、[ADR 0470](./docs/decisions/0470-footprint-digits-failure-description-grapheme.md) の追記）。以前は 64 コードユニットの位置にサロゲートペアが跨ると孤立サロゲートが残った。長さは今までどおり 64 コードユニット以下で、公開の型は変わらない。
-
-- **`@mnemora/postgres` の語彙検索で、クエリ全体の上限（600）の切り口を、書記素の境界に揃えた**（[Issue #1798](https://github.com/takecchi/mnemora/issues/1798)、[ADR 0092](./docs/decisions/0092-lexical-or-coverage.md) の追記）。以前は境目にサロゲートペアが来ると孤立サロゲートが、結合文字・ZWJ の絵文字列が来ると割れた書記素が残った。長さは今までどおり 600 コードユニット以下で、境目に当たらないクエリは変わらない。公開の型・API は変わらない。 同じ切り詰めを写している `@mnemora/testkit/fixtures` の `InMemoryLexicalStore` も同じ切り口に揃えた（例外は投げない）。
 
 ## [1.2.0] - 2026-10-02
 
