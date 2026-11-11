@@ -1387,6 +1387,7 @@ Math.pow(0.5, 1075) === 0                  // 真——ここから先は厳密�
 - **既定は 0.5**（`DEFAULT_TIME_WEIGHT_FLOOR`）。`0` を渡すと従来の式（`affinity × decay × tagMatch × freshness × strength`）をビット単位で同じに通す。
 - φ を使ったとき、`ScoreBreakdown.timeWeightFloor` にその値が入る（`total` を内訳から組み立て直せるようにするため）。
 - 忘却ゲート（`includeFullyDecayed`）・閾値（`scoreThreshold`）とは独立。忘却ゲートは、[ADR 0707](./decisions/0707-recall-decay-gate-default-off.md) で既定では掛けないことにした（時間だけで候補から外すのは「薄れる」と両立しないため）。`includeFullyDecayed: false` を渡せば、従来どおり減衰しきった記憶を外す。
+- **⚠ 埋め込みによって効き方が大きく違う**（2026-11 追記）。下限が効くのは、関連の強さの差（類似度の差）が時間の重みの差より大きいときだけである。`@mnemora/local-embedding`（`ruri-v3-30m`）では、無関係な文どうしの類似度も高く（実測で約0.75。正解は約0.9）、新しい既定でも30日目以降の正解はほぼ返らなかった。OpenAI の `text-embedding-3-small` では90日まで 7/8 が返った（ADR 0699 の追記・ADR 0704）。注意書きは `packages/local-embedding/README.md` にも置いた。
 - **⚠ 取り引き**: 時間で古い値を沈める力が弱まるので、訂正の古い側（`active` のまま残っている誤った値）が新しい側より上に来ることがある（実測: 120日目以降、6件中1件）。訂正は `contested`・`superseded` の状態で扱うこと（`superseded` は返らず、`contested` は対で返る）。
 
 ## 8. 矛盾がある場合の提示
